@@ -1,0 +1,35 @@
+version: "1.0"
+description: "默认分类规则"
+
+filename:
+  regex: '(\d{8})_(\w+)_(\w+)_(\w+)_(\d+Hz)'
+  fields:
+    - date
+    - chip
+    - company
+    - project
+    - sample_rate
+
+data_columns:
+  - name: motion
+    source: filename
+    type: string
+    match:
+      supine: ["supine", "lie", "lying"]
+      sit: ["sit", "sitting"]
+      stand: ["stand", "standing"]
+      walk: ["walk", "walking"]
+      run: ["run", "running"]
+
+structure:
+  supine: ""
+  sit: ""
+  stand: ""
+  walk: ""
+  run: ""
+
+rules:
+  - target: "{motion}"
+    use_filename: true
+
+default: unclassified

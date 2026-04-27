@@ -1,0 +1,13 @@
+version: "1.0"
+chip: max30102
+
+csv:
+  header_row: 1
+  data_start_row: 2
+  delimiter: ","
+  encoding: "utf-8"
+
+columns:
+  - timestamp
+  - red
+  - ir

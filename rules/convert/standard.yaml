@@ -1,0 +1,12 @@
+version: "1.0"
+description: "标准转换规则"
+
+source_columns:
+  - timestamp
+  - red
+  - ir
+
+target_columns:
+  - TIME
+  - RED
+  - IR

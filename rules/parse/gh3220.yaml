@@ -1,0 +1,11 @@
+version: "1.0"
+description: "GH3220日志解析规则"
+
+regex: '^\[(.+?)\]\s+GH3220:\s*(\d+),(\d+),(\d+),(\d+)$'
+
+columns:
+  - timestamp
+  - red
+  - ir
+  - green
+  - aux

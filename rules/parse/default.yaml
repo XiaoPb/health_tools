@@ -1,0 +1,8 @@
+version: "1.0"
+description: "默认日志解析规则 - 时间戳 + 逗号分隔数值"
+
+regex: '^\[(.+?)\]\s*(.+)$'
+
+columns:
+  - timestamp
+  - data
