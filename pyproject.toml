@@ -47,7 +47,7 @@ dev = [
 health_tool = "health_tools.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/health_tools/health_tools"
+Homepage = "https://github.com/XiaoPb/health_tools"
 
 [tool.setuptools.packages.find]
 where = ["src"]
