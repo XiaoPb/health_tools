@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import signal
+
+from health_tools.core.stft import STFTPlotter, bandpass_filter, compute_stft, remove_baseline
 
 
 @dataclass
@@ -25,12 +27,35 @@ class DataPlotter:
         overlap: float = 0.5,
         fmt: str = "png",
         dpi: int = 150,
+        bandpass: Optional[str] = None,
+        remove_baseline: bool = True,
+        baseline_method: str = "mean",
+        freq_bpm: bool = True,
+        freq_range: Tuple[float, float] = (30.0, 240.0),
     ):
-        self.sample_rate = sample_rate
+        self.sample_rate = sample_rate or 25
         self.window = window
         self.overlap = overlap
         self.fmt = fmt
         self.dpi = dpi
+
+        self.bandpass = bandpass
+        self.remove_baseline_flag = remove_baseline
+        self.baseline_method = baseline_method
+        self.freq_bpm = freq_bpm
+        self.freq_range = freq_range
+
+        if bandpass:
+            try:
+                parts = bandpass.split("-")
+                self.lowcut = float(parts[0])
+                self.highcut = float(parts[1])
+            except (ValueError, IndexError):
+                self.lowcut = 0.5
+                self.highcut = 4.0
+        else:
+            self.lowcut = 0.5
+            self.highcut = 4.0
 
     def plot_time(
         self,
@@ -66,7 +91,7 @@ class DataPlotter:
         if channels is None:
             channels = [col for col in df.columns if col != "timestamp"]
 
-        sample_rate = self.sample_rate or 100
+        sample_rate = self.sample_rate or 25
 
         fig, axes = plt.subplots(len(channels), 1, figsize=(12, 3 * len(channels)), sharex=True)
         if len(channels) == 1:
@@ -96,7 +121,7 @@ class DataPlotter:
         if channel not in df.columns:
             return
 
-        sample_rate = self.sample_rate or 100
+        sample_rate = self.sample_rate or 25
         data = pd.to_numeric(df[channel], errors="coerce").dropna().values
 
         if len(data) == 0:
@@ -118,3 +143,50 @@ class DataPlotter:
         plt.tight_layout()
         plt.savefig(output_file, dpi=self.dpi)
         plt.close()
+
+    def plot_stft(
+        self,
+        df: pd.DataFrame,
+        output_file: Path,
+        channels: Optional[List[str]] = None,
+        ref_column: Optional[str] = None,
+    ) -> None:
+        if channels is None:
+            channels = [col for col in df.columns if col != "timestamp"]
+
+        plotter = STFTPlotter(
+            fs=self.sample_rate,
+            window_sec=self.window,
+            step_sec=self.window * (1 - self.overlap),
+            lowcut=self.lowcut,
+            highcut=self.highcut,
+            remove_baseline_method=self.baseline_method if self.remove_baseline_flag else None,
+            freq_bpm=self.freq_bpm,
+            freq_range=self.freq_range,
+        )
+
+        if len(channels) == 1:
+            data = pd.to_numeric(df[channels[0]], errors="coerce").dropna().values
+
+            ref_data = None
+            if ref_column and ref_column in df.columns:
+                ref_data = pd.to_numeric(df[ref_column], errors="coerce").dropna().values
+
+            plotter.plot_stft(
+                data,
+                str(output_file),
+                title=f"STFT - {channels[0]}",
+                ref_data=ref_data,
+            )
+        else:
+            data_dict = {}
+            for channel in channels:
+                if channel in df.columns:
+                    data_dict[channel] = pd.to_numeric(df[channel], errors="coerce").dropna().values
+
+            if data_dict:
+                plotter.plot_multi_channel_stft(
+                    data_dict,
+                    str(output_file),
+                    title="Multi-Channel STFT",
+                )

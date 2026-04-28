@@ -1,0 +1,66 @@
+version: "1.0"
+description: "血氧+体位分类规则（默认）"
+
+extends: posture_patterns.yaml
+
+accuracy:
+  ref_column: REF_RESULT0
+  pred_column: ALGO_RESULT0
+  methods:
+    - std
+    - rmse
+    - mae
+    - mape
+    - within_1
+    - within_2
+    - within_3
+    - within_5
+    - correlation
+  thresholds:
+    - { name: within_0.5, value: 0.5 }
+    - { name: within_10_percent, percent: 10 }
+
+extract:
+  - name: spo2_median
+    function: calculate_median
+    params:
+      column: ALGO_RESULT5
+      samples: 50
+  
+  - name: posture
+    function: extract_from_path
+    params:
+      patterns:
+        sit_standard: ["坐姿标准"]
+        stand_standard: ["站姿标准"]
+        sit: ["静坐"]
+        supine: ["平躺"]
+        wrist_turn: ["翻腕"]
+        strap_fix: ["卡表带"]
+        strap_push: ["顶表带"]
+        typing: ["电脑打字"]
+        arm_shake: ["手臂轻微晃动"]
+        stand_15s_lift: ["站立15s后抬手", "站资15S后抬手", "站姿15s后抬手"]
+        stand_30s_lift: ["站立30s后抬手", "站姿30s后抬手"]
+        in_car: ["坐车"]
+
+classify:
+  - target: "{posture}/normalSpO2"
+    condition: "spo2_median >= 95"
+  
+  - target: "{posture}/lowspo2/90-95"
+    condition: "spo2_median >= 90 and spo2_median < 95"
+  
+  - target: "{posture}/lowspo2/85-90"
+    condition: "spo2_median >= 85 and spo2_median < 90"
+  
+  - target: "{posture}/lowspo2/80-85"
+    condition: "spo2_median >= 80 and spo2_median < 85"
+  
+  - target: "{posture}/lowspo2/75-80"
+    condition: "spo2_median >= 75 and spo2_median < 80"
+  
+  - target: "no_standard/{posture}"
+    condition: "spo2_median < 0.1"
+
+default: unclassified

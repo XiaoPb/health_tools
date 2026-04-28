@@ -1,0 +1,16 @@
+version: "1.0"
+description: "体位模式定义（可扩展）"
+
+patterns:
+  sit_standard: ["坐姿标准"]
+  stand_standard: ["站姿标准"]
+  sit: ["静坐"]
+  supine: ["平躺"]
+  wrist_turn: ["翻腕"]
+  strap_fix: ["卡表带"]
+  strap_push: ["顶表带"]
+  typing: ["电脑打字"]
+  arm_shake: ["手臂轻微晃动"]
+  stand_15s_lift: ["站立15s后抬手", "站资15S后抬手", "站姿15s后抬手"]
+  stand_30s_lift: ["站立30s后抬手", "站姿30s后抬手"]
+  in_car: ["坐车"]

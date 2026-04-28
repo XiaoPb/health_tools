@@ -74,3 +74,6 @@ Thumbs.db
 *.log
 output/
 plots/
+
+ReferenceDocumentation/
+.trae/

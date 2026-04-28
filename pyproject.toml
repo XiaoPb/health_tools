@@ -32,6 +32,8 @@ dependencies = [
     "matplotlib>=3.7.0",
     "scipy>=1.10.0",
     "rich>=13.0.0",
+    "chardet>=5.0.0",
+    "tqdm>=4.65.0",
 ]
 
 [project.optional-dependencies]

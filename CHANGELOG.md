@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2024-01-02
+
+### Added
+- `split` command: Split data by column value/size/time
+- `process` command: Batch process CSV files with multi-threading
+- STFT time-frequency analysis support in `plot` command
+- Accuracy calculation support in `classify` command
+- CSV handler with configurable format based on chip rules
+- File encoding auto-detection
+- Parallel processing utilities
+- Classification helper functions (calculate_median, extract_from_path, etc.)
+- Accuracy metrics (std, rmse, mae, mape, within_N, correlation)
+- Patterns extension support in classify rules
+- Default spo2_posture classification rule
+
+### Changed
+- Chip rules support info_row, header_row, data_start_row configuration
+- `plot` command supports default parameters (sample-rate=25, bandpass=0.5-4.0)
+- `classify` command supports --extend, --accuracy, --ref-column, --pred-column options
+- Improved CSV reading with chip rule configuration
+
 ## [0.1.0] - 2024-01-01
 
 ### Added

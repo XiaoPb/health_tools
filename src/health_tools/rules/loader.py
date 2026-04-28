@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -19,17 +19,33 @@ class RuleLoader:
         return cls._builtin_rules_path
 
     @classmethod
-    def load_parse_rule(cls, rule_file: str) -> ParseRule:
+    def _resolve_rule_path(cls, rule_file: str, rule_type: str) -> Path:
         rule_path = Path(rule_file)
         if not rule_path.is_absolute():
-            builtin_path = cls.get_builtin_rules_path() / "parse" / rule_file
+            builtin_path = cls.get_builtin_rules_path() / rule_type / rule_file
             if builtin_path.exists():
                 rule_path = builtin_path
-            else:
-                rule_path = Path(rule_file)
+        return rule_path
 
-        with open(rule_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+    @classmethod
+    def _load_yaml(cls, file_path: Path) -> Dict[str, Any]:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+
+    @classmethod
+    def _merge_dicts(cls, base: Dict, override: Dict) -> Dict:
+        result = base.copy()
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = cls._merge_dicts(result[key], value)
+            else:
+                result[key] = value
+        return result
+
+    @classmethod
+    def load_parse_rule(cls, rule_file: str) -> ParseRule:
+        rule_path = cls._resolve_rule_path(rule_file, "parse")
+        data = cls._load_yaml(rule_path)
 
         return ParseRule(
             regex=data.get("regex", ""),
@@ -40,16 +56,8 @@ class RuleLoader:
     @classmethod
     def load_chip_rule(cls, chip_name: str) -> ChipRule:
         rule_file = f"{chip_name}.yaml"
-        rule_path = Path(rule_file)
-        if not rule_path.is_absolute():
-            builtin_path = cls.get_builtin_rules_path() / "chip" / rule_file
-            if builtin_path.exists():
-                rule_path = builtin_path
-            else:
-                rule_path = Path(rule_file)
-
-        with open(rule_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+        rule_path = cls._resolve_rule_path(rule_file, "chip")
+        data = cls._load_yaml(rule_path)
 
         return ChipRule(
             chip=data.get("chip", chip_name),
@@ -59,17 +67,41 @@ class RuleLoader:
         )
 
     @classmethod
-    def load_classify_rule(cls, rule_file: str) -> ClassifyRule:
-        rule_path = Path(rule_file)
-        if not rule_path.is_absolute():
-            builtin_path = cls.get_builtin_rules_path() / "classify" / rule_file
-            if builtin_path.exists():
-                rule_path = builtin_path
-            else:
-                rule_path = Path(rule_file)
+    def load_classify_rule(
+        cls,
+        rule_file: str,
+        extend_files: Optional[List[str]] = None,
+    ) -> ClassifyRule:
+        rule_path = cls._resolve_rule_path(rule_file, "classify")
+        data = cls._load_yaml(rule_path)
 
-        with open(rule_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+        if "extends" in data:
+            extends_path = cls._resolve_rule_path(data["extends"], "classify")
+            extends_data = cls._load_yaml(extends_path)
+            data = cls._merge_dicts(extends_data, data)
+
+        if extend_files:
+            for extend_file in extend_files:
+                extend_path = cls._resolve_rule_path(extend_file, "classify")
+                extend_data = cls._load_yaml(extend_path)
+                if "patterns" in extend_data:
+                    if "extract" not in data:
+                        data["extract"] = []
+                    for extract_item in data.get("extract", []):
+                        if "params" in extract_item and "patterns" in extract_item["params"]:
+                            extract_item["params"]["patterns"].update(extend_data["patterns"])
+
+        extract_rules = []
+        for extract_item in data.get("extract", []):
+            extract_rules.append({
+                "name": extract_item.get("name", ""),
+                "function": extract_item.get("function", ""),
+                "params": extract_item.get("params", {}),
+            })
+
+        classify_rules = data.get("classify", [])
+
+        accuracy_config = data.get("accuracy", {})
 
         data_columns = []
         for col_data in data.get("data_columns", []):
@@ -95,26 +127,27 @@ class RuleLoader:
             structure=data.get("structure", {}),
             rules=data.get("rules", []),
             default=data.get("default", "unclassified"),
+            extract=extract_rules,
+            classify_rules=classify_rules,
+            accuracy=accuracy_config,
         )
 
     @classmethod
     def load_convert_rule(cls, rule_file: str) -> ConvertRule:
-        rule_path = Path(rule_file)
-        if not rule_path.is_absolute():
-            builtin_path = cls.get_builtin_rules_path() / "convert" / rule_file
-            if builtin_path.exists():
-                rule_path = builtin_path
-            else:
-                rule_path = Path(rule_file)
-
-        with open(rule_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+        rule_path = cls._resolve_rule_path(rule_file, "convert")
+        data = cls._load_yaml(rule_path)
 
         return ConvertRule(
             source_columns=data.get("source_columns", []),
             target_columns=data.get("target_columns", []),
             computed=data.get("computed", {}),
         )
+
+    @classmethod
+    def load_patterns(cls, patterns_file: str) -> Dict[str, List[str]]:
+        patterns_path = cls._resolve_rule_path(patterns_file, "classify")
+        data = cls._load_yaml(patterns_path)
+        return data.get("patterns", {})
 
     @classmethod
     def expand_columns(cls, columns: List[str]) -> List[str]:

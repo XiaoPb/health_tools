@@ -2,7 +2,7 @@ import click
 from rich.console import Console
 
 from health_tools import __version__
-from health_tools.commands import parse, plot, classify, convert, info, validate
+from health_tools.commands import parse, plot, classify, convert, info, validate, split, process
 
 console = Console()
 
@@ -28,6 +28,8 @@ main.add_command(info.info_cmd, name="info")
 main.add_command(info.info_cmd, name="i")
 main.add_command(validate.validate_cmd, name="validate")
 main.add_command(validate.validate_cmd, name="val")
+main.add_command(split.split_cmd, name="split")
+main.add_command(process.process_cmd, name="process")
 
 
 if __name__ == "__main__":

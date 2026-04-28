@@ -11,13 +11,19 @@ console = Console()
 @click.command()
 @click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-o", "--output", "output_path", required=True, help="输出图片目录")
-@click.option("--type", "plot_type", default="both", help="图表类型: time|freq|both")
+@click.option("--type", "plot_type", default="both", help="图表类型: time|freq|stft|both")
 @click.option("--channels", help="指定绘制的通道（如: red,ir,green）")
-@click.option("--sample-rate", type=int, help="采样率（Hz）")
-@click.option("--window", type=int, default=10, help="时间窗口大小（秒）")
-@click.option("--overlap", type=float, default=0.5, help="窗口重叠率（0-1）")
-@click.option("--format", "fmt", default="png", help="图片格式: png|svg|pdf")
-@click.option("--dpi", type=int, default=150, help="图片DPI")
+@click.option("--sample-rate", type=int, default=25, help="采样率（Hz，默认: 25）")
+@click.option("--window", type=int, default=10, help="时间窗口大小（秒，默认: 10）")
+@click.option("--overlap", type=float, default=0.5, help="窗口重叠率（0-1，默认: 0.5）")
+@click.option("--format", "fmt", default="png", help="图片格式: png|svg|pdf（默认: png）")
+@click.option("--dpi", type=int, default=150, help="图片DPI（默认: 150）")
+@click.option("--bandpass", default="0.5-4.0", help="带通滤波范围（Hz，默认: 0.5-4.0）")
+@click.option("--remove-baseline/--no-remove-baseline", default=True, help="去除基线（默认: 是）")
+@click.option("--baseline-method", default="mean", help="基线去除方法: mean|median（默认: mean）")
+@click.option("--freq-bpm", is_flag=True, default=True, help="Y轴显示BPM（默认: 是）")
+@click.option("--freq-range", default="30-240", help="频率范围（BPM，默认: 30-240）")
+@click.option("--ref-column", help="参考曲线列名")
 @click.option("--no-show", is_flag=True, help="不显示图片，仅保存")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
@@ -27,15 +33,21 @@ def plot_cmd(
     output_path: str,
     plot_type: str,
     channels: Optional[str],
-    sample_rate: Optional[int],
+    sample_rate: int,
     window: int,
     overlap: float,
     fmt: str,
     dpi: int,
+    bandpass: str,
+    remove_baseline: bool,
+    baseline_method: str,
+    freq_bpm: bool,
+    freq_range: str,
+    ref_column: Optional[str],
     no_show: bool,
     verbose: bool,
 ) -> None:
-    """绘制PPG数据的时域/频域图"""
+    """绘制PPG数据的时域/频域/时频图"""
     from health_tools.core.plotter import DataPlotter
 
     input_path_obj = Path(input_path)
@@ -44,12 +56,22 @@ def plot_cmd(
 
     channel_list = channels.split(",") if channels else None
 
+    try:
+        freq_min, freq_max = map(float, freq_range.split("-"))
+    except (ValueError, AttributeError):
+        freq_min, freq_max = 30.0, 240.0
+
     plotter = DataPlotter(
         sample_rate=sample_rate,
         window=window,
         overlap=overlap,
         fmt=fmt,
         dpi=dpi,
+        bandpass=bandpass,
+        remove_baseline=remove_baseline,
+        baseline_method=baseline_method,
+        freq_bpm=freq_bpm,
+        freq_range=(freq_min, freq_max),
     )
 
     if input_path_obj.is_file():
@@ -59,6 +81,7 @@ def plot_cmd(
             plotter,
             plot_type,
             channel_list,
+            ref_column,
             no_show,
             verbose,
         )
@@ -71,6 +94,7 @@ def plot_cmd(
                 plotter,
                 plot_type,
                 channel_list,
+                ref_column,
                 no_show,
                 verbose,
             )
@@ -85,23 +109,30 @@ def _plot_file(
     plotter,
     plot_type: str,
     channels: Optional[List[str]],
+    ref_column: Optional[str],
     no_show: bool,
     verbose: bool,
 ) -> None:
     try:
         df = pd.read_csv(input_file)
-        output_file = output_dir / f"{input_file.stem}_{plot_type}.{plotter.fmt}"
 
         if plot_type in ("time", "both"):
+            output_file = output_dir / f"{input_file.stem}_time.{plotter.fmt}"
             plotter.plot_time(df, output_file, channels)
             if verbose:
                 console.print(f"[green]✓[/green] 时域图: {output_file}")
 
         if plot_type in ("freq", "both"):
-            freq_file = output_dir / f"{input_file.stem}_freq.{plotter.fmt}"
-            plotter.plot_freq(df, freq_file, channels)
+            output_file = output_dir / f"{input_file.stem}_freq.{plotter.fmt}"
+            plotter.plot_freq(df, output_file, channels)
             if verbose:
-                console.print(f"[green]✓[/green] 频域图: {freq_file}")
+                console.print(f"[green]✓[/green] 频域图: {output_file}")
+
+        if plot_type in ("stft", "both"):
+            output_file = output_dir / f"{input_file.stem}_stft.{plotter.fmt}"
+            plotter.plot_stft(df, output_file, channels, ref_column)
+            if verbose:
+                console.print(f"[green]✓[/green] 时频图: {output_file}")
 
     except Exception as e:
         console.print(f"[red]✗[/red] {input_file.name}: {e}")

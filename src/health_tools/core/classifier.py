@@ -1,9 +1,12 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
+
+from health_tools.utils.classify_helpers import CLASSIFY_FUNCTIONS, get_function
+from health_tools.utils.csv_handler import CSVHandler
 
 
 @dataclass
@@ -28,37 +31,64 @@ class ClassifyRule:
     structure: Dict[str, str] = field(default_factory=dict)
     rules: List[Dict[str, Any]] = field(default_factory=list)
     default: str = "unclassified"
+    extract: List[Dict[str, Any]] = field(default_factory=list)
+    classify_rules: List[Dict[str, Any]] = field(default_factory=list)
+    accuracy: Dict[str, Any] = field(default_factory=dict)
 
 
 class DataClassifier:
-    def __init__(self, rule: ClassifyRule):
+    def __init__(self, rule: ClassifyRule, chip_rule=None):
         self.rule = rule
+        self.chip_rule = chip_rule
+        self.csv_handler = CSVHandler(chip_rule)
         self._filename_fields: Dict[str, str] = {}
+        self._extracted_values: Dict[str, Any] = {}
 
     def create_structure(self, base_dir: Path) -> None:
         for parent, children in self.rule.structure.items():
-            parent_path = base_dir / parent
+            parent_resolved = self._resolve_variables(parent)
+            parent_path = base_dir / parent_resolved
             parent_path.mkdir(parents=True, exist_ok=True)
 
             if children:
                 child_names = children.split("|")
                 for child in child_names:
-                    child_path = parent_path / child
+                    child_resolved = self._resolve_variables(child)
+                    child_path = parent_path / child_resolved
                     child_path.mkdir(parents=True, exist_ok=True)
+
+    def _resolve_variables(self, text: str) -> str:
+        result = text
+        for key, value in self._filename_fields.items():
+            result = result.replace(f"{{{key}}}", str(value))
+        for key, value in self._extracted_values.items():
+            result = result.replace(f"{{{key}}}", str(value))
+        return result
 
     def classify(self, file_path: Path, base_dir: Path) -> Optional[Path]:
         self._parse_filename(file_path)
 
-        data_values = self._extract_data_values(file_path)
+        self._extracted_values = self._extract_values(file_path)
 
-        for rule in self.rule.rules:
-            target = rule.get("target", "")
-            conditions = rule.get("conditions", {})
+        if self.rule.classify_rules:
+            for rule in self.rule.classify_rules:
+                target = rule.get("target", "")
+                condition = rule.get("condition", "")
 
-            resolved_target = self._resolve_target(target, data_values, conditions)
+                if condition and self._evaluate_condition(condition, self._extracted_values):
+                    resolved_target = self._resolve_variables(target)
+                    for key, value in self._extracted_values.items():
+                        resolved_target = resolved_target.replace(f"{{{key}}}", str(value))
+                    return base_dir / resolved_target
+        else:
+            for rule in self.rule.rules:
+                target = rule.get("target", "")
+                conditions = rule.get("conditions", {})
 
-            if resolved_target:
-                return base_dir / resolved_target
+                resolved_target = self._resolve_target(target, self._extracted_values, conditions)
+
+                if resolved_target:
+                    return base_dir / resolved_target
 
         return None
 
@@ -78,6 +108,38 @@ class DataClassifier:
                 for i, field_name in enumerate(fields):
                     if i < len(groups):
                         self._filename_fields[field_name] = groups[i]
+
+    def _extract_values(self, file_path: Path) -> Dict[str, Any]:
+        values = {}
+
+        for col_def in self.rule.data_columns:
+            value = self._extract_column_value(file_path, col_def)
+            if value is not None:
+                values[col_def.name] = value
+
+        if self.rule.extract:
+            try:
+                info, df = self.csv_handler.read(file_path)
+
+                for extract_item in self.rule.extract:
+                    name = extract_item.get("name", "")
+                    func_name = extract_item.get("function", "")
+                    params = extract_item.get("params", {})
+
+                    func = get_function(func_name)
+                    if func:
+                        if "patterns" in params:
+                            value = func(file_path, params["patterns"])
+                        elif "column" in params:
+                            value = func(df, params["column"], params.get("samples", 50))
+                        else:
+                            value = func(df, **params)
+
+                        values[name] = value
+            except Exception:
+                pass
+
+        return values
 
     def _extract_data_values(self, file_path: Path) -> Dict[str, Any]:
         values = {}
@@ -103,7 +165,7 @@ class DataClassifier:
         if col_def.match:
             for value, patterns in col_def.match.items():
                 for pattern in patterns:
-                    if pattern.lower() in filename.lower():
+                    if pattern in filename:
                         return value
 
         if col_def.regex:
@@ -121,14 +183,17 @@ class DataClassifier:
         if col_def.match:
             for value, patterns in col_def.match.items():
                 for pattern in patterns:
-                    if pattern.lower() in parent_name.lower():
+                    if pattern in parent_name:
                         return value
 
         return None
 
     def _extract_from_data(self, file_path: Path, col_def: DataColumn) -> Any:
         try:
-            df = pd.read_csv(file_path)
+            info, df = self.csv_handler.read(file_path)
+
+            if df.empty:
+                return None
 
             if col_def.column:
                 if col_def.column not in df.columns:
@@ -147,7 +212,7 @@ class DataClassifier:
             if col_def.ranges:
                 mean_val = data.mean()
                 for range_name, range_vals in col_def.ranges.items():
-                    if range_vals[0] <= mean_val <= range_vals[1]:
+                    if len(range_vals) >= 2 and range_vals[0] <= mean_val <= range_vals[1]:
                         return range_name
 
             if col_def.values:
@@ -202,12 +267,16 @@ class DataClassifier:
 
     def _evaluate_condition(self, condition: str, data_values: Dict[str, Any]) -> bool:
         try:
+            eval_condition = condition
             for key, value in data_values.items():
-                condition = condition.replace(key, repr(value))
+                if isinstance(value, str):
+                    eval_condition = eval_condition.replace(key, repr(value))
+                else:
+                    eval_condition = eval_condition.replace(key, str(value))
 
-            condition = condition.replace(" and ", " and ")
-            condition = condition.replace(" or ", " or ")
-
-            return bool(eval(condition))
+            return bool(eval(eval_condition))
         except Exception:
             return False
+
+    def get_accuracy_config(self) -> Dict[str, Any]:
+        return self.rule.accuracy

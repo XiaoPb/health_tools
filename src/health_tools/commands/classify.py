@@ -1,7 +1,7 @@
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import click
 import pandas as pd
@@ -11,6 +11,8 @@ from rich.table import Table
 
 from health_tools.core.classifier import DataClassifier
 from health_tools.rules.loader import RuleLoader
+from health_tools.utils.accuracy import AccuracyCalculator
+from health_tools.utils.csv_handler import CSVHandler
 
 console = Console()
 
@@ -18,12 +20,17 @@ console = Console()
 @click.command()
 @click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-o", "--output", "output_path", required=True, help="输出目录")
-@click.option("-r", "--rule", "rule_file", required=True, help="分类规则文件")
+@click.option("-r", "--rule", "rule_file", default="spo2_posture.yaml", help="分类规则文件（默认: spo2_posture.yaml）")
+@click.option("--extend", "extend_files", multiple=True, help="扩展patterns文件（可多次使用）")
+@click.option("--accuracy", "enable_accuracy", is_flag=True, help="启用准确度计算")
+@click.option("--ref-column", help="参考列名/列索引（覆盖规则配置）")
+@click.option("--pred-column", help="预测列名/列索引（覆盖规则配置）")
 @click.option("--copy", "mode", flag_value="copy", default=True, help="复制文件到分类目录")
 @click.option("--move", "mode", flag_value="move", help="移动文件到分类目录")
 @click.option("--symlink", "mode", flag_value="symlink", help="创建符号链接")
 @click.option("--report", is_flag=True, help="生成分类报告")
 @click.option("--unknown", "unknown_dir", help="未匹配文件的存放目录")
+@click.option("-c", "--chip", "chip_name", help="芯片类型（决定CSV格式）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def classify_cmd(
@@ -31,14 +38,25 @@ def classify_cmd(
     input_path: str,
     output_path: str,
     rule_file: str,
+    extend_files: Tuple[str, ...],
+    enable_accuracy: bool,
+    ref_column: Optional[str],
+    pred_column: Optional[str],
     mode: str,
     report: bool,
     unknown_dir: Optional[str],
+    chip_name: Optional[str],
     verbose: bool,
 ) -> None:
     """根据规则对数据进行分类保存"""
-    rule = RuleLoader.load_classify_rule(rule_file)
-    classifier = DataClassifier(rule)
+    extend_list = list(extend_files) if extend_files else None
+    rule = RuleLoader.load_classify_rule(rule_file, extend_list)
+
+    chip_rule = None
+    if chip_name:
+        chip_rule = RuleLoader.load_chip_rule(chip_name)
+
+    classifier = DataClassifier(rule, chip_rule)
 
     input_path_obj = Path(input_path)
     output_path_obj = Path(output_path)
@@ -46,7 +64,26 @@ def classify_cmd(
 
     classifier.create_structure(output_path_obj)
 
+    accuracy_config = rule.accuracy if hasattr(rule, 'accuracy') else {}
+    accuracy_calc: Optional[AccuracyCalculator] = None
+
+    if enable_accuracy and (accuracy_config or (ref_column and pred_column)):
+        ref_col = ref_column or accuracy_config.get('ref_column')
+        pred_col = pred_column or accuracy_config.get('pred_column')
+        methods = accuracy_config.get('methods', ['std', 'rmse', 'mae', 'within_1', 'within_2', 'within_3'])
+        thresholds = accuracy_config.get('thresholds', [])
+
+        if ref_col and pred_col:
+            accuracy_calc = AccuracyCalculator(
+                ref_column=ref_col,
+                pred_column=pred_col,
+                methods=methods,
+                thresholds=thresholds,
+            )
+
+    csv_handler = CSVHandler(chip_rule)
     stats: Dict[str, int] = {}
+    category_files: Dict[str, List[Path]] = {}
 
     if input_path_obj.is_file():
         files = [input_path_obj]
@@ -75,6 +112,17 @@ def classify_cmd(
                 category = str(target_dir.relative_to(output_path_obj))
                 stats[category] = stats.get(category, 0) + 1
 
+                if category not in category_files:
+                    category_files[category] = []
+                category_files[category].append(target_path)
+
+                if accuracy_calc:
+                    try:
+                        info, df = csv_handler.read(target_path)
+                        accuracy_calc.add_file_result(category, df)
+                    except Exception:
+                        pass
+
                 if verbose:
                     console.print(f"[green]✓[/green] {file.name} -> {category}")
             else:
@@ -91,6 +139,11 @@ def classify_cmd(
 
     if report:
         _print_report(stats)
+
+    if accuracy_calc:
+        accuracy_calc.print_report()
+        accuracy_report_path = output_path_obj / "accuracy_summary.csv"
+        accuracy_calc.save_report(accuracy_report_path)
 
 
 def _print_report(stats: Dict[str, int]) -> None:

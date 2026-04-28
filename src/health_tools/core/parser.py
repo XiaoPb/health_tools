@@ -52,6 +52,10 @@ class ChipRule:
         return expanded
 
     @property
+    def info_row(self) -> int:
+        return self.csv.get("info_row", 0)
+
+    @property
     def header_row(self) -> int:
         return self.csv.get("header_row", 1)
 
@@ -66,6 +70,10 @@ class ChipRule:
     @property
     def encoding(self) -> str:
         return self.csv.get("encoding", "utf-8")
+
+    @property
+    def info(self) -> str:
+        return self.csv.get("info", "")
 
 
 class LogParser:
