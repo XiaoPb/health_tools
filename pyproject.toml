@@ -70,5 +70,14 @@ python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["health_tools"]
+
+[tool.coverage.report]
+show_missing = true
+
 [tool.setuptools_scm]
 write_to = "src/health_tools/_version.py"
