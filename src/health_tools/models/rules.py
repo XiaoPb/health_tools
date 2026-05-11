@@ -69,6 +69,8 @@ class ConvertRule:
         self.source_columns = self._expand_columns(self.source_columns)
         self.target_columns = self._expand_columns(self.target_columns)
         self.column_mapping = self._expand_mapping(self.column_mapping)
+        self.forward_fill = self._expand_columns(self.forward_fill)
+        self.expand_repeat = self._expand_repeat_keys(self.expand_repeat)
 
     def _expand_columns(self, columns: List[str]) -> List[str]:
         return expand_columns(columns, brace_only=True)
@@ -84,6 +86,13 @@ class ConvertRule:
             else:
                 for s in src_expanded:
                     expanded[s] = tgt
+        return expanded
+
+    def _expand_repeat_keys(self, repeat: Dict[str, int]) -> Dict[str, int]:
+        expanded = {}
+        for key, value in repeat.items():
+            for k in self._expand_columns([key]):
+                expanded[k] = value
         return expanded
 
     @property
