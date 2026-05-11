@@ -5,7 +5,7 @@
 将原始日志文件按正则规则解析为CSV格式。
 
 ```bash
-health_tool parse -i <输入> -o <输出> [-r <规则文件>] [-c <芯片>] [--delimiter <分隔符>]
+ghealth_tool parse -i <输入> -o <输出> [-r <规则文件>] [-c <芯片>] [--delimiter <分隔符>]
 ```
 
 | 参数 | 说明 |
@@ -20,13 +20,13 @@ health_tool parse -i <输入> -o <输出> [-r <规则文件>] [-c <芯片>] [--d
 
 ```bash
 # 单文件解析
-health_tool parse -i raw.log -o output.csv -r parse/gh3220.yaml
+ghealth_tool parse -i raw.log -o output.csv -r parse/gh3220.yaml
 
 # 目录批量解析
-health_tool parse -i logs/ -o output/ -c gh3220
+ghealth_tool parse -i logs/ -o output/ -c gh3220
 
 # 使用别名
-health_tool p -i raw.log -o output.csv -c gh3220
+ghealth_tool p -i raw.log -o output.csv -c gh3220
 ```
 
 ### 工作原理
@@ -42,7 +42,7 @@ health_tool p -i raw.log -o output.csv -c gh3220
 绘制PPG数据的时域图、频域图或时频图（STFT）。
 
 ```bash
-health_tool plot -i <输入> -o <输出目录> [--type <类型>] [--sample-rate <采样率>]
+ghealth_tool plot -i <输入> -o <输出目录> [--type <类型>] [--sample-rate <采样率>]
 ```
 
 | 参数 | 说明 |
@@ -59,13 +59,13 @@ health_tool plot -i <输入> -o <输出目录> [--type <类型>] [--sample-rate 
 
 ```bash
 # 时域+频域
-health_tool plot -i data.csv -o plots/ --type both --sample-rate 100
+ghealth_tool plot -i data.csv -o plots/ --type both --sample-rate 100
 
 # 仅时域，指定通道
-health_tool plot -i data.csv -o plots/ --type time --channels red,ir
+ghealth_tool plot -i data.csv -o plots/ --type time --channels red,ir
 
 # STFT时频图
-health_tool plot -i data.csv -o plots/ --type stft --sample-rate 100 --window 10
+ghealth_tool plot -i data.csv -o plots/ --type stft --sample-rate 100 --window 10
 ```
 
 ---
@@ -75,7 +75,7 @@ health_tool plot -i data.csv -o plots/ --type stft --sample-rate 100 --window 10
 根据文件名模式和规则将CSV文件分类到目录结构中。
 
 ```bash
-health_tool classify -i <输入目录> -o <输出目录> [-r <规则>] [--accuracy] [--move]
+ghealth_tool classify -i <输入目录> -o <输出目录> [-r <规则>] [--accuracy] [--move]
 ```
 
 | 参数 | 说明 |
@@ -90,10 +90,10 @@ health_tool classify -i <输入目录> -o <输出目录> [-r <规则>] [--accura
 
 ```bash
 # 基本分类
-health_tool classify -i data/ -o classified/ -r classify/spo2_posture.yaml
+ghealth_tool classify -i data/ -o classified/ -r classify/spo2_posture.yaml
 
 # 使用别名 + 准确率
-health_tool cls -i data/ -o classified/ --accuracy
+ghealth_tool cls -i data/ -o classified/ --accuracy
 ```
 
 ---
@@ -103,7 +103,7 @@ health_tool cls -i data/ -o classified/ --accuracy
 CSV格式转换，支持列映射、前值填充、频率扩展、合并和分割。
 
 ```bash
-health_tool convert -i <输入> -o <输出> [-r <规则>] [-c <芯片>] [--merge] [--split <行数>]
+ghealth_tool convert -i <输入> -o <输出> [-r <规则>] [-c <芯片>] [--merge] [--split <行数>]
 ```
 
 | 参数 | 说明 |
@@ -123,19 +123,19 @@ health_tool convert -i <输入> -o <输出> [-r <规则>] [-c <芯片>] [--merge
 
 ```bash
 # 使用转换规则
-health_tool convert -i input.csv -o output.csv -r convert/my_rule.yaml -v
+ghealth_tool convert -i input.csv -o output.csv -r convert/my_rule.yaml -v
 
 # 直接指定目标芯片
-health_tool convert -i input.csv -o output.csv -c gh3036
+ghealth_tool convert -i input.csv -o output.csv -c gh3036
 
 # 合并目录并分割
-health_tool convert -i data/ -o merged.csv --merge --split 5000 -r convert/rule.yaml
+ghealth_tool convert -i data/ -o merged.csv --merge --split 5000 -r convert/rule.yaml
 
 # 生成规则模板
-health_tool convert --init-rule -c gh3220 -o my_convert_rule.yaml
+ghealth_tool convert --init-rule -c gh3220 -o my_convert_rule.yaml
 
 # 使用别名
-health_tool cv -i input.csv -o output.csv -r convert/rule.yaml
+ghealth_tool cv -i input.csv -o output.csv -r convert/rule.yaml
 ```
 
 ### 转换流程
@@ -177,7 +177,7 @@ expand_repeat:
 按行数分割大型CSV文件。
 
 ```bash
-health_tool split -i <输入> -o <输出目录> -n <行数>
+ghealth_tool split -i <输入> -o <输出目录> -n <行数>
 ```
 
 | 参数 | 说明 |
@@ -193,7 +193,7 @@ health_tool split -i <输入> -o <输出目录> -n <行数>
 查看CSV数据文件或规则文件的基本信息。
 
 ```bash
-health_tool info <文件路径> [--stats] [--preview <行数>] [--schema]
+ghealth_tool info <文件路径> [--stats] [--preview <行数>] [--schema]
 ```
 
 | 参数 | 说明 |
@@ -207,13 +207,13 @@ health_tool info <文件路径> [--stats] [--preview <行数>] [--schema]
 
 ```bash
 # 查看CSV信息和统计
-health_tool info data.csv --stats --preview 10
+ghealth_tool info data.csv --stats --preview 10
 
 # 查看规则文件结构
-health_tool info rules/chip/gh3220.yaml --schema
+ghealth_tool info rules/chip/gh3220.yaml --schema
 
 # 使用别名
-health_tool i data.csv --stats
+ghealth_tool i data.csv --stats
 ```
 
 ---
@@ -223,7 +223,7 @@ health_tool i data.csv --stats
 验证YAML规则文件的格式和内容是否正确。
 
 ```bash
-health_tool validate <规则文件> [--strict]
+ghealth_tool validate <规则文件> [--strict]
 ```
 
 | 参数 | 说明 |
@@ -238,5 +238,5 @@ health_tool validate <规则文件> [--strict]
 执行批量数据处理流水线。
 
 ```bash
-health_tool process -i <输入目录> -o <输出目录> [选项]
+ghealth_tool process -i <输入目录> -o <输出目录> [选项]
 ```

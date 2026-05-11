@@ -1,11 +1,11 @@
-# Health Tools
+# GHealth Tools
 
 PPG（光电容积脉搏波）数据分析命令行工具库，支持数据转换、可视化、分类等功能。
 
 ## 安装
 
 ```bash
-pip install health-tools
+pip install ghealth-tools
 ```
 
 或从源码安装：
@@ -20,10 +20,10 @@ pip install -e .
 
 ```bash
 # 查看帮助
-health_tool --help
+ghealth_tool --help
 
 # 查看版本
-health_tool --version
+ghealth_tool --version
 ```
 
 ## 命令
@@ -34,13 +34,13 @@ health_tool --version
 
 ```bash
 # 使用解析规则文件
-health_tool parse -i raw.log -o output.csv -r parse/gh3220.yaml
+ghealth_tool parse -i raw.log -o output.csv -r parse/gh3220.yaml
 
 # 使用芯片规则
-health_tool parse -i raw.log -o output.csv --chip gh3220
+ghealth_tool parse -i raw.log -o output.csv --chip gh3220
 
 # 批量处理目录
-health_tool parse -i logs/ -o output/ -r parse/default.yaml -v
+ghealth_tool parse -i logs/ -o output/ -r parse/default.yaml -v
 ```
 
 ### plot - 数据可视化
@@ -49,13 +49,13 @@ health_tool parse -i logs/ -o output/ -r parse/default.yaml -v
 
 ```bash
 # 绘制时域和频域图
-health_tool plot -i data.csv -o plots/ --type both --sample-rate 100
+ghealth_tool plot -i data.csv -o plots/ --type both --sample-rate 100
 
 # 仅绘制时域图
-health_tool plot -i data.csv -o plots/ --type time --channels red,ir
+ghealth_tool plot -i data.csv -o plots/ --type time --channels red,ir
 
 # 指定窗口和重叠率
-health_tool plot -i data.csv -o plots/ --window 10 --overlap 0.75
+ghealth_tool plot -i data.csv -o plots/ --window 10 --overlap 0.75
 ```
 
 ### classify - 数据分类
@@ -64,13 +64,13 @@ health_tool plot -i data.csv -o plots/ --window 10 --overlap 0.75
 
 ```bash
 # 使用分类规则
-health_tool classify -i data/ -o classified/ -r classify/default.yaml
+ghealth_tool classify -i data/ -o classified/ -r classify/default.yaml
 
 # 生成分类报告
-health_tool classify -i data/ -o classified/ -r classify/default.yaml --report
+ghealth_tool classify -i data/ -o classified/ -r classify/default.yaml --report
 
 # 移动文件而非复制
-health_tool classify -i data/ -o classified/ -r classify/default.yaml --move
+ghealth_tool classify -i data/ -o classified/ -r classify/default.yaml --move
 ```
 
 ### convert - 格式转换
@@ -79,13 +79,13 @@ CSV格式转换（紧凑型↔展开型，芯片特定格式）。
 
 ```bash
 # 转换为芯片格式
-health_tool convert -i input.csv -o output.csv --chip gh3220
+ghealth_tool convert -i input.csv -o output.csv --chip gh3220
 
 # 合并多个文件
-health_tool convert -i data/ -o merged.csv --merge
+ghealth_tool convert -i data/ -o merged.csv --merge
 
 # 按大小分割
-health_tool convert -i large.csv -o split/ --split 10000
+ghealth_tool convert -i large.csv -o split/ --split 10000
 ```
 
 ### info - 信息查看
@@ -94,10 +94,10 @@ health_tool convert -i large.csv -o split/ --split 10000
 
 ```bash
 # 查看CSV文件信息
-health_tool info data.csv --stats --preview 20
+ghealth_tool info data.csv --stats --preview 20
 
 # 查看规则文件
-health_tool info rules/chip/gh3220.yaml --schema
+ghealth_tool info rules/chip/gh3220.yaml --schema
 ```
 
 ### validate - 规则验证
@@ -106,10 +106,10 @@ health_tool info rules/chip/gh3220.yaml --schema
 
 ```bash
 # 验证规则文件
-health_tool validate rules/chip/gh3220.yaml
+ghealth_tool validate rules/chip/gh3220.yaml
 
 # 严格模式验证
-health_tool validate rules/parse/gh3220.yaml --strict
+ghealth_tool validate rules/parse/gh3220.yaml --strict
 ```
 
 ## 规则文件

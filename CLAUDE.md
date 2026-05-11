@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 pip install -e ".[dev]"       # Install with dev dependencies
-health_tool --help            # Run the CLI
+ghealth_tool --help            # Run the CLI
 ```
 
 ## Testing & Quality
@@ -46,7 +46,7 @@ Always include the Co-Authored-By line. Never skip committing changes.
 
 ## Architecture
 
-CLI tool for PPG (photoplethysmography) sensor data: parsing logs, plotting, classifying, converting, and splitting CSV files. Entry point: `health_tool` -> `src/health_tools/cli.py` (Click group).
+CLI tool for PPG (photoplethysmography) sensor data: parsing logs, plotting, classifying, converting, and splitting CSV files. Entry point: `ghealth_tool` -> `src/health_tools/cli.py` (Click group).
 
 ### Layers
 

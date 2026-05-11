@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "health-tools"
+name = "ghealth-tools"
 dynamic = ["version"]
 description = "PPG数据分析命令行工具库"
 readme = "README.md"
@@ -46,7 +46,7 @@ dev = [
 ]
 
 [project.scripts]
-health_tool = "health_tools.cli:main"
+ghealth_tool = "health_tools.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/XiaoPb/health_tools"

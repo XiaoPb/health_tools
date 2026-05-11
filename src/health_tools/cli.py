@@ -8,7 +8,7 @@ console = Console()
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="health_tool")
+@click.version_option(version=__version__, prog_name="ghealth_tool")
 @click.option("--log-level", default="info", help="日志级别: debug|info|warning|error")
 @click.pass_context
 def main(ctx: click.Context, log_level: str) -> None:

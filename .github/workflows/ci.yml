@@ -121,7 +121,7 @@ jobs:
           ## Installation
 
           ```bash
-          pip install health-tools
+          pip install ghealth-tools
           ```
 
           Or download the wheel/sdist from the assets below.
@@ -137,7 +137,7 @@ jobs:
 
     environment:
       name: pypi
-      url: https://pypi.org/p/health-tools
+      url: https://pypi.org/p/ghealth-tools
 
     permissions:
       id-token: write
@@ -159,7 +159,7 @@ jobs:
 
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/health-tools
+      url: https://test.pypi.org/p/ghealth-tools
 
     permissions:
       id-token: write
