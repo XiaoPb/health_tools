@@ -74,8 +74,10 @@ Thumbs.db
 *.log
 output/
 plots/
+src/health_tools/_version.py
 
 ReferenceDocumentation/
 .trae/
 test_data/
 debug/
+.claude/
