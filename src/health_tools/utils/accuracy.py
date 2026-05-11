@@ -1,13 +1,11 @@
 """准确度计算模块"""
 
-from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
 from rich.console import Console
-from rich.table import Table
 
 console = Console()
 
@@ -48,9 +46,7 @@ def calculate_within_threshold(diff: np.ndarray, threshold: float) -> float:
     return float(np.mean(np.abs(diff) <= threshold) * 100)
 
 
-def calculate_within_percent(
-    ref: np.ndarray, pred: np.ndarray, percent: float
-) -> float:
+def calculate_within_percent(ref: np.ndarray, pred: np.ndarray, percent: float) -> float:
     """计算误差在百分比内的占比"""
     if len(ref) == 0:
         return 0.0
@@ -272,7 +268,9 @@ class AccuracyCalculator:
         self.finalize()
         total_results = self.get_total_results()
 
-        console.print("\n[bold cyan]==================== 准确度报告 ====================[/bold cyan]\n")
+        console.print(
+            "\n[bold cyan]==================== 准确度报告 ====================[/bold cyan]\n"
+        )
 
         console.print(f"[bold]整体统计 (Total: {sum(self.category_files.values())} files)[/bold]")
         console.print("-" * 50)

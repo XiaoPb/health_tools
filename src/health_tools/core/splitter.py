@@ -1,12 +1,11 @@
 """数据分割模块"""
 
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
-import numpy as np
 import pandas as pd
 
-from health_tools.core.parser import ChipRule
+from health_tools.models.rules import ChipRule
 from health_tools.utils.csv_handler import CSVHandler
 
 
@@ -40,7 +39,7 @@ def split_by_column_value(
     for i, start_idx in enumerate(split_indices):
         if i < len(split_indices) - 1:
             end_idx = split_indices[i + 1]
-            dfs.append(df.loc[start_idx:end_idx - 1].reset_index(drop=True))
+            dfs.append(df.loc[start_idx : end_idx - 1].reset_index(drop=True))
         else:
             dfs.append(df.loc[start_idx:].reset_index(drop=True))
 
@@ -66,7 +65,7 @@ def split_by_size(
 
     dfs = []
     for i in range(0, len(df), size):
-        dfs.append(df.iloc[i:i + size].reset_index(drop=True))
+        dfs.append(df.iloc[i : i + size].reset_index(drop=True))
 
     return dfs
 
@@ -108,14 +107,14 @@ def split_by_time(
 
     for i in range(1, len(times)):
         if (times.iloc[i] - start_time).total_seconds() >= seconds:
-            dfs.append(df.iloc[current_df_indices[0]:i].reset_index(drop=True))
+            dfs.append(df.iloc[current_df_indices[0] : i].reset_index(drop=True))
             current_df_indices = [i]
             start_time = times.iloc[i]
         else:
             current_df_indices.append(i)
 
     if current_df_indices:
-        dfs.append(df.iloc[current_df_indices[0]:].reset_index(drop=True))
+        dfs.append(df.iloc[current_df_indices[0] :].reset_index(drop=True))
 
     return dfs
 

@@ -1,8 +1,10 @@
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import yaml
+
+from health_tools.utils.columns import expand_columns as _expand_cols
 
 
 class RuleValidator:
@@ -110,9 +112,7 @@ class RuleValidator:
                     pattern = re.compile(rule["regex"])
                     groups = pattern.groups
                     if len(columns) != groups:
-                        errors.append(
-                            f"正则捕获组数量({groups})与列名数量({len(columns)})不匹配"
-                        )
+                        errors.append(f"正则捕获组数量({groups})与列名数量({len(columns)})不匹配")
                 except re.error:
                     pass
 
@@ -156,21 +156,10 @@ class RuleValidator:
             src_cols = RuleValidator._expand_columns(rule["source_columns"])
             tgt_cols = RuleValidator._expand_columns(rule["target_columns"])
             if len(src_cols) != len(tgt_cols):
-                errors.append(
-                    f"源列数({len(src_cols)})与目标列数({len(tgt_cols)})不匹配"
-                )
+                errors.append(f"源列数({len(src_cols)})与目标列数({len(tgt_cols)})不匹配")
 
         return errors
 
     @staticmethod
     def _expand_columns(columns: list) -> list:
-        expanded = []
-        for col in columns:
-            match = re.match(r"^(.+?)\[(\d+)-(\d+)\]$", str(col))
-            if match:
-                prefix, start, end = match.groups()
-                for i in range(int(start), int(end) + 1):
-                    expanded.append(f"{prefix}{i}")
-            else:
-                expanded.append(col)
-        return expanded
+        return _expand_cols([str(c) for c in columns])

@@ -1,12 +1,16 @@
-import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import yaml
 
-from health_tools.core.classifier import ClassifyRule, DataColumn
-from health_tools.core.converter import ConvertRule
-from health_tools.core.parser import ChipRule, ParseRule
+from health_tools.models.rules import (
+    ChipRule,
+    ClassifyRule,
+    ConvertRule,
+    DataColumn,
+    ParseRule,
+)
+from health_tools.utils.columns import expand_columns as _expand_columns
 
 
 class RuleLoader:
@@ -93,11 +97,13 @@ class RuleLoader:
 
         extract_rules = []
         for extract_item in data.get("extract", []):
-            extract_rules.append({
-                "name": extract_item.get("name", ""),
-                "function": extract_item.get("function", ""),
-                "params": extract_item.get("params", {}),
-            })
+            extract_rules.append(
+                {
+                    "name": extract_item.get("name", ""),
+                    "function": extract_item.get("function", ""),
+                    "params": extract_item.get("params", {}),
+                }
+            )
 
         classify_rules = data.get("classify", [])
 
@@ -141,6 +147,12 @@ class RuleLoader:
             source_columns=data.get("source_columns", []),
             target_columns=data.get("target_columns", []),
             computed=data.get("computed", {}),
+            target_chip=data.get("target_chip"),
+            description=data.get("description", ""),
+            column_mapping=data.get("column_mapping", {}),
+            forward_fill=data.get("forward_fill", []),
+            expand_repeat=data.get("expand_repeat", {}),
+            csv=data.get("csv", {}),
         )
 
     @classmethod
@@ -151,13 +163,4 @@ class RuleLoader:
 
     @classmethod
     def expand_columns(cls, columns: List[str]) -> List[str]:
-        expanded = []
-        for col in columns:
-            match = re.match(r"^(.+?)\[(\d+)-(\d+)\]$", col)
-            if match:
-                prefix, start, end = match.groups()
-                for i in range(int(start), int(end) + 1):
-                    expanded.append(f"{prefix}{i}")
-            else:
-                expanded.append(col)
-        return expanded
+        return _expand_columns(columns)

@@ -1,6 +1,6 @@
 from health_tools.utils.file import detect_file_encoding, ensure_dir, find_files
 from health_tools.utils.logger import setup_logger
-from health_tools.utils.csv_handler import CSVHandler, read_csv, write_csv
+from health_tools.utils.columns import expand_columns
 from health_tools.utils.parallel import parallel_process, parallel_process_with_index, batch_process
 from health_tools.utils.classify_helpers import (
     calculate_median,
@@ -24,9 +24,7 @@ __all__ = [
     "ensure_dir",
     "find_files",
     "setup_logger",
-    "CSVHandler",
-    "read_csv",
-    "write_csv",
+    "expand_columns",
     "parallel_process",
     "parallel_process_with_index",
     "batch_process",

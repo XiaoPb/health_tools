@@ -1,10 +1,9 @@
 """时频分析模块"""
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from scipy import signal
 
 
@@ -251,9 +250,7 @@ class STFTPlotter:
         if len(data) == 0:
             return None
 
-        frequencies, times, Zxx = compute_stft(
-            data, self.fs, self.window_sec, self.step_sec
-        )
+        frequencies, times, Zxx = compute_stft(data, self.fs, self.window_sec, self.step_sec)
 
         if len(frequencies) == 0:
             return None
@@ -283,7 +280,10 @@ class STFTPlotter:
             if len(ref_data) == len(data):
                 ref_times = np.arange(len(ref_data)) / self.fs
                 if self.freq_bpm:
-                    ref_data = ref_data * 60 / np.max(ref_data) * (freq_max - freq_min) / 2 + (freq_max + freq_min) / 2
+                    ref_data = (
+                        ref_data * 60 / np.max(ref_data) * (freq_max - freq_min) / 2
+                        + (freq_max + freq_min) / 2
+                    )
                 ax.plot(ref_times, ref_data, "w-", linewidth=1, label=ref_label, alpha=0.7)
 
         ax.set_ylabel("Frequency (BPM)" if self.freq_bpm else "Frequency (Hz)")
@@ -344,9 +344,7 @@ class STFTPlotter:
             if len(data) == 0:
                 continue
 
-            frequencies, times, Zxx = compute_stft(
-                data, self.fs, self.window_sec, self.step_sec
-            )
+            frequencies, times, Zxx = compute_stft(data, self.fs, self.window_sec, self.step_sec)
 
             if len(frequencies) == 0:
                 continue
@@ -370,7 +368,7 @@ class STFTPlotter:
 
             Zxx_db = 10 * np.log10(Zxx + 1e-10)
 
-            im = ax.pcolormesh(times, frequencies, Zxx_db, shading="gouraud", cmap=cmap)
+            ax.pcolormesh(times, frequencies, Zxx_db, shading="gouraud", cmap=cmap)
             ax.set_ylabel(f"{channel_name}\n(BPM)" if self.freq_bpm else f"{channel_name}\n(Hz)")
             ax.set_title(f"{channel_name}")
 

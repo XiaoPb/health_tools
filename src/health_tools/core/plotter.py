@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import signal
 
-from health_tools.core.stft import STFTPlotter, bandpass_filter, compute_stft, remove_baseline
+from health_tools.core.stft import STFTPlotter
 
 
 @dataclass

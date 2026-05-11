@@ -1,9 +1,7 @@
-import re
 from pathlib import Path
 from typing import Optional
 
 import click
-import pandas as pd
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -53,9 +51,7 @@ def parse_cmd(
     output_path_obj = Path(output_path)
 
     if input_path_obj.is_file():
-        _parse_file(
-            input_path_obj, output_path_obj, rule, delimiter, encoding, verbose
-        )
+        _parse_file(input_path_obj, output_path_obj, rule, delimiter, encoding, verbose)
     elif input_path_obj.is_dir():
         output_path_obj.mkdir(parents=True, exist_ok=True)
         files = list(input_path_obj.glob("*.log")) + list(input_path_obj.glob("*.txt"))

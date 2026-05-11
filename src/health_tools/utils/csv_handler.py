@@ -6,7 +6,7 @@ from typing import Optional, Tuple, Union
 
 import pandas as pd
 
-from health_tools.core.parser import ChipRule
+from health_tools.models.rules import ChipRule
 from health_tools.utils.file import detect_file_encoding
 
 
@@ -36,9 +36,7 @@ class CSVHandler:
         if auto_detect_encoding:
             encoding = detect_file_encoding(file_path)
         else:
-            encoding = (
-                self.chip_rule.encoding if self.chip_rule else "utf-8"
-            )
+            encoding = self.chip_rule.encoding if self.chip_rule else "utf-8"
 
         with open(file_path, "r", encoding=encoding) as f:
             lines = f.readlines()
@@ -68,7 +66,7 @@ class CSVHandler:
         if header:
             df = pd.read_csv(
                 StringIO("".join(data_lines)),
-                header=0,
+                header=None,
                 names=header,
                 delimiter=delimiter,
                 low_memory=False,

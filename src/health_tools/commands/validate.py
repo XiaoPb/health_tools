@@ -81,9 +81,7 @@ def _validate_rule(rule: dict, rule_path: Path, strict: bool) -> list:
                 groups = pattern.groups
                 columns = _expand_columns(rule["columns"])
                 if len(columns) != groups:
-                    errors.append(
-                        f"正则捕获组数量({groups})与列名数量({len(columns)})不匹配"
-                    )
+                    errors.append(f"正则捕获组数量({groups})与列名数量({len(columns)})不匹配")
             except re.error as e:
                 errors.append(f"正则表达式错误: {e}")
 

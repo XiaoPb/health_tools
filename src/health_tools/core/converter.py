@@ -1,41 +1,25 @@
 import re
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 
+import numpy as np
 import pandas as pd
 
-
-@dataclass
-class ConvertRule:
-    source_columns: List[str] = field(default_factory=list)
-    target_columns: List[str] = field(default_factory=list)
-    computed: Dict[str, str] = field(default_factory=dict)
-
-    def __post_init__(self):
-        self.source_columns = self._expand_columns(self.source_columns)
-        self.target_columns = self._expand_columns(self.target_columns)
-
-    def _expand_columns(self, columns: List[str]) -> List[str]:
-        expanded = []
-        for col in columns:
-            match = re.match(r"^(.+?)\[(\d+)-(\d+)\]$", col)
-            if match:
-                prefix, start, end = match.groups()
-                for i in range(int(start), int(end) + 1):
-                    expanded.append(f"{prefix}{i}")
-            else:
-                expanded.append(col)
-        return expanded
+from health_tools.models.rules import ConvertRule  # noqa: F401
 
 
 class DataConverter:
-    def __init__(self, rule: ConvertRule):
+    def __init__(self, rule: ConvertRule, chip_columns: Optional[List[str]] = None):
         self.rule = rule
+        self.chip_columns = chip_columns
 
     def convert(self, df: pd.DataFrame) -> pd.DataFrame:
         result = pd.DataFrame()
 
-        if self.rule.source_columns and self.rule.target_columns:
+        if self.rule.column_mapping:
+            for src, tgt in self.rule.column_mapping.items():
+                if src in df.columns:
+                    result[tgt] = df[src]
+        elif self.rule.source_columns and self.rule.target_columns:
             for src, tgt in zip(self.rule.source_columns, self.rule.target_columns):
                 if src in df.columns:
                     result[tgt] = df[src]
@@ -46,7 +30,77 @@ class DataConverter:
             for col_name, formula in self.rule.computed.items():
                 result[col_name] = self._compute_column(formula, df)
 
+        if self.rule.expand_repeat:
+            result = self._apply_expand_repeat(result)
+
+        if self.rule.forward_fill:
+            result = self._apply_forward_fill(result)
+
+        if self.chip_columns:
+            missing_cols = [col for col in self.chip_columns if col not in result.columns]
+            if missing_cols:
+                fill_df = pd.DataFrame(0, index=result.index, columns=missing_cols)
+                result = pd.concat([result, fill_df], axis=1)
+            result = result[self.chip_columns]
+
+        result = self._ensure_int64(result)
         return result
+
+    def _ensure_int64(self, df: pd.DataFrame) -> pd.DataFrame:
+        for col in df.select_dtypes(include=["float64"]).columns:
+            series = df[col]
+            non_null = series.dropna()
+            if len(non_null) > 0 and (non_null == non_null.astype("int64")).all():
+                df[col] = series.astype("Int64")
+        return df
+
+    def _resolve_column_name(self, name: str, df: pd.DataFrame) -> Optional[str]:
+        """将 forward_fill/expand_repeat 中的列名解析为 result DataFrame 中的实际列名"""
+        if name in df.columns:
+            return name
+        if self.rule.column_mapping and name in self.rule.column_mapping:
+            target = self.rule.column_mapping[name]
+            if target in df.columns:
+                return target
+        return None
+
+    def _apply_expand_repeat(self, df: pd.DataFrame) -> pd.DataFrame:
+        total_rows = len(df)
+        for col, repeat_count in self.rule.expand_repeat.items():
+            resolved = self._resolve_column_name(col, df)
+            if resolved is None:
+                continue
+            values = df[resolved].values
+            expanded = np.repeat(values, repeat_count)
+            if len(expanded) >= total_rows:
+                df[resolved] = expanded[:total_rows]
+            else:
+                padded = np.full(total_rows, values[-1] if len(values) > 0 else 0)
+                padded[: len(expanded)] = expanded
+                df[resolved] = padded
+        return df
+
+    def _apply_forward_fill(self, df: pd.DataFrame) -> pd.DataFrame:
+        for col in self.rule.forward_fill:
+            resolved = self._resolve_column_name(col, df)
+            if resolved is None:
+                continue
+            values = df[resolved].values.copy()
+            first_nonzero_idx = None
+            for i, v in enumerate(values):
+                if v != 0:
+                    first_nonzero_idx = i
+                    break
+            if first_nonzero_idx is None:
+                continue
+            last_nonzero = values[first_nonzero_idx]
+            for i in range(first_nonzero_idx + 1, len(values)):
+                if values[i] == 0:
+                    values[i] = last_nonzero
+                else:
+                    last_nonzero = values[i]
+            df[resolved] = values
+        return df
 
     def _compute_column(self, formula: str, df: pd.DataFrame) -> pd.Series:
         try:

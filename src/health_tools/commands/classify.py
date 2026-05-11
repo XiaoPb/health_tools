@@ -1,10 +1,8 @@
-import re
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import click
-import pandas as pd
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -20,7 +18,13 @@ console = Console()
 @click.command()
 @click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-o", "--output", "output_path", required=True, help="输出目录")
-@click.option("-r", "--rule", "rule_file", default="spo2_posture.yaml", help="分类规则文件（默认: spo2_posture.yaml）")
+@click.option(
+    "-r",
+    "--rule",
+    "rule_file",
+    default="spo2_posture.yaml",
+    help="分类规则文件（默认: spo2_posture.yaml）",
+)
 @click.option("--extend", "extend_files", multiple=True, help="扩展patterns文件（可多次使用）")
 @click.option("--accuracy", "enable_accuracy", is_flag=True, help="启用准确度计算")
 @click.option("--ref-column", help="参考列名/列索引（覆盖规则配置）")
@@ -64,14 +68,16 @@ def classify_cmd(
 
     classifier.create_structure(output_path_obj)
 
-    accuracy_config = rule.accuracy if hasattr(rule, 'accuracy') else {}
+    accuracy_config = rule.accuracy if hasattr(rule, "accuracy") else {}
     accuracy_calc: Optional[AccuracyCalculator] = None
 
     if enable_accuracy and (accuracy_config or (ref_column and pred_column)):
-        ref_col = ref_column or accuracy_config.get('ref_column')
-        pred_col = pred_column or accuracy_config.get('pred_column')
-        methods = accuracy_config.get('methods', ['std', 'rmse', 'mae', 'within_1', 'within_2', 'within_3'])
-        thresholds = accuracy_config.get('thresholds', [])
+        ref_col = ref_column or accuracy_config.get("ref_column")
+        pred_col = pred_column or accuracy_config.get("pred_column")
+        methods = accuracy_config.get(
+            "methods", ["std", "rmse", "mae", "within_1", "within_2", "within_3"]
+        )
+        thresholds = accuracy_config.get("thresholds", [])
 
         if ref_col and pred_col:
             accuracy_calc = AccuracyCalculator(

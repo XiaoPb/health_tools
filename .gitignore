@@ -77,3 +77,5 @@ plots/
 
 ReferenceDocumentation/
 .trae/
+test_data/
+debug/

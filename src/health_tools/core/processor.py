@@ -1,12 +1,11 @@
 """批量处理模块"""
 
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
-from tqdm import tqdm
 
-from health_tools.core.parser import ChipRule
+from health_tools.models.rules import ChipRule
 from health_tools.core.splitter import DataSplitter
 from health_tools.utils.csv_handler import CSVHandler
 from health_tools.utils.parallel import parallel_process
@@ -183,12 +182,14 @@ class BatchProcessor:
 
                 results = []
                 for split_file in split_files:
-                    results.append({
-                        "input": str(file),
-                        "output": str(split_file),
-                        "success": True,
-                        "rows": 0,
-                    })
+                    results.append(
+                        {
+                            "input": str(file),
+                            "output": str(split_file),
+                            "success": True,
+                            "rows": 0,
+                        }
+                    )
                 return {"success": True, "split_count": len(split_files)}
             else:
                 relative_path = file.relative_to(input_dir)

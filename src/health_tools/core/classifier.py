@@ -1,39 +1,12 @@
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from health_tools.utils.classify_helpers import CLASSIFY_FUNCTIONS, get_function
+from health_tools.models.rules import ClassifyRule, DataColumn  # noqa: F401
+from health_tools.utils.classify_helpers import get_function
 from health_tools.utils.csv_handler import CSVHandler
-
-
-@dataclass
-class DataColumn:
-    name: str
-    type: str = "string"
-    column: Optional[str] = None
-    column_index: Optional[int] = None
-    source: str = "data"
-    ranges: Dict[str, List[int]] = field(default_factory=dict)
-    values: List[str] = field(default_factory=list)
-    match: Dict[str, List[str]] = field(default_factory=dict)
-    regex: Optional[str] = None
-    group: Optional[int] = None
-    compute: Optional[str] = None
-
-
-@dataclass
-class ClassifyRule:
-    filename: Dict[str, Any] = field(default_factory=dict)
-    data_columns: List[DataColumn] = field(default_factory=list)
-    structure: Dict[str, str] = field(default_factory=dict)
-    rules: List[Dict[str, Any]] = field(default_factory=list)
-    default: str = "unclassified"
-    extract: List[Dict[str, Any]] = field(default_factory=list)
-    classify_rules: List[Dict[str, Any]] = field(default_factory=list)
-    accuracy: Dict[str, Any] = field(default_factory=dict)
 
 
 class DataClassifier:

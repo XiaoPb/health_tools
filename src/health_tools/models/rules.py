@@ -1,0 +1,134 @@
+"""规则数据类定义"""
+
+import re
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+from health_tools.utils.columns import expand_columns
+
+
+@dataclass
+class ParseRule:
+    regex: str
+    columns: List[str]
+    description: str = ""
+
+    def __post_init__(self):
+        self.columns = expand_columns(self.columns)
+        self._compiled_regex = re.compile(self.regex)
+
+
+@dataclass
+class ChipRule:
+    chip: str
+    csv: dict
+    columns: List[str]
+    version: str = "1.0"
+
+    def __post_init__(self):
+        self.columns = expand_columns(self.columns)
+
+    @property
+    def info_row(self) -> int:
+        return self.csv.get("info_row", 0)
+
+    @property
+    def header_row(self) -> int:
+        return self.csv.get("header_row", 1)
+
+    @property
+    def data_start_row(self) -> int:
+        return self.csv.get("data_start_row", 2)
+
+    @property
+    def delimiter(self) -> str:
+        return self.csv.get("delimiter", ",")
+
+    @property
+    def encoding(self) -> str:
+        return self.csv.get("encoding", "utf-8")
+
+    @property
+    def info(self) -> str:
+        return self.csv.get("info", "")
+
+
+@dataclass
+class ConvertRule:
+    source_columns: List[str] = field(default_factory=list)
+    target_columns: List[str] = field(default_factory=list)
+    computed: Dict[str, str] = field(default_factory=dict)
+    target_chip: Optional[str] = None
+    description: str = ""
+    column_mapping: Dict[str, str] = field(default_factory=dict)
+    forward_fill: List[str] = field(default_factory=list)
+    expand_repeat: Dict[str, int] = field(default_factory=dict)
+    csv: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.source_columns = self._expand_columns(self.source_columns)
+        self.target_columns = self._expand_columns(self.target_columns)
+        self.column_mapping = self._expand_mapping(self.column_mapping)
+
+    def _expand_columns(self, columns: List[str]) -> List[str]:
+        return expand_columns(columns, brace_only=True)
+
+    def _expand_mapping(self, mapping: Dict[str, str]) -> Dict[str, str]:
+        expanded = {}
+        for src, tgt in mapping.items():
+            src_expanded = self._expand_columns([src])
+            tgt_expanded = self._expand_columns([tgt])
+            if len(src_expanded) == len(tgt_expanded):
+                for s, t in zip(src_expanded, tgt_expanded):
+                    expanded[s] = t
+            else:
+                for s in src_expanded:
+                    expanded[s] = tgt
+        return expanded
+
+    @property
+    def info_row(self) -> int:
+        return self.csv.get("info_row", 0)
+
+    @property
+    def header_row(self) -> int:
+        return self.csv.get("header_row", 1)
+
+    @property
+    def data_start_row(self) -> int:
+        return self.csv.get("data_start_row", 2)
+
+    @property
+    def delimiter(self) -> str:
+        return self.csv.get("delimiter", ",")
+
+    @property
+    def encoding(self) -> str:
+        return self.csv.get("encoding", "utf-8")
+
+
+@dataclass
+class DataColumn:
+    name: str
+    type: str = "string"
+    column: Optional[str] = None
+    column_index: Optional[int] = None
+    source: str = "data"
+    ranges: Dict[str, List[int]] = field(default_factory=dict)
+    values: List[str] = field(default_factory=list)
+    match: Dict[str, List[str]] = field(default_factory=dict)
+    regex: Optional[str] = None
+    group: Optional[int] = None
+    compute: Optional[str] = None
+
+
+@dataclass
+class ClassifyRule:
+    filename: Dict[str, Any] = field(default_factory=dict)
+    data_columns: List[DataColumn] = field(default_factory=list)
+    structure: Dict[str, str] = field(default_factory=dict)
+    rules: List[Dict[str, Any]] = field(default_factory=list)
+    default: str = "unclassified"
+    extract: List[Dict[str, Any]] = field(default_factory=list)
+    classify_rules: List[Dict[str, Any]] = field(default_factory=list)
+    accuracy: Dict[str, Any] = field(default_factory=dict)

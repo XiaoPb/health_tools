@@ -1,7 +1,7 @@
 """并行处理模块"""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from tqdm import tqdm
 
@@ -77,10 +77,7 @@ def parallel_process_with_index(
         return index, func(item)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(wrapped_func, i, item): i
-            for i, item in enumerate(items)
-        }
+        futures = {executor.submit(wrapped_func, i, item): i for i, item in enumerate(items)}
 
         if show_progress:
             futures_iter = tqdm(

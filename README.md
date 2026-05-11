@@ -185,31 +185,43 @@ rules:
 
 ### 转换规则 (rules/convert/*.yaml)
 
-定义CSV格式转换：
+定义CSV格式转换，支持列映射、前值填充、频率扩展：
 
 ```yaml
 version: "1.0"
+target_chip: gh3220
 
-source_columns:
-  - timestamp
-  - red
-  - ir
+csv:
+  info_row: 0            # 信息所在行（0=无）
+  header_row: 1          # 列名所在行
+  data_start_row: 2      # 数据开始行
+  delimiter: ","
 
-target_columns:
-  - TIME
-  - RED
-  - IR
+column_mapping:
+  time: TimeStamp
+  acc[0]: ACCX           # [] 为字面量列名
+  rawdata{0-15}: CH{0-15}  # {} 展开为 rawdata0->CH0, rawdata1->CH1, ...
+
+forward_fill:
+  - polar_HR             # 0值用前一个非0值填充
+
+expand_repeat:
+  polar_HR: 25           # 每个值重复25次匹配采样率
 ```
 
-## 通道简写语法
+## 列名展开语法
 
-支持使用 `name[start-end]` 格式表示连续通道：
+支持两种范围展开语法：
 
 ```yaml
+# chip/parse 规则中：[] 表示范围展开
 columns:
-  - timestamp
-  - ch[0-15]       # 展开为 ch0~ch15
-  - led[1-4]       # 展开为 led1~led4
+  - ch[0-15]             # 展开为 ch0, ch1, ..., ch15
+
+# convert 规则中：{} 表示范围展开，[] 为字面量
+column_mapping:
+  rawdata[{0-1}]: Rawdata{0-1}  # rawdata[0]->Rawdata0, rawdata[1]->Rawdata1
+  acc[0]: ACCX                   # acc[0] 是字面量列名
 ```
 
 ## 内置芯片规则
@@ -217,8 +229,7 @@ columns:
 | 芯片 | 文件 | 描述 |
 |------|------|------|
 | GH3220 | `rules/chip/gh3220.yaml` | Goodix PPG传感器 |
-| MAX30102 | `rules/chip/max30102.yaml` | Maxim血氧模块 |
-| AFE4400 | `rules/chip/afe4400.yaml` | TI生物传感模拟前端 |
+| GH3036 | `rules/chip/gh3036.yaml` | Goodix健康传感器 |
 
 ## 开发
 

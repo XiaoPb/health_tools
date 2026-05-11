@@ -1,5 +1,5 @@
 version: "1.0"
-chip: gh3220
+chip: gh3036
 
 csv:
   info_row: 1            # 信息所在行
@@ -7,7 +7,7 @@ csv:
   data_start_row: 3      # 数据开始行
   delimiter: ","         # 分隔符
   encoding: "utf-8"      # 编码
-  info: "Version: GH3220"  # 信息
+  info: "Version: GH3036"  # 信息
 
 columns:                 # 列定义（按顺序）
     - TimeStamp
@@ -15,17 +15,14 @@ columns:                 # 列定义（按顺序）
     - ACCX
     - ACCY
     - ACCZ
-    - CH{0-15}
+    - Ipd{0-31}
     - FLAG{0-7}
     - REF_RESULT{0-15}
-    - ALGO_RESULT{0-7}
-    - AGC_INFO_CH{0-15}
-    - AMB_CH{0-15}
+    - ALGO_RESULT{0-15}
+    - Rawdata{0-31}
+    - AGC_INFO_CH{0-31}
+    - LED_INFO_CH{0-31}
     - GYRO_X
     - GYRO_Y
     - GYRO_Z
-    - CH16-31
-    - ALGO_RESULT{8-15}
-    - AGC_INFO_CH{16-31}
-    - CAP_CH{0-3}
-    - TEMP_CH{0-3}
+
