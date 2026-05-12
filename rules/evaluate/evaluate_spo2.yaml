@@ -1,0 +1,25 @@
+description: "血氧准确度评估规则"
+type: spo2
+
+ref_column: REF_RESULT0
+pred_column: ALGO_RESULT0
+
+anomaly:
+  diff_threshold: 5
+  stale_minutes: 2
+  sample_rate: 25
+
+classify_rule: spo2_posture.yaml
+
+classify:
+  by_directory:
+    normal_spo2: ["normalSpO2", "正常血氧"]
+    low_spo2: ["lowspo2", "低血氧"]
+  by_filename:
+    sit: ["静坐", "sit"]
+    supine: ["平躺", "supine"]
+    stand: ["站姿", "stand"]
+
+methods: ["rmse", "within_3", "within_6", "within_9", "mae", "std", "correlation"]
+
+default_category: "other"

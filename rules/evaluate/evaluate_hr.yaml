@@ -1,0 +1,29 @@
+description: "心率准确度评估规则"
+type: hr
+
+ref_column: REF_RESULT0
+pred_column: ALGO_RESULT0
+
+anomaly:
+  diff_threshold: 30
+  stale_minutes: 2
+  sample_rate: 25
+
+classify:
+  by_directory:
+    walk: ["walk", "walking", "步行"]
+    run: ["run", "running", "跑步"]
+    sit: ["sit", "sitting", "静坐"]
+    sleep: ["sleep", "sleeping", "睡眠"]
+    cycling: ["cycling", "骑行"]
+    daily: ["daily", "日常"]
+  by_filename:
+    walk: ["walk", "步行"]
+    run: ["run", "跑步"]
+    sit: ["sit", "静坐"]
+    sleep: ["sleep", "睡眠"]
+
+methods: ["mae", "within_5", "within_10", "within_15", "std", "rmse", "correlation"]
+first_output_time: true
+
+default_category: "other"

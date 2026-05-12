@@ -25,6 +25,8 @@ COMMAND_MAP = {
     "fac": ("health_tools.commands.factory", "factory_cmd"),
     "config": ("health_tools.commands.config", "config_cmd"),
     "cfg": ("health_tools.commands.config", "config_cmd"),
+    "evaluate": ("health_tools.commands.evaluate", "evaluate_cmd"),
+    "eval": ("health_tools.commands.evaluate", "evaluate_cmd"),
 }
 
 

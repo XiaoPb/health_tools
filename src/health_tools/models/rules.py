@@ -156,3 +156,30 @@ class ClassifyRule:
     extract: List[Dict[str, Any]] = field(default_factory=list)
     classify_rules: List[Dict[str, Any]] = field(default_factory=list)
     accuracy: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EvaluateRule:
+    type: str = "hr"
+    ref_column: str = "REF_RESULT0"
+    pred_column: str = "ALGO_RESULT0"
+    anomaly: Dict[str, Any] = field(default_factory=dict)
+    classify: Dict[str, Any] = field(default_factory=dict)
+    classify_rule: Optional[str] = None
+    methods: List[str] = field(default_factory=list)
+    thresholds: List[Dict[str, Any]] = field(default_factory=list)
+    first_output_time: bool = False
+    default_category: str = "other"
+    description: str = ""
+
+    @property
+    def diff_threshold(self) -> float:
+        return self.anomaly.get("diff_threshold", 30 if self.type == "hr" else 5)
+
+    @property
+    def stale_minutes(self) -> float:
+        return self.anomaly.get("stale_minutes", 2)
+
+    @property
+    def sample_rate(self) -> float:
+        return self.anomaly.get("sample_rate", 25)

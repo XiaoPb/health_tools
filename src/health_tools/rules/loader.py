@@ -10,6 +10,7 @@ from health_tools.models.rules import (
     ClassifyRule,
     ConvertRule,
     DataColumn,
+    EvaluateRule,
     ParsePattern,
     ParseRule,
 )
@@ -205,3 +206,22 @@ class RuleLoader:
     @classmethod
     def expand_columns(cls, columns: List[str]) -> List[str]:
         return _expand_columns(columns)
+
+    @classmethod
+    def load_evaluate_rule(cls, rule_file: str) -> EvaluateRule:
+        rule_path = cls._resolve_rule_path(rule_file, "evaluate")
+        data = cls._load_yaml(rule_path)
+
+        return EvaluateRule(
+            type=data.get("type", "hr"),
+            ref_column=data.get("ref_column", "REF_RESULT0"),
+            pred_column=data.get("pred_column", "ALGO_RESULT0"),
+            anomaly=data.get("anomaly", {}),
+            classify=data.get("classify", {}),
+            classify_rule=data.get("classify_rule"),
+            methods=data.get("methods", []),
+            thresholds=data.get("thresholds", []),
+            first_output_time=data.get("first_output_time", False),
+            default_category=data.get("default_category", "other"),
+            description=data.get("description", ""),
+        )
