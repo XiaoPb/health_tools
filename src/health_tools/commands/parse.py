@@ -48,10 +48,17 @@ def parse_cmd(
         console.print("[red]错误: 需要指定 --rule 或 --chip 参数[/red]")
         raise SystemExit(1)
 
+    multi_mode = bool(getattr(rule, "patterns", None))
+
     if dry_run:
         console.print("[green]规则验证通过[/green]")
-        console.print(f"  正则表达式: {rule.regex}")
-        console.print(f"  列名: {rule.columns}")
+        if multi_mode:
+            for name, pat in rule.patterns.items():
+                console.print(f"  [{name}] 正则: {pat.regex}")
+                console.print(f"  [{name}] 列名: {pat.columns}")
+        else:
+            console.print(f"  正则表达式: {rule.regex}")
+            console.print(f"  列名: {rule.columns}")
         if chip_columns:
             console.print(f"  芯片列数: {len(chip_columns)}")
         return
@@ -59,8 +66,19 @@ def parse_cmd(
     input_path_obj = Path(input_path)
     output_path_obj = Path(output_path)
 
+    if multi_mode:
+        output_path_obj.mkdir(parents=True, exist_ok=True)
+
     if input_path_obj.is_file():
-        _parse_file(input_path_obj, output_path_obj, rule, chip_rule, chip_columns, delimiter, encoding, verbose)
+        if multi_mode:
+            _parse_file_multi(
+                input_path_obj, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
+            )
+        else:
+            _parse_file(
+                input_path_obj, output_path_obj, rule, chip_rule, chip_columns, delimiter,
+                encoding, verbose,
+            )
     elif input_path_obj.is_dir():
         output_path_obj.mkdir(parents=True, exist_ok=True)
         files = list(input_path_obj.glob("*.log")) + list(input_path_obj.glob("*.txt"))
@@ -70,8 +88,15 @@ def parse_cmd(
             console=console,
         ) as progress:
             for file in progress.track(files, description="解析文件..."):
-                out_file = output_path_obj / f"{file.stem}.csv"
-                _parse_file(file, out_file, rule, chip_rule, chip_columns, delimiter, encoding, verbose)
+                if multi_mode:
+                    _parse_file_multi(
+                        file, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
+                    )
+                else:
+                    out_file = output_path_obj / f"{file.stem}.csv"
+                    _parse_file(
+                        file, out_file, rule, chip_rule, chip_columns, delimiter, encoding, verbose
+                    )
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
@@ -101,5 +126,35 @@ def _parse_file(
         else:
             if verbose:
                 console.print(f"[yellow]WARN[/yellow] {input_file.name}: 无有效数据")
+    except Exception as e:
+        console.print(f"[red]FAIL[/red] {input_file.name}: {e}")
+
+
+def _parse_file_multi(
+    input_file: Path,
+    output_dir: Path,
+    rule,
+    chip_rule,
+    chip_columns,
+    encoding: str,
+    verbose: bool,
+) -> None:
+    parser = LogParser(rule, chip_columns=chip_columns)
+    try:
+        results = parser.parse_file_multi(input_file, encoding)
+        if not results:
+            if verbose:
+                console.print(f"[yellow]WARN[/yellow] {input_file.name}: 无有效数据")
+            return
+        for name, df in results.items():
+            out_file = output_dir / f"{input_file.stem}_{name}.csv"
+            if chip_rule:
+                write_csv(out_file, df, chip_rule=chip_rule, info=chip_rule.info)
+            else:
+                df.to_csv(out_file, index=False)
+            if verbose:
+                console.print(
+                    f"[green]OK[/green] {input_file.name} [{name}] -> {out_file} ({len(df)}行)"
+                )
     except Exception as e:
         console.print(f"[red]FAIL[/red] {input_file.name}: {e}")

@@ -2,29 +2,9 @@ from pathlib import Path
 from typing import List, Optional
 
 import click
-import pandas as pd
 from rich.console import Console
 
 console = Console()
-
-
-def _read_csv_with_config(file_path: Path, csv_config: Optional[dict]) -> pd.DataFrame:
-    if not csv_config:
-        return pd.read_csv(file_path)
-
-    header_row = csv_config.get("header_row", 1) - 1
-    data_start_row = csv_config.get("data_start_row", 2) - 1
-    delimiter = csv_config.get("delimiter", ",")
-
-    skip_between = data_start_row - header_row - 1
-    skiprows = list(range(1, skip_between + 1)) if skip_between > 0 else None
-
-    return pd.read_csv(
-        file_path,
-        header=header_row,
-        skiprows=skiprows,
-        delimiter=delimiter,
-    )
 
 
 @click.command()
@@ -73,14 +53,17 @@ def plot_cmd(
     """绘制PPG数据的时域/频域/时频图"""
     from health_tools.core.plotter import DataPlotter
     from health_tools.rules.loader import RuleLoader
+    from health_tools.utils.csv_handler import read_csv_df
 
-    csv_config = None
+    chip_rule = None
     if chip_name:
         chip_rule = RuleLoader.load_chip_rule(chip_name)
-        csv_config = chip_rule.csv
     elif rule_file:
         convert_rule = RuleLoader.load_convert_rule(rule_file)
         csv_config = convert_rule.csv
+        from health_tools.models.rules import ChipRule as _ChipRule
+
+        chip_rule = _ChipRule(chip="", csv=csv_config, columns=[])
 
     input_path_obj = Path(input_path)
     output_path_obj = Path(output_path)
@@ -116,7 +99,7 @@ def plot_cmd(
             ref_column,
             no_show,
             verbose,
-            csv_config,
+            chip_rule,
         )
     elif input_path_obj.is_dir():
         files = list(input_path_obj.glob("*.csv"))
@@ -130,7 +113,7 @@ def plot_cmd(
                 ref_column,
                 no_show,
                 verbose,
-                csv_config,
+                chip_rule,
             )
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
@@ -146,10 +129,12 @@ def _plot_file(
     ref_column: Optional[str],
     no_show: bool,
     verbose: bool,
-    csv_config: Optional[dict] = None,
+    chip_rule=None,
 ) -> None:
     try:
-        df = _read_csv_with_config(input_file, csv_config)
+        from health_tools.utils.csv_handler import read_csv_df
+
+        df = read_csv_df(input_file, chip_rule)
 
         if plot_type in ("time", "both"):
             output_file = output_dir / f"{input_file.stem}_time.{plotter.fmt}"

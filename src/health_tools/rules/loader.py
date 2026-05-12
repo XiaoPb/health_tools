@@ -9,6 +9,7 @@ from health_tools.models.rules import (
     ClassifyRule,
     ConvertRule,
     DataColumn,
+    ParsePattern,
     ParseRule,
 )
 from health_tools.utils.columns import expand_columns as _expand_columns
@@ -52,12 +53,21 @@ class RuleLoader:
         rule_path = cls._resolve_rule_path(rule_file, "parse")
         data = cls._load_yaml(rule_path)
 
+        patterns = {}
+        for name, pat_data in data.get("patterns", {}).items():
+            patterns[name] = ParsePattern(
+                regex=pat_data.get("regex", ""),
+                columns=pat_data.get("columns", []),
+                separator=pat_data.get("separator", ","),
+            )
+
         return ParseRule(
             regex=data.get("regex", ""),
             columns=data.get("columns", []),
             description=data.get("description", ""),
             separator=data.get("separator", ","),
             chip=data.get("chip") or data.get("target_chip"),
+            patterns=patterns,
         )
 
     @classmethod

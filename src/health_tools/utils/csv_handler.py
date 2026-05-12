@@ -171,3 +171,12 @@ def write_csv(
     """
     handler = CSVHandler(chip_rule)
     handler.write(file_path, df, info)
+
+
+def read_csv_df(
+    file_path: Union[str, Path],
+    chip_rule: Optional[ChipRule] = None,
+) -> pd.DataFrame:
+    """读取CSV返回DataFrame（忽略info行）"""
+    _, df = read_csv(file_path, chip_rule)
+    return df

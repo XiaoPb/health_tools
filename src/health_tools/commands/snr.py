@@ -10,27 +10,9 @@ from rich.table import Table
 
 from health_tools.core.snr import SNRCalculator
 from health_tools.rules.loader import RuleLoader
+from health_tools.utils.csv_handler import read_csv_df
 
 console = Console()
-
-
-def _read_csv_with_config(file_path: Path, csv_config: Optional[dict]) -> pd.DataFrame:
-    if not csv_config:
-        return pd.read_csv(file_path)
-
-    header_row = csv_config.get("header_row", 1) - 1
-    data_start_row = csv_config.get("data_start_row", 2) - 1
-    delimiter = csv_config.get("delimiter", ",")
-
-    skip_between = data_start_row - header_row - 1
-    skiprows = list(range(1, skip_between + 1)) if skip_between > 0 else None
-
-    return pd.read_csv(
-        file_path,
-        header=header_row,
-        skiprows=skiprows,
-        delimiter=delimiter,
-    )
 
 
 @click.command()
@@ -57,20 +39,21 @@ def snr_cmd(
     verbose: bool,
 ) -> None:
     """计算SNR/CTR/Noise（产测）"""
-    csv_config = None
+    chip_rule = None
     if chip_name:
         chip_rule = RuleLoader.load_chip_rule(chip_name)
-        csv_config = chip_rule.csv
     elif rule_file:
         convert_rule = RuleLoader.load_convert_rule(rule_file)
-        csv_config = convert_rule.csv
+        from health_tools.models.rules import ChipRule as _ChipRule
+
+        chip_rule = _ChipRule(chip="", csv=convert_rule.csv, columns=[])
 
     input_file = Path(input_path)
     if not input_file.exists():
         console.print(f"[red]错误: 文件不存在: {input_path}[/red]")
         raise SystemExit(1)
 
-    df = _read_csv_with_config(input_file, csv_config)
+    df = read_csv_df(input_file, chip_rule)
     channel_list = channels.split(",") if channels else None
 
     calculator = SNRCalculator(gain=gain, current=current, sample_rate=sample_rate)

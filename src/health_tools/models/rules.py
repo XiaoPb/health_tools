@@ -8,16 +8,29 @@ from health_tools.utils.columns import expand_columns
 
 
 @dataclass
-class ParseRule:
+class ParsePattern:
     regex: str
     columns: List[str]
-    description: str = ""
     separator: str = ","
-    chip: Optional[str] = None
 
     def __post_init__(self):
         self.columns = expand_columns(self.columns)
         self._compiled_regex = re.compile(self.regex)
+
+
+@dataclass
+class ParseRule:
+    regex: str = ""
+    columns: List[str] = field(default_factory=list)
+    description: str = ""
+    separator: str = ","
+    chip: Optional[str] = None
+    patterns: Dict[str, "ParsePattern"] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.columns = expand_columns(self.columns)
+        if self.regex:
+            self._compiled_regex = re.compile(self.regex)
 
 
 @dataclass
