@@ -14,13 +14,39 @@ from health_tools.utils.csv_handler import CSVHandler
 console = Console()
 
 
-def _generate_rule_template(chip_rule: ChipRule, output_path: Path) -> None:
+def _generate_rule_template(
+    chip_rule: ChipRule, output_path: Path, source_file: Optional[Path] = None
+) -> None:
+    source_columns = []
+    if source_file and source_file.is_file():
+        try:
+            df = pd.read_csv(source_file, nrows=0)
+            cols = list(df.columns)
+            if len(cols) == 1 or any(col.startswith("Version") for col in cols):
+                df = pd.read_csv(source_file, header=1, nrows=0)
+                cols = list(df.columns)
+            source_columns = cols
+        except Exception:
+            pass
+
+    column_mapping = {}
+    source_lower_map = {col.lower(): col for col in source_columns}
+    for target_col in chip_rule.columns:
+        if target_col.lower() in source_lower_map:
+            column_mapping[target_col] = source_lower_map[target_col.lower()]
+        elif source_columns and target_col in source_columns:
+            column_mapping[target_col] = target_col
+        else:
+            column_mapping[target_col] = "Unknown" if source_columns else target_col
+
     template = {
         "version": "1.0",
         "description": f"转换为{chip_rule.chip}格式",
         "target_chip": chip_rule.chip,
-        "column_mapping": {col: col for col in chip_rule.columns},
+        "csv": chip_rule.csv,
+        "column_mapping": column_mapping,
     }
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         yaml.dump(
@@ -30,7 +56,17 @@ def _generate_rule_template(chip_rule: ChipRule, output_path: Path) -> None:
             allow_unicode=True,
             sort_keys=False,
         )
-    console.print(f"[green]OK[/green] 模板已生成: {output_path}")
+        f.write("\n# forward_fill: []  # 前向填充列（如 [TimeStamp, FRAME_ID]）\n")
+        f.write("# expand_repeat: []  # 重复扩展列（如 [REF_RESULT{0-15}]）\n")
+
+    if source_columns:
+        matched = sum(1 for v in column_mapping.values() if v != "Unknown")
+        console.print(
+            f"[green]OK[/green] 模板已生成: {output_path} "
+            f"(源列 {len(source_columns)} 个, 匹配 {matched}/{len(chip_rule.columns)})"
+        )
+    else:
+        console.print(f"[green]OK[/green] 模板已生成: {output_path}")
 
 
 @click.command()
@@ -66,7 +102,8 @@ def convert_cmd(
         if not output_path:
             output_path = f"convert_{chip_name}.yaml"
         chip_rule = RuleLoader.load_chip_rule(chip_name)
-        _generate_rule_template(chip_rule, Path(output_path))
+        source_file = Path(input_path) if input_path else None
+        _generate_rule_template(chip_rule, Path(output_path), source_file)
         return
 
     if not input_path or not output_path:
