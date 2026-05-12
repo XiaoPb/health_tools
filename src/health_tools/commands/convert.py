@@ -89,9 +89,15 @@ def _generate_rule_template(
     column_mapping = {}
     if source_columns:
         source_index = _build_source_index(source_columns)
+        matched_sources = set()
         for target_col in chip_rule.columns:
             matched = _match_target_col(target_col, source_index)
-            column_mapping[target_col] = matched if matched else "Unknown"
+            if matched:
+                column_mapping[matched] = target_col
+                matched_sources.add(matched)
+        for src_col in source_columns:
+            if src_col not in matched_sources:
+                column_mapping[src_col] = "Unknown"
     else:
         for target_col in chip_rule.columns:
             column_mapping[target_col] = target_col
@@ -120,7 +126,7 @@ def _generate_rule_template(
         matched = sum(1 for v in column_mapping.values() if v != "Unknown")
         console.print(
             f"[green]OK[/green] 模板已生成: {output_path} "
-            f"(源列 {len(source_columns)} 个, 匹配 {matched}/{len(chip_rule.columns)})"
+            f"(源列 {len(source_columns)} 个, 匹配 {matched}/{len(source_columns)})"
         )
     else:
         console.print(f"[green]OK[/green] 模板已生成: {output_path}")
