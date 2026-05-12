@@ -1,11 +1,11 @@
-# snr 命令
+# factory 命令
 
 计算 SNR/CTR/Noise（产测用途）。
 
 ## 用法
 
 ```bash
-ghealth_tool snr -i <input.csv> [options]
+ghealth_tool factory -i <input.csv> [options]
 ```
 
 ## 参数
@@ -43,11 +43,11 @@ ghealth_tool snr -i <input.csv> [options]
 
 ```bash
 # 计算所有通道
-ghealth_tool snr -i data.csv --chip gh3036
+ghealth_tool factory -i data.csv --chip gh3036
 
 # 指定通道和参数
-ghealth_tool snr -i data.csv --chip gh3036 --channels Ipd0,Ipd1 --gain 4.0 --current 20.0
+ghealth_tool factory -i data.csv --chip gh3036 --channels Ipd0,Ipd1 --gain 4.0 --current 20.0
 
 # 输出到文件
-ghealth_tool snr -i data.csv --chip gh3036 -o results.csv -v
+ghealth_tool factory -i data.csv --chip gh3036 -o results.csv -v
 ```

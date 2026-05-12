@@ -1,4 +1,4 @@
-"""SNR/CTR/Noise 产测计算命令"""
+"""产测计算命令（SNR/CTR/Noise）"""
 
 from pathlib import Path
 from typing import Optional
@@ -26,7 +26,7 @@ console = Console()
 @click.option("-o", "--output", "output_path", help="输出结果CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
-def snr_cmd(
+def factory_cmd(
     ctx: click.Context,
     input_path: str,
     chip_name: Optional[str],

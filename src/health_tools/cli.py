@@ -20,7 +20,11 @@ COMMAND_MAP = {
     "val": ("health_tools.commands.validate", "validate_cmd"),
     "split": ("health_tools.commands.split", "split_cmd"),
     "process": ("health_tools.commands.process", "process_cmd"),
-    "snr": ("health_tools.commands.snr", "snr_cmd"),
+    "snr": ("health_tools.commands.factory", "factory_cmd"),
+    "factory": ("health_tools.commands.factory", "factory_cmd"),
+    "fac": ("health_tools.commands.factory", "factory_cmd"),
+    "config": ("health_tools.commands.config", "config_cmd"),
+    "cfg": ("health_tools.commands.config", "config_cmd"),
 }
 
 

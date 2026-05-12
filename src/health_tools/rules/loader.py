@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import click
 import yaml
 
+from health_tools.config import get_user_rules_dir
 from health_tools.models.rules import (
     ChipRule,
     ClassifyRule,
@@ -28,6 +29,11 @@ class RuleLoader:
     def _resolve_rule_path(cls, rule_file: str, rule_type: str) -> Path:
         rule_path = Path(rule_file)
         if not rule_path.is_absolute():
+            user_rules_dir = get_user_rules_dir()
+            if user_rules_dir:
+                user_path = user_rules_dir / rule_type / rule_file
+                if user_path.exists():
+                    return user_path
             builtin_path = cls.get_builtin_rules_path() / rule_type / rule_file
             if builtin_path.exists():
                 rule_path = builtin_path
@@ -76,9 +82,16 @@ class RuleLoader:
         rule_path = cls._resolve_rule_path(rule_file, "chip")
 
         if not rule_path.exists():
+            available = set()
             chip_dir = cls.get_builtin_rules_path() / "chip"
-            available = [f.stem for f in chip_dir.glob("*.yaml")] if chip_dir.exists() else []
-            supported = ", ".join(available) if available else "无"
+            if chip_dir.exists():
+                available.update(f.stem for f in chip_dir.glob("*.yaml"))
+            user_rules_dir = get_user_rules_dir()
+            if user_rules_dir:
+                user_chip_dir = user_rules_dir / "chip"
+                if user_chip_dir.exists():
+                    available.update(f.stem for f in user_chip_dir.glob("*.yaml"))
+            supported = ", ".join(sorted(available)) if available else "无"
             raise click.ClickException(
                 f"不支持的芯片型号: {chip_name}。当前支持: {supported}"
             )
