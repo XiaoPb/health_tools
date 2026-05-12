@@ -22,7 +22,13 @@ class RuleLoader:
     @classmethod
     def get_builtin_rules_path(cls) -> Path:
         if cls._builtin_rules_path is None:
-            cls._builtin_rules_path = Path(__file__).parent.parent.parent.parent / "rules"
+            candidate = Path(__file__).parent.parent.parent.parent / "rules"
+            if candidate.exists():
+                cls._builtin_rules_path = candidate
+            else:
+                # wheel 安装时 rules 在包内
+                pkg_dir = Path(__file__).parent.parent
+                cls._builtin_rules_path = pkg_dir / "rules"
         return cls._builtin_rules_path
 
     @classmethod

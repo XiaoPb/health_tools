@@ -9,6 +9,8 @@ from scipy import signal
 
 from health_tools.core.stft import STFTPlotter
 
+MAX_PLOT_POINTS = 50000
+
 
 @dataclass
 class PlotConfig:
@@ -17,6 +19,13 @@ class PlotConfig:
     overlap: float = 0.5
     fmt: str = "png"
     dpi: int = 150
+
+
+def _downsample(data: np.ndarray, max_points: int = MAX_PLOT_POINTS) -> np.ndarray:
+    if len(data) <= max_points:
+        return data
+    step = len(data) // max_points
+    return data[::step]
 
 
 class DataPlotter:
@@ -33,7 +42,7 @@ class DataPlotter:
         freq_bpm: bool = True,
         freq_range: Tuple[float, float] = (30.0, 240.0),
     ):
-        self.sample_rate = sample_rate or 25
+        self.sample_rate = sample_rate if sample_rate else 25
         self.window = window
         self.overlap = overlap
         self.fmt = fmt
@@ -65,22 +74,26 @@ class DataPlotter:
     ) -> None:
         if channels is None:
             channels = [col for col in df.columns if col != "timestamp"]
+        if not channels:
+            return
 
         fig, axes = plt.subplots(len(channels), 1, figsize=(12, 3 * len(channels)), sharex=True)
         if len(channels) == 1:
             axes = [axes]
 
-        for ax, channel in zip(axes, channels):
-            if channel in df.columns:
-                data = pd.to_numeric(df[channel], errors="coerce")
-                ax.plot(data.values, linewidth=0.5)
-                ax.set_ylabel(channel)
-                ax.grid(True, alpha=0.3)
+        try:
+            for ax, channel in zip(axes, channels):
+                if channel in df.columns:
+                    data = pd.to_numeric(df[channel], errors="coerce").values
+                    ax.plot(_downsample(data), linewidth=0.5)
+                    ax.set_ylabel(channel)
+                    ax.grid(True, alpha=0.3)
 
-        axes[-1].set_xlabel("Sample")
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=self.dpi)
-        plt.close()
+            axes[-1].set_xlabel("Sample")
+            plt.tight_layout()
+            plt.savefig(output_file, dpi=self.dpi)
+        finally:
+            plt.close(fig)
 
     def plot_freq(
         self,
@@ -90,27 +103,31 @@ class DataPlotter:
     ) -> None:
         if channels is None:
             channels = [col for col in df.columns if col != "timestamp"]
+        if not channels:
+            return
 
-        sample_rate = self.sample_rate or 25
+        sample_rate = self.sample_rate
 
         fig, axes = plt.subplots(len(channels), 1, figsize=(12, 3 * len(channels)), sharex=True)
         if len(channels) == 1:
             axes = [axes]
 
-        for ax, channel in zip(axes, channels):
-            if channel in df.columns:
-                data = pd.to_numeric(df[channel], errors="coerce").dropna().values
+        try:
+            for ax, channel in zip(axes, channels):
+                if channel in df.columns:
+                    data = pd.to_numeric(df[channel], errors="coerce").dropna().values
+                    if len(data) > 0:
+                        nperseg = min(256, len(data))
+                        freqs, psd = signal.welch(data, fs=sample_rate, nperseg=nperseg)
+                        ax.semilogy(freqs, psd, linewidth=0.5)
+                        ax.set_ylabel(f"{channel}\nPSD")
+                        ax.grid(True, alpha=0.3)
 
-                if len(data) > 0:
-                    freqs, psd = signal.welch(data, fs=sample_rate, nperseg=min(256, len(data)))
-                    ax.semilogy(freqs, psd, linewidth=0.5)
-                    ax.set_ylabel(f"{channel}\nPSD")
-                    ax.grid(True, alpha=0.3)
-
-        axes[-1].set_xlabel("Frequency (Hz)")
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=self.dpi)
-        plt.close()
+            axes[-1].set_xlabel("Frequency (Hz)")
+            plt.tight_layout()
+            plt.savefig(output_file, dpi=self.dpi)
+        finally:
+            plt.close(fig)
 
     def plot_spectrogram(
         self,
@@ -121,28 +138,26 @@ class DataPlotter:
         if channel not in df.columns:
             return
 
-        sample_rate = self.sample_rate or 25
         data = pd.to_numeric(df[channel], errors="coerce").dropna().values
-
-        if len(data) == 0:
+        if len(data) < 16:
             return
 
         fig, ax = plt.subplots(figsize=(12, 6))
+        try:
+            nperseg = min(256, len(data) // 4)
+            nperseg = max(nperseg, 16)
 
-        nperseg = min(256, len(data) // 4)
-        if nperseg < 8:
-            nperseg = 8
-
-        freqs, times, Sxx = signal.spectrogram(data, fs=sample_rate, nperseg=nperseg)
-
-        im = ax.pcolormesh(times, freqs, 10 * np.log10(Sxx + 1e-10), shading="gouraud")
-        ax.set_ylabel("Frequency (Hz)")
-        ax.set_xlabel("Time (s)")
-        plt.colorbar(im, ax=ax, label="Power (dB)")
-
-        plt.tight_layout()
-        plt.savefig(output_file, dpi=self.dpi)
-        plt.close()
+            freqs, times, Sxx = signal.spectrogram(
+                data, fs=self.sample_rate, nperseg=nperseg
+            )
+            im = ax.pcolormesh(times, freqs, 10 * np.log10(Sxx + 1e-10), shading="gouraud")
+            ax.set_ylabel("Frequency (Hz)")
+            ax.set_xlabel("Time (s)")
+            plt.colorbar(im, ax=ax, label="Power (dB)")
+            plt.tight_layout()
+            plt.savefig(output_file, dpi=self.dpi)
+        finally:
+            plt.close(fig)
 
     def plot_stft(
         self,
@@ -153,6 +168,8 @@ class DataPlotter:
     ) -> None:
         if channels is None:
             channels = [col for col in df.columns if col != "timestamp"]
+        if not channels:
+            return
 
         plotter = STFTPlotter(
             fs=self.sample_rate,
@@ -201,7 +218,6 @@ class DataPlotter:
         output_dir: Path,
         stem: str,
     ) -> List[str]:
-        """模式A：自动检测非零Ipd通道，每个通道生成独立STFT图"""
         plotter = STFTPlotter(
             fs=self.sample_rate,
             window_sec=self.window,

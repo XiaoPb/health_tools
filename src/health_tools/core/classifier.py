@@ -16,6 +16,8 @@ class DataClassifier:
         self.csv_handler = CSVHandler(chip_rule)
         self._filename_fields: Dict[str, str] = {}
         self._extracted_values: Dict[str, Any] = {}
+        self._cached_df: Optional[pd.DataFrame] = None
+        self._cached_file: Optional[Path] = None
 
     def create_structure(self, base_dir: Path) -> None:
         for parent, children in self.rule.structure.items():
@@ -114,16 +116,6 @@ class DataClassifier:
 
         return values
 
-    def _extract_data_values(self, file_path: Path) -> Dict[str, Any]:
-        values = {}
-
-        for col_def in self.rule.data_columns:
-            value = self._extract_column_value(file_path, col_def)
-            if value is not None:
-                values[col_def.name] = value
-
-        return values
-
     def _extract_column_value(self, file_path: Path, col_def: DataColumn) -> Any:
         if col_def.source == "filename":
             return self._extract_from_filename(file_path, col_def)
@@ -163,9 +155,12 @@ class DataClassifier:
 
     def _extract_from_data(self, file_path: Path, col_def: DataColumn) -> Any:
         try:
-            info, df = self.csv_handler.read(file_path)
+            if self._cached_file != file_path:
+                _, self._cached_df = self.csv_handler.read(file_path)
+                self._cached_file = file_path
 
-            if df.empty:
+            df = self._cached_df
+            if df is None or df.empty:
                 return None
 
             if col_def.column:
@@ -241,7 +236,8 @@ class DataClassifier:
     def _evaluate_condition(self, condition: str, data_values: Dict[str, Any]) -> bool:
         try:
             eval_condition = condition
-            for key, value in data_values.items():
+            for key in sorted(data_values.keys(), key=len, reverse=True):
+                value = data_values[key]
                 if isinstance(value, str):
                     eval_condition = eval_condition.replace(key, repr(value))
                 else:

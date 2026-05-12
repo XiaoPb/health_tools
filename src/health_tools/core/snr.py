@@ -30,7 +30,12 @@ class ChannelMetrics:
     max_val: float
 
 
+MIN_FILTER_SAMPLES = 15
+
+
 def highpass_filter(data: np.ndarray, cutoff: float = 0.5, fs: float = 100.0, order: int = 2) -> np.ndarray:
+    if len(data) < MIN_FILTER_SAMPLES:
+        return data
     nyq = fs / 2.0
     normalized_cutoff = cutoff / nyq
     if normalized_cutoff >= 1.0:

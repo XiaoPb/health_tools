@@ -85,12 +85,14 @@ class DataConverter:
             resolved = self._resolve_column_name(col, df)
             if resolved is None:
                 continue
-            series = df[resolved]
-            first_nonzero = series.ne(0).idxmax()
-            if series.iloc[first_nonzero] == 0:
+            series = df[resolved].reset_index(drop=True)
+            nonzero_mask = series.ne(0)
+            if not nonzero_mask.any():
                 continue
-            filled = series.iloc[first_nonzero:].replace(0, pd.NA).ffill().fillna(0)
-            df[resolved] = pd.concat([series.iloc[:first_nonzero], filled])
+            first_pos = int(nonzero_mask.idxmax())
+            filled = series.iloc[first_pos:].replace(0, pd.NA).ffill().fillna(0)
+            series.iloc[first_pos:] = filled
+            df[resolved] = series.values
         return df
 
     def _compute_column(self, formula: str, df: pd.DataFrame) -> pd.Series:

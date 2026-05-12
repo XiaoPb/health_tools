@@ -37,6 +37,9 @@ def split_by_column_value(
         return [df]
 
     dfs = []
+    if positional_indices[0] > 0:
+        dfs.append(df.iloc[: positional_indices[0]].reset_index(drop=True))
+
     for i, pos in enumerate(positional_indices):
         if i < len(positional_indices) - 1:
             end_pos = positional_indices[i + 1]

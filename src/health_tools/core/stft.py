@@ -178,16 +178,12 @@ def compute_psd(
 
 
 def normalize_per_time_column(zxx_amp: np.ndarray) -> np.ndarray:
-    """逐时间列 0-100 归一化"""
-    z_norm = zxx_amp.copy().astype(np.float32)
-    for t_idx in range(z_norm.shape[1]):
-        col = z_norm[:, t_idx]
-        col_max = np.max(col)
-        col_min = np.min(col)
-        if col_max - col_min < 1e-10:
-            continue
-        z_norm[:, t_idx] = (col - col_min) / (col_max - col_min) * 100
-    return z_norm
+    """逐时间列 0-100 归一化（向量化）"""
+    z = zxx_amp.astype(np.float32)
+    col_min = z.min(axis=0, keepdims=True)
+    col_ptp = np.ptp(z, axis=0, keepdims=True)
+    col_ptp[col_ptp < 1e-10] = 1.0
+    return (z - col_min) / col_ptp * 100
 
 
 class STFTPlotter:
@@ -248,10 +244,12 @@ class STFTPlotter:
         ax.set_ylim([freq_min, freq_max])
 
         if ref_data is not None and len(ref_data) > 0:
-            ref_times = np.arange(len(ref_data)) / self.fs
+            total_duration = times[-1] if len(times) > 0 else len(ref_data) / self.fs
+            ref_times = np.linspace(0, total_duration, len(ref_data))
             ax.plot(ref_times, ref_data, "r--", linewidth=1.5, label=ref_label)
         if algo_data is not None and len(algo_data) > 0:
-            algo_times = np.arange(len(algo_data)) / self.fs
+            total_duration = times[-1] if len(times) > 0 else len(algo_data) / self.fs
+            algo_times = np.linspace(0, total_duration, len(algo_data))
             ax.plot(algo_times, algo_data, "w-", linewidth=1.0, label="ALGO_RESULT0")
         if ref_data is not None or algo_data is not None:
             ax.legend(loc="upper right", fontsize=8)

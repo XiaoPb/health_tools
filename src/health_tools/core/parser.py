@@ -65,17 +65,15 @@ class LogParser:
         return result
 
     def parse_file(self, file_path: Path, encoding: str = "utf-8") -> Optional[pd.DataFrame]:
-        with open(file_path, "r", encoding=encoding) as f:
-            lines = f.readlines()
-
         records = []
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            record = self._extract_record(line)
-            if record:
-                records.append(record)
+        with open(file_path, "r", encoding=encoding, errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = self._extract_record(line)
+                if record:
+                    records.append(record)
 
         if records:
             df = pd.DataFrame(records)
@@ -85,20 +83,18 @@ class LogParser:
     def parse_file_multi(
         self, file_path: Path, encoding: str = "utf-8"
     ) -> Dict[str, pd.DataFrame]:
-        with open(file_path, "r", encoding=encoding) as f:
-            lines = f.readlines()
-
         records_map: Dict[str, list] = {name: [] for name in self.rule.patterns}
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            for name, pattern in self.rule.patterns.items():
-                record = self._extract_record_with_pattern(line, pattern)
-                if record:
-                    records_map[name].append(record)
-                    break
+        with open(file_path, "r", encoding=encoding, errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                for name, pattern in self.rule.patterns.items():
+                    record = self._extract_record_with_pattern(line, pattern)
+                    if record:
+                        records_map[name].append(record)
+                        break
 
         result = {}
         for name, records in records_map.items():
