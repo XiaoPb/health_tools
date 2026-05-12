@@ -57,6 +57,7 @@ class RuleLoader:
             columns=data.get("columns", []),
             description=data.get("description", ""),
             separator=data.get("separator", ","),
+            chip=data.get("chip") or data.get("target_chip"),
         )
 
     @classmethod

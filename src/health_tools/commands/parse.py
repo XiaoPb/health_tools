@@ -33,8 +33,12 @@ def parse_cmd(
     dry_run: bool,
 ) -> None:
     """log解析转CSV命令"""
+    chip_columns = None
     if rule_file:
         rule = RuleLoader.load_parse_rule(rule_file)
+        if rule.chip:
+            chip_rule = RuleLoader.load_chip_rule(rule.chip)
+            chip_columns = chip_rule.columns
     elif chip_name:
         rule = RuleLoader.load_chip_rule(chip_name)
     else:
@@ -45,13 +49,15 @@ def parse_cmd(
         console.print("[green]规则验证通过[/green]")
         console.print(f"  正则表达式: {rule.regex}")
         console.print(f"  列名: {rule.columns}")
+        if chip_columns:
+            console.print(f"  芯片列数: {len(chip_columns)}")
         return
 
     input_path_obj = Path(input_path)
     output_path_obj = Path(output_path)
 
     if input_path_obj.is_file():
-        _parse_file(input_path_obj, output_path_obj, rule, delimiter, encoding, verbose)
+        _parse_file(input_path_obj, output_path_obj, rule, chip_columns, delimiter, encoding, verbose)
     elif input_path_obj.is_dir():
         output_path_obj.mkdir(parents=True, exist_ok=True)
         files = list(input_path_obj.glob("*.log")) + list(input_path_obj.glob("*.txt"))
@@ -62,7 +68,7 @@ def parse_cmd(
         ) as progress:
             for file in progress.track(files, description="解析文件..."):
                 out_file = output_path_obj / f"{file.stem}.csv"
-                _parse_file(file, out_file, rule, delimiter, encoding, verbose)
+                _parse_file(file, out_file, rule, chip_columns, delimiter, encoding, verbose)
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
@@ -72,11 +78,12 @@ def _parse_file(
     input_file: Path,
     output_file: Path,
     rule,
+    chip_columns,
     delimiter: str,
     encoding: str,
     verbose: bool,
 ) -> None:
-    parser = LogParser(rule)
+    parser = LogParser(rule, chip_columns=chip_columns)
     try:
         df = parser.parse_file(input_file, encoding)
         if df is not None and not df.empty:

@@ -13,6 +13,7 @@ class ParseRule:
     columns: List[str]
     description: str = ""
     separator: str = ","
+    chip: Optional[str] = None
 
     def __post_init__(self):
         self.columns = expand_columns(self.columns)
