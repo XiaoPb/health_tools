@@ -102,11 +102,31 @@ def _generate_rule_template(
         for target_col in chip_rule.columns:
             column_mapping[target_col] = target_col
 
+    source_csv_config = {
+        "header_row": 1,
+        "data_start_row": 2,
+        "delimiter": ",",
+    }
+    if source_file and source_file.is_file():
+        try:
+            with open(source_file, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+            if first_line and not "," in first_line or first_line.startswith("Version"):
+                source_csv_config = {
+                    "info_row": 1,
+                    "header_row": 2,
+                    "data_start_row": 3,
+                    "delimiter": ",",
+                    "info": first_line,
+                }
+        except Exception:
+            pass
+
     template = {
         "version": "1.0",
         "description": f"转换为{chip_rule.chip}格式",
         "target_chip": chip_rule.chip,
-        "csv": chip_rule.csv,
+        "csv": source_csv_config,
         "column_mapping": column_mapping,
     }
 
