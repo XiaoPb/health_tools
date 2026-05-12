@@ -15,8 +15,8 @@ console = Console()
 @click.option("--type", "plot_type", default="both", help="图表类型: time|freq|stft|both")
 @click.option("--channels", help="指定绘制的通道（如: red,ir,green）")
 @click.option("--sample-rate", type=int, default=25, help="采样率（Hz，默认: 25）")
-@click.option("--window", type=int, default=10, help="时间窗口大小（秒，默认: 10）")
-@click.option("--overlap", type=float, default=0.5, help="窗口重叠率（0-1，默认: 0.5）")
+@click.option("--window", type=int, default=25, help="STFT窗口大小（秒，默认: 25）")
+@click.option("--overlap", type=float, default=0.96, help="窗口重叠率（0-1，默认: 0.96）")
 @click.option("--format", "fmt", default="png", help="图片格式: png|svg|pdf（默认: png）")
 @click.option("--dpi", type=int, default=150, help="图片DPI（默认: 150）")
 @click.option("--bandpass", default="0.5-4.0", help="带通滤波范围（Hz，默认: 0.5-4.0）")
@@ -149,10 +149,16 @@ def _plot_file(
                 console.print(f"[green]OK[/green] 频域图: {output_file}")
 
         if plot_type in ("stft", "both"):
-            output_file = output_dir / f"{input_file.stem}_stft.{plotter.fmt}"
-            plotter.plot_stft(df, output_file, channels, ref_column)
-            if verbose:
-                console.print(f"[green]OK[/green] 时频图: {output_file}")
+            if chip_rule and not channels:
+                out_files = plotter.plot_chip_stft(df, output_dir, input_file.stem)
+                if verbose:
+                    for f in out_files:
+                        console.print(f"[green]OK[/green] 时频图: {f}")
+            else:
+                output_file = output_dir / f"{input_file.stem}_stft.{plotter.fmt}"
+                plotter.plot_stft(df, output_file, channels, ref_column)
+                if verbose:
+                    console.print(f"[green]OK[/green] 时频图: {output_file}")
 
     except Exception as e:
         console.print(f"[red]FAIL[/red] {input_file.name}: {e}")

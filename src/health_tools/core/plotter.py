@@ -165,28 +165,65 @@ class DataPlotter:
             freq_range=self.freq_range,
         )
 
+        ref_data = None
+        if ref_column and ref_column in df.columns:
+            ref_data = pd.to_numeric(df[ref_column], errors="coerce").fillna(0).values
+
         if len(channels) == 1:
             data = pd.to_numeric(df[channels[0]], errors="coerce").dropna().values
-
-            ref_data = None
-            if ref_column and ref_column in df.columns:
-                ref_data = pd.to_numeric(df[ref_column], errors="coerce").dropna().values
-
             plotter.plot_stft(
                 data,
                 str(output_file),
                 title=f"STFT - {channels[0]}",
                 ref_data=ref_data,
+                ref_label=ref_column or "Reference",
             )
         else:
             data_dict = {}
             for channel in channels:
                 if channel in df.columns:
-                    data_dict[channel] = pd.to_numeric(df[channel], errors="coerce").dropna().values
+                    data_dict[channel] = pd.to_numeric(
+                        df[channel], errors="coerce"
+                    ).dropna().values
 
             if data_dict:
                 plotter.plot_multi_channel_stft(
                     data_dict,
                     str(output_file),
                     title="Multi-Channel STFT",
+                    ref_data=ref_data,
+                    ref_label=ref_column or "Reference",
                 )
+
+    def plot_chip_stft(
+        self,
+        df: pd.DataFrame,
+        output_dir: Path,
+        stem: str,
+    ) -> List[str]:
+        """模式A：自动检测非零Ipd通道，每个通道生成独立STFT图"""
+        plotter = STFTPlotter(
+            fs=self.sample_rate,
+            window_sec=self.window,
+            step_sec=self.window * (1 - self.overlap),
+            lowcut=self.lowcut,
+            highcut=self.highcut,
+            remove_baseline_method=self.baseline_method if self.remove_baseline_flag else None,
+            freq_bpm=self.freq_bpm,
+            freq_range=self.freq_range,
+        )
+
+        ipd_cols = [c for c in df.columns if c.startswith("Ipd")]
+        nonzero_ipd = []
+        for col in ipd_cols:
+            vals = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            if (vals != 0).any():
+                nonzero_ipd.append(col)
+
+        output_files = []
+        for channel in nonzero_ipd:
+            out_file = output_dir / f"{stem}_stft_{channel}.png"
+            plotter.plot_chip_stft(df, str(out_file), channel)
+            output_files.append(str(out_file))
+
+        return output_files

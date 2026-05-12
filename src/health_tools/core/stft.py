@@ -177,14 +177,27 @@ def compute_psd(
         return np.array([]), np.array([])
 
 
+def normalize_per_time_column(zxx_amp: np.ndarray) -> np.ndarray:
+    """逐时间列 0-100 归一化"""
+    z_norm = zxx_amp.copy().astype(np.float32)
+    for t_idx in range(z_norm.shape[1]):
+        col = z_norm[:, t_idx]
+        col_max = np.max(col)
+        col_min = np.min(col)
+        if col_max - col_min < 1e-10:
+            continue
+        z_norm[:, t_idx] = (col - col_min) / (col_max - col_min) * 100
+    return z_norm
+
+
 class STFTPlotter:
     """STFT时频图绑图器"""
 
     def __init__(
         self,
         fs: float = 25.0,
-        window_sec: float = 10.0,
-        step_sec: float = 0.5,
+        window_sec: float = 25.0,
+        step_sec: float = 1.0,
         lowcut: float = 0.5,
         highcut: float = 4.0,
         remove_baseline_method: str = "mean",
@@ -200,105 +213,156 @@ class STFTPlotter:
         self.freq_bpm = freq_bpm
         self.freq_range = freq_range
 
-    def process_data(
-        self,
-        data: np.ndarray,
-    ) -> np.ndarray:
-        """预处理数据"""
+    def process_data(self, data: np.ndarray) -> np.ndarray:
+        """预处理：去基线 + 带通滤波"""
         data = np.asarray(data, dtype=float)
-
         data = data[~np.isnan(data)]
-
         if len(data) == 0:
             return data
-
-        data = remove_baseline(data, method=self.remove_baseline_method)
-
+        if self.remove_baseline_method:
+            data = remove_baseline(data, method=self.remove_baseline_method)
         data = bandpass_filter(data, self.fs, self.lowcut, self.highcut)
-
         return data
+
+    def _compute_normalized_stft(self, data: np.ndarray):
+        """预处理 + STFT + 逐列归一化，返回 (freqs, times, normalized_zxx)"""
+        processed = self.process_data(data)
+        if len(processed) == 0:
+            return None, None, None
+        freqs, times, zxx = compute_stft(processed, self.fs, self.window_sec, self.step_sec)
+        if len(freqs) == 0:
+            return None, None, None
+        zxx_norm = normalize_per_time_column(zxx)
+        return freqs, times, zxx_norm
+
+    def _plot_subplot(self, ax, times, freqs_bpm, zxx_norm, title, ref_data=None,
+                      ref_label="REF_RESULT0", algo_data=None, cmap="viridis"):
+        """绘制单个 STFT 子图"""
+        freq_min, freq_max = self.freq_range
+        freq_mask = (freqs_bpm >= freq_min) & (freqs_bpm <= freq_max)
+        freqs_masked = freqs_bpm[freq_mask]
+        zxx_masked = zxx_norm[freq_mask, :]
+
+        ax.pcolormesh(times, freqs_masked, zxx_masked, cmap=cmap, shading="auto")
+        ax.set_ylabel(title)
+        ax.set_ylim([freq_min, freq_max])
+
+        if ref_data is not None and len(ref_data) > 0:
+            ref_times = np.arange(len(ref_data)) / self.fs
+            ax.plot(ref_times, ref_data, "r--", linewidth=1.5, label=ref_label)
+        if algo_data is not None and len(algo_data) > 0:
+            algo_times = np.arange(len(algo_data)) / self.fs
+            ax.plot(algo_times, algo_data, "w-", linewidth=1.0, label="ALGO_RESULT0")
+        if ref_data is not None or algo_data is not None:
+            ax.legend(loc="upper right", fontsize=8)
+
+    def plot_chip_stft(
+        self,
+        df,
+        output_file: str,
+        channel: str,
+        ref_columns=None,
+        dpi: int = 300,
+    ) -> None:
+        """模式A：chip自动模式，5子图（channel + ACCXYZ + CH-ACC）"""
+        import pandas as pd
+
+        if ref_columns is None:
+            ref_columns = ["REF_RESULT0", "ALGO_RESULT0"]
+
+        ch_data = pd.to_numeric(df[channel], errors="coerce").fillna(0).values
+        acc_cols = ["ACCX", "ACCY", "ACCZ"]
+        acc_data = {}
+        for col in acc_cols:
+            if col in df.columns:
+                acc_data[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).values
+
+        ref_data = None
+        if ref_columns[0] in df.columns:
+            ref_data = pd.to_numeric(df[ref_columns[0]], errors="coerce").fillna(0).values
+        algo_data = None
+        if len(ref_columns) > 1 and ref_columns[1] in df.columns:
+            algo_data = pd.to_numeric(df[ref_columns[1]], errors="coerce").fillna(0).values
+
+        results = {}
+        freqs_out, times_out = None, None
+
+        ch_result = self._compute_normalized_stft(ch_data)
+        if ch_result[0] is not None:
+            freqs_out, times_out = ch_result[0], ch_result[1]
+            results[channel] = ch_result[2]
+
+        acc_stft_list = []
+        for col in acc_cols:
+            if col in acc_data:
+                r = self._compute_normalized_stft(acc_data[col])
+                if r[0] is not None:
+                    results[col] = r[2]
+                    acc_stft_list.append(r[2])
+                    if freqs_out is None:
+                        freqs_out, times_out = r[0], r[1]
+
+        if freqs_out is None:
+            return
+
+        if acc_stft_list and channel in results:
+            acc_combined = np.mean(acc_stft_list, axis=0)
+            acc_combined_norm = normalize_per_time_column(acc_combined)
+            ch_minus_acc = results[channel] - acc_combined_norm
+            ch_minus_acc[ch_minus_acc < 0] = 0
+            results[f"{channel} - ACC"] = normalize_per_time_column(ch_minus_acc)
+
+        freqs_bpm = freqs_out * 60 if self.freq_bpm else freqs_out
+        titles = [channel] + acc_cols + [f"{channel} - ACC"]
+        n_plots = len([t for t in titles if t in results])
+
+        fig, axes = plt.subplots(n_plots, 1, figsize=(18, 4.4 * n_plots))
+        if n_plots == 1:
+            axes = [axes]
+
+        idx = 0
+        for title in titles:
+            if title not in results:
+                continue
+            self._plot_subplot(
+                axes[idx], times_out, freqs_bpm, results[title], title,
+                ref_data=ref_data, algo_data=algo_data,
+            )
+            idx += 1
+
+        axes[-1].set_xlabel("Time (s)")
+        plt.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
+        plt.savefig(output_file, dpi=dpi)
+        plt.close()
 
     def plot_stft(
         self,
         data: np.ndarray,
         output_file: Optional[str] = None,
         title: str = "STFT Spectrogram",
-        cmap: str = "jet",
-        figsize: Tuple[float, float] = (12, 6),
-        dpi: int = 150,
+        cmap: str = "viridis",
+        figsize: Tuple[float, float] = (18, 6),
+        dpi: int = 300,
         ref_data: Optional[np.ndarray] = None,
         ref_label: str = "Reference",
     ) -> Optional[plt.Figure]:
-        """
-        绑制STFT时频图
-
-        Args:
-            data: 输入数据
-            output_file: 输出文件路径
-            title: 图表标题
-            cmap: 颜色映射
-            figsize: 图表大小
-            dpi: DPI
-            ref_data: 参考数据
-            ref_label: 参考数据标签
-
-        Returns:
-            Figure对象（如果未保存文件）
-        """
-        data = self.process_data(data)
-
-        if len(data) == 0:
+        """单通道 STFT（模式B单通道）"""
+        freqs, times, zxx_norm = self._compute_normalized_stft(data)
+        if freqs is None:
             return None
 
-        frequencies, times, Zxx = compute_stft(data, self.fs, self.window_sec, self.step_sec)
-
-        if len(frequencies) == 0:
-            return None
-
-        if self.freq_bpm:
-            frequencies = frequencies * 60
-            freq_min, freq_max = self.freq_range
-        else:
-            freq_min = self.lowcut
-            freq_max = self.highcut
-
-        freq_mask = (frequencies >= freq_min) & (frequencies <= freq_max)
-        frequencies = frequencies[freq_mask]
-        Zxx = Zxx[freq_mask, :]
-
-        if Zxx.size == 0:
-            return None
-
-        Zxx_db = 10 * np.log10(Zxx + 1e-10)
+        freqs_bpm = freqs * 60 if self.freq_bpm else freqs
 
         fig, ax = plt.subplots(figsize=figsize)
-
-        im = ax.pcolormesh(times, frequencies, Zxx_db, shading="gouraud", cmap=cmap)
-
-        if ref_data is not None:
-            ref_data = self.process_data(ref_data)
-            if len(ref_data) == len(data):
-                ref_times = np.arange(len(ref_data)) / self.fs
-                if self.freq_bpm:
-                    ref_data = (
-                        ref_data * 60 / np.max(ref_data) * (freq_max - freq_min) / 2
-                        + (freq_max + freq_min) / 2
-                    )
-                ax.plot(ref_times, ref_data, "w-", linewidth=1, label=ref_label, alpha=0.7)
-
-        ax.set_ylabel("Frequency (BPM)" if self.freq_bpm else "Frequency (Hz)")
+        self._plot_subplot(ax, times, freqs_bpm, zxx_norm, title,
+                           ref_data=ref_data, ref_label=ref_label, cmap=cmap)
         ax.set_xlabel("Time (s)")
-        ax.set_title(title)
-
-        plt.colorbar(im, ax=ax, label="Power (dB)")
-
         plt.tight_layout()
 
         if output_file:
             plt.savefig(output_file, dpi=dpi)
             plt.close()
             return None
-
         return fig
 
     def plot_multi_channel_stft(
@@ -306,80 +370,37 @@ class STFTPlotter:
         data_dict: dict,
         output_file: Optional[str] = None,
         title: str = "Multi-Channel STFT",
-        cmap: str = "jet",
-        figsize: Tuple[float, float] = (12, 8),
-        dpi: int = 150,
-        normalize: bool = True,
+        cmap: str = "viridis",
+        figsize: Tuple[float, float] = (18, 6),
+        dpi: int = 300,
+        ref_data: Optional[np.ndarray] = None,
+        ref_label: str = "Reference",
     ) -> Optional[plt.Figure]:
-        """
-        绑制多通道STFT时频图
-
-        Args:
-            data_dict: {通道名: 数据} 字典
-            output_file: 输出文件路径
-            title: 图表标题
-            cmap: 颜色映射
-            figsize: 图表大小
-            dpi: DPI
-            normalize: 是否归一化
-
-        Returns:
-            Figure对象（如果未保存文件）
-        """
+        """多通道 STFT（模式B多通道）"""
         n_channels = len(data_dict)
-
         if n_channels == 0:
             return None
 
         fig, axes = plt.subplots(
-            n_channels, 1, figsize=(figsize[0], figsize[1] * n_channels / 2), sharex=True
+            n_channels, 1, figsize=(figsize[0], 4.4 * n_channels), sharex=True
         )
-
         if n_channels == 1:
             axes = [axes]
 
         for ax, (channel_name, data) in zip(axes, data_dict.items()):
-            data = self.process_data(data)
-
-            if len(data) == 0:
+            freqs, times, zxx_norm = self._compute_normalized_stft(data)
+            if freqs is None:
                 continue
-
-            frequencies, times, Zxx = compute_stft(data, self.fs, self.window_sec, self.step_sec)
-
-            if len(frequencies) == 0:
-                continue
-
-            if self.freq_bpm:
-                frequencies = frequencies * 60
-                freq_min, freq_max = self.freq_range
-            else:
-                freq_min = self.lowcut
-                freq_max = self.highcut
-
-            freq_mask = (frequencies >= freq_min) & (frequencies <= freq_max)
-            frequencies = frequencies[freq_mask]
-            Zxx = Zxx[freq_mask, :]
-
-            if Zxx.size == 0:
-                continue
-
-            if normalize:
-                Zxx = Zxx / (np.max(Zxx) + 1e-10)
-
-            Zxx_db = 10 * np.log10(Zxx + 1e-10)
-
-            ax.pcolormesh(times, frequencies, Zxx_db, shading="gouraud", cmap=cmap)
-            ax.set_ylabel(f"{channel_name}\n(BPM)" if self.freq_bpm else f"{channel_name}\n(Hz)")
-            ax.set_title(f"{channel_name}")
+            freqs_bpm = freqs * 60 if self.freq_bpm else freqs
+            self._plot_subplot(ax, times, freqs_bpm, zxx_norm, channel_name,
+                               ref_data=ref_data, ref_label=ref_label, cmap=cmap)
 
         axes[-1].set_xlabel("Time (s)")
-
         plt.suptitle(title)
-        plt.tight_layout()
+        plt.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
 
         if output_file:
             plt.savefig(output_file, dpi=dpi)
             plt.close()
             return None
-
         return fig
