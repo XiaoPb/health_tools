@@ -1,5 +1,6 @@
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import click
 import pandas as pd
@@ -13,11 +14,67 @@ from health_tools.utils.csv_handler import CSVHandler
 
 console = Console()
 
+_ACC_MAP = {"x": "0", "y": "1", "z": "2"}
+_ALIAS_MAP = {
+    "frame_cnt": "FRAME_ID",
+    "frame_id": "FRAME_ID",
+    "hba_out": "ALGO_RESULT0",
+}
+
+
+def _normalize_col(name: str) -> str:
+    """将源列名归一化为可比较的形式：小写，去掉 [] 和 _pa 后缀，[n] → n，去下划线"""
+    s = name.lower().strip()
+    s = s.replace("_pa", "")
+    s = re.sub(r"\[(\d+)\]", r"\1", s)
+    s = s.replace("_", "")
+    return s
+
+
+def _build_source_index(source_columns: List[str]) -> Dict[str, str]:
+    """构建归一化源列名 → 原始源列名的映射"""
+    index: Dict[str, str] = {}
+    for col in source_columns:
+        norm = _normalize_col(col)
+        index[norm] = col
+        if col.lower() in _ALIAS_MAP:
+            index[_ALIAS_MAP[col.lower()].lower()] = col
+    return index
+
+
+def _match_target_col(target_col: str, source_index: Dict[str, str]) -> Optional[str]:
+    """尝试将目标列匹配到源列"""
+    target_lower = target_col.lower()
+    if target_lower in source_index:
+        return source_index[target_lower]
+
+    # ACCX/ACCY/ACCZ → acc0/acc1/acc2
+    m = re.match(r"acc([xyz])$", target_lower)
+    if m:
+        key = f"acc{_ACC_MAP[m.group(1)]}"
+        if key in source_index:
+            return source_index[key]
+
+    # GYRO_X/Y/Z → gyro0/gyro1/gyro2
+    m = re.match(r"gyro_([xyz])$", target_lower)
+    if m:
+        key = f"gyro{_ACC_MAP[m.group(1)]}"
+        if key in source_index:
+            return source_index[key]
+
+    # Ipd0 → ipd0, Rawdata0 → rawdata0, AGC_INFO_CH0 → agc_info0
+    norm_target = re.sub(r"_ch(\d+)$", r"\1", target_lower)
+    norm_target = re.sub(r"_", "", norm_target)
+    if norm_target in source_index:
+        return source_index[norm_target]
+
+    return None
+
 
 def _generate_rule_template(
     chip_rule: ChipRule, output_path: Path, source_file: Optional[Path] = None
 ) -> None:
-    source_columns = []
+    source_columns: List[str] = []
     if source_file and source_file.is_file():
         try:
             df = pd.read_csv(source_file, nrows=0)
@@ -30,14 +87,14 @@ def _generate_rule_template(
             pass
 
     column_mapping = {}
-    source_lower_map = {col.lower(): col for col in source_columns}
-    for target_col in chip_rule.columns:
-        if target_col.lower() in source_lower_map:
-            column_mapping[target_col] = source_lower_map[target_col.lower()]
-        elif source_columns and target_col in source_columns:
+    if source_columns:
+        source_index = _build_source_index(source_columns)
+        for target_col in chip_rule.columns:
+            matched = _match_target_col(target_col, source_index)
+            column_mapping[target_col] = matched if matched else "Unknown"
+    else:
+        for target_col in chip_rule.columns:
             column_mapping[target_col] = target_col
-        else:
-            column_mapping[target_col] = "Unknown" if source_columns else target_col
 
     template = {
         "version": "1.0",
