@@ -1,3 +1,1 @@
-from health_tools.commands import parse, plot, classify, convert, info, validate, split, process
-
-__all__ = ["parse", "plot", "classify", "convert", "info", "validate", "split", "process"]
+# 命令模块通过 LazyGroup 按需加载，无需在此导入

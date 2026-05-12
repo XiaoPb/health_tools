@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import click
 import yaml
 
 from health_tools.models.rules import (
@@ -55,12 +56,22 @@ class RuleLoader:
             regex=data.get("regex", ""),
             columns=data.get("columns", []),
             description=data.get("description", ""),
+            separator=data.get("separator", ","),
         )
 
     @classmethod
     def load_chip_rule(cls, chip_name: str) -> ChipRule:
         rule_file = f"{chip_name}.yaml"
         rule_path = cls._resolve_rule_path(rule_file, "chip")
+
+        if not rule_path.exists():
+            chip_dir = cls.get_builtin_rules_path() / "chip"
+            available = [f.stem for f in chip_dir.glob("*.yaml")] if chip_dir.exists() else []
+            supported = ", ".join(available) if available else "无"
+            raise click.ClickException(
+                f"不支持的芯片型号: {chip_name}。当前支持: {supported}"
+            )
+
         data = cls._load_yaml(rule_path)
 
         return ChipRule(

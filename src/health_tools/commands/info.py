@@ -8,6 +8,8 @@ from rich.table import Table
 
 console = Console()
 
+console = Console()
+
 
 @click.command()
 @click.argument("target", required=True)

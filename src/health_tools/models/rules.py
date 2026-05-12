@@ -12,6 +12,7 @@ class ParseRule:
     regex: str
     columns: List[str]
     description: str = ""
+    separator: str = ","
 
     def __post_init__(self):
         self.columns = expand_columns(self.columns)

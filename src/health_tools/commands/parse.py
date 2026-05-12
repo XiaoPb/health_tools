@@ -80,11 +80,12 @@ def _parse_file(
     try:
         df = parser.parse_file(input_file, encoding)
         if df is not None and not df.empty:
+            output_file.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(output_file, index=False, sep=delimiter)
             if verbose:
-                console.print(f"[green]✓[/green] {input_file.name} -> {output_file}")
+                console.print(f"[green]OK[/green] {input_file.name} -> {output_file} ({len(df)}行)")
         else:
             if verbose:
-                console.print(f"[yellow]![/yellow] {input_file.name}: 无有效数据")
+                console.print(f"[yellow]WARN[/yellow] {input_file.name}: 无有效数据")
     except Exception as e:
-        console.print(f"[red]✗[/red] {input_file.name}: {e}")
+        console.print(f"[red]FAIL[/red] {input_file.name}: {e}")

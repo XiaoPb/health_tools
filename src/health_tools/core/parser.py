@@ -10,6 +10,27 @@ class LogParser:
     def __init__(self, rule: ParseRule):
         self.rule = rule
 
+    def _extract_record(self, line: str) -> Optional[dict]:
+        match = self.rule._compiled_regex.search(line)
+        if not match:
+            return None
+
+        groups = match.groups()
+        num_columns = len(self.rule.columns)
+
+        if len(groups) == num_columns:
+            return dict(zip(self.rule.columns, groups))
+
+        if len(groups) == 1 and num_columns > 1:
+            raw = groups[0].strip().rstrip(self.rule.separator)
+            parts = [p.strip() for p in raw.split(self.rule.separator)]
+            if len(parts) == num_columns:
+                return dict(zip(self.rule.columns, parts))
+            if len(parts) > num_columns:
+                return dict(zip(self.rule.columns, parts[:num_columns]))
+
+        return None
+
     def parse_file(self, file_path: Path, encoding: str = "utf-8") -> Optional[pd.DataFrame]:
         with open(file_path, "r", encoding=encoding) as f:
             lines = f.readlines()
@@ -19,13 +40,9 @@ class LogParser:
             line = line.strip()
             if not line:
                 continue
-
-            match = self.rule._compiled_regex.match(line)
-            if match:
-                groups = match.groups()
-                if len(groups) == len(self.rule.columns):
-                    record = dict(zip(self.rule.columns, groups))
-                    records.append(record)
+            record = self._extract_record(line)
+            if record:
+                records.append(record)
 
         if records:
             return pd.DataFrame(records)
@@ -39,13 +56,9 @@ class LogParser:
             line = line.strip()
             if not line:
                 continue
-
-            match = self.rule._compiled_regex.match(line)
-            if match:
-                groups = match.groups()
-                if len(groups) == len(self.rule.columns):
-                    record = dict(zip(self.rule.columns, groups))
-                    records.append(record)
+            record = self._extract_record(line)
+            if record:
+                records.append(record)
 
         if records:
             return pd.DataFrame(records)

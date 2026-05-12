@@ -8,9 +8,30 @@ from rich.console import Console
 console = Console()
 
 
+def _read_csv_with_config(file_path: Path, csv_config: Optional[dict]) -> pd.DataFrame:
+    if not csv_config:
+        return pd.read_csv(file_path)
+
+    header_row = csv_config.get("header_row", 1) - 1
+    data_start_row = csv_config.get("data_start_row", 2) - 1
+    delimiter = csv_config.get("delimiter", ",")
+
+    skip_between = data_start_row - header_row - 1
+    skiprows = list(range(1, skip_between + 1)) if skip_between > 0 else None
+
+    return pd.read_csv(
+        file_path,
+        header=header_row,
+        skiprows=skiprows,
+        delimiter=delimiter,
+    )
+
+
 @click.command()
 @click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-o", "--output", "output_path", required=True, help="输出图片目录")
+@click.option("-c", "--chip", "chip_name", help="芯片类型（指定CSV格式）")
+@click.option("-r", "--rule", "rule_file", help="转换规则文件（指定CSV格式）")
 @click.option("--type", "plot_type", default="both", help="图表类型: time|freq|stft|both")
 @click.option("--channels", help="指定绘制的通道（如: red,ir,green）")
 @click.option("--sample-rate", type=int, default=25, help="采样率（Hz，默认: 25）")
@@ -31,6 +52,8 @@ def plot_cmd(
     ctx: click.Context,
     input_path: str,
     output_path: str,
+    chip_name: Optional[str],
+    rule_file: Optional[str],
     plot_type: str,
     channels: Optional[str],
     sample_rate: int,
@@ -49,6 +72,15 @@ def plot_cmd(
 ) -> None:
     """绘制PPG数据的时域/频域/时频图"""
     from health_tools.core.plotter import DataPlotter
+    from health_tools.rules.loader import RuleLoader
+
+    csv_config = None
+    if chip_name:
+        chip_rule = RuleLoader.load_chip_rule(chip_name)
+        csv_config = chip_rule.csv
+    elif rule_file:
+        convert_rule = RuleLoader.load_convert_rule(rule_file)
+        csv_config = convert_rule.csv
 
     input_path_obj = Path(input_path)
     output_path_obj = Path(output_path)
@@ -84,6 +116,7 @@ def plot_cmd(
             ref_column,
             no_show,
             verbose,
+            csv_config,
         )
     elif input_path_obj.is_dir():
         files = list(input_path_obj.glob("*.csv"))
@@ -97,6 +130,7 @@ def plot_cmd(
                 ref_column,
                 no_show,
                 verbose,
+                csv_config,
             )
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
@@ -112,27 +146,28 @@ def _plot_file(
     ref_column: Optional[str],
     no_show: bool,
     verbose: bool,
+    csv_config: Optional[dict] = None,
 ) -> None:
     try:
-        df = pd.read_csv(input_file)
+        df = _read_csv_with_config(input_file, csv_config)
 
         if plot_type in ("time", "both"):
             output_file = output_dir / f"{input_file.stem}_time.{plotter.fmt}"
             plotter.plot_time(df, output_file, channels)
             if verbose:
-                console.print(f"[green]✓[/green] 时域图: {output_file}")
+                console.print(f"[green]OK[/green] 时域图: {output_file}")
 
         if plot_type in ("freq", "both"):
             output_file = output_dir / f"{input_file.stem}_freq.{plotter.fmt}"
             plotter.plot_freq(df, output_file, channels)
             if verbose:
-                console.print(f"[green]✓[/green] 频域图: {output_file}")
+                console.print(f"[green]OK[/green] 频域图: {output_file}")
 
         if plot_type in ("stft", "both"):
             output_file = output_dir / f"{input_file.stem}_stft.{plotter.fmt}"
             plotter.plot_stft(df, output_file, channels, ref_column)
             if verbose:
-                console.print(f"[green]✓[/green] 时频图: {output_file}")
+                console.print(f"[green]OK[/green] 时频图: {output_file}")
 
     except Exception as e:
-        console.print(f"[red]✗[/red] {input_file.name}: {e}")
+        console.print(f"[red]FAIL[/red] {input_file.name}: {e}")
