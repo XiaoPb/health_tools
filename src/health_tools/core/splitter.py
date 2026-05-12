@@ -30,18 +30,19 @@ def split_by_column_value(
     else:
         col_data = df[column]
 
-    split_indices = col_data[col_data == value].index.tolist()
+    split_positions = col_data[col_data == value].index
+    positional_indices = [df.index.get_loc(idx) for idx in split_positions]
 
-    if not split_indices:
+    if not positional_indices:
         return [df]
 
     dfs = []
-    for i, start_idx in enumerate(split_indices):
-        if i < len(split_indices) - 1:
-            end_idx = split_indices[i + 1]
-            dfs.append(df.loc[start_idx : end_idx - 1].reset_index(drop=True))
+    for i, pos in enumerate(positional_indices):
+        if i < len(positional_indices) - 1:
+            end_pos = positional_indices[i + 1]
+            dfs.append(df.iloc[pos:end_pos].reset_index(drop=True))
         else:
-            dfs.append(df.loc[start_idx:].reset_index(drop=True))
+            dfs.append(df.iloc[pos:].reset_index(drop=True))
 
     return dfs
 

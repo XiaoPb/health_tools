@@ -126,8 +126,11 @@ def classify_cmd(
                     try:
                         info, df = csv_handler.read(target_path)
                         accuracy_calc.add_file_result(category, df)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        if verbose:
+                            console.print(
+                                f"[yellow]WARN[/yellow] 准确率计算跳过 {file.name}: {e}"
+                            )
 
                 if verbose:
                     console.print(f"[green]✓[/green] {file.name} -> {category}")

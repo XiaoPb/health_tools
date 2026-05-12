@@ -14,7 +14,7 @@ def parallel_process(
     show_progress: bool = True,
 ) -> List[Any]:
     """
-    多线程并行处理
+    多线程并行处理（保持输入顺序）
 
     Args:
         func: 处理函数
@@ -24,12 +24,12 @@ def parallel_process(
         show_progress: 是否显示进度条
 
     Returns:
-        处理结果列表
+        处理结果列表（与输入顺序一致）
     """
-    results = []
+    results: List[Any] = [None] * len(items)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(func, item): item for item in items}
+        futures = {executor.submit(func, item): i for i, item in enumerate(items)}
 
         if show_progress:
             futures_iter = tqdm(
@@ -41,12 +41,11 @@ def parallel_process(
             futures_iter = as_completed(futures)
 
         for future in futures_iter:
+            idx = futures[future]
             try:
-                result = future.result()
-                results.append(result)
+                results[idx] = future.result()
             except Exception as e:
-                item = futures[future]
-                results.append({"error": str(e), "item": str(item)})
+                results[idx] = {"error": str(e), "item": str(items[idx])}
 
     return results
 

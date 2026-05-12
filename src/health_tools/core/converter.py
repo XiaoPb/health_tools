@@ -85,21 +85,12 @@ class DataConverter:
             resolved = self._resolve_column_name(col, df)
             if resolved is None:
                 continue
-            values = df[resolved].values.copy()
-            first_nonzero_idx = None
-            for i, v in enumerate(values):
-                if v != 0:
-                    first_nonzero_idx = i
-                    break
-            if first_nonzero_idx is None:
+            series = df[resolved]
+            first_nonzero = series.ne(0).idxmax()
+            if series.iloc[first_nonzero] == 0:
                 continue
-            last_nonzero = values[first_nonzero_idx]
-            for i in range(first_nonzero_idx + 1, len(values)):
-                if values[i] == 0:
-                    values[i] = last_nonzero
-                else:
-                    last_nonzero = values[i]
-            df[resolved] = values
+            filled = series.iloc[first_nonzero:].replace(0, pd.NA).ffill().fillna(0)
+            df[resolved] = pd.concat([series.iloc[:first_nonzero], filled])
         return df
 
     def _compute_column(self, formula: str, df: pd.DataFrame) -> pd.Series:
@@ -130,7 +121,10 @@ class DataConverter:
                 elif current_op == "*":
                     result = result * value
                 elif current_op == "/":
-                    result = result / value.replace(0, 1)
+                    if isinstance(value, pd.Series):
+                        result = result / value.replace(0, 1)
+                    else:
+                        result = result / (value if value != 0 else 1)
 
             return result if result is not None else pd.Series([0] * len(df))
         except Exception:

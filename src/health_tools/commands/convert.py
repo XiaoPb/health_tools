@@ -111,7 +111,7 @@ def _generate_rule_template(
         try:
             with open(source_file, "r", encoding="utf-8") as f:
                 first_line = f.readline().strip()
-            if first_line and not "," in first_line or first_line.startswith("Version"):
+            if first_line and ("," not in first_line or first_line.startswith("Version")):
                 source_csv_config = {
                     "info_row": 1,
                     "header_row": 2,

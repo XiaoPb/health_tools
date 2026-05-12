@@ -98,6 +98,7 @@ class LogParser:
                 record = self._extract_record_with_pattern(line, pattern)
                 if record:
                     records_map[name].append(record)
+                    break
 
         result = {}
         for name, records in records_map.items():

@@ -1,6 +1,5 @@
 """统一CSV读写模块"""
 
-from io import StringIO
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
@@ -35,14 +34,10 @@ class CSVHandler:
 
         if auto_detect_encoding:
             encoding = detect_file_encoding(file_path)
+            if encoding and encoding.lower() == "ascii":
+                encoding = "utf-8"
         else:
             encoding = self.chip_rule.encoding if self.chip_rule else "utf-8"
-
-        with open(file_path, "r", encoding=encoding) as f:
-            lines = f.readlines()
-
-        if not lines:
-            return "", pd.DataFrame()
 
         info_row = self.chip_rule.info_row if self.chip_rule else 0
         header_row = self.chip_rule.header_row if self.chip_rule else 1
@@ -50,32 +45,41 @@ class CSVHandler:
         delimiter = self.chip_rule.delimiter if self.chip_rule else ","
 
         info = ""
-        if info_row > 0 and info_row <= len(lines):
-            info = lines[info_row - 1].strip()
+        if info_row > 0:
+            with open(file_path, "r", encoding=encoding) as f:
+                for i, line in enumerate(f, 1):
+                    if i == info_row:
+                        info = line.strip()
+                        break
 
-        header = None
-        if header_row > 0 and header_row <= len(lines):
-            header = [h.strip() for h in lines[header_row - 1].strip().split(delimiter)]
+        skiprows = list(range(data_start_row - 1)) if data_start_row > 1 else None
+        header_idx = header_row - 1 if header_row > 0 else None
 
-        data_start_idx = data_start_row - 1 if data_start_row > 0 else 0
-        data_lines = lines[data_start_idx:]
-
-        if not data_lines:
-            return info, pd.DataFrame()
-
-        if header:
+        if header_idx is not None and skiprows:
+            skiprows = [r for r in skiprows if r != header_idx]
             df = pd.read_csv(
-                StringIO("".join(data_lines)),
-                header=None,
-                names=header,
+                file_path,
+                header=0,
+                skiprows=skiprows if skiprows else None,
                 delimiter=delimiter,
+                encoding=encoding,
+                low_memory=False,
+            )
+        elif header_idx is not None:
+            df = pd.read_csv(
+                file_path,
+                header=header_idx,
+                delimiter=delimiter,
+                encoding=encoding,
                 low_memory=False,
             )
         else:
             df = pd.read_csv(
-                StringIO("".join(data_lines)),
+                file_path,
                 header=None,
+                skiprows=data_start_row - 1 if data_start_row > 1 else None,
                 delimiter=delimiter,
+                encoding=encoding,
                 low_memory=False,
             )
 

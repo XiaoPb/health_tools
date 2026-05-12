@@ -247,7 +247,12 @@ class DataClassifier:
                 else:
                     eval_condition = eval_condition.replace(key, str(value))
 
-            return bool(eval(eval_condition))
+            code = compile(eval_condition, "<condition>", "eval")
+            allowed_names = {"True", "False", "None"}
+            for name in code.co_names:
+                if name not in allowed_names:
+                    return False
+            return bool(eval(code, {"__builtins__": {}}, {}))
         except Exception:
             return False
 
