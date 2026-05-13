@@ -20,25 +20,30 @@ console = Console()
 
 @click.command()
 @click.option("--init", "do_init", is_flag=True, help="初始化用户配置目录")
+@click.option("--force", "do_force", is_flag=True, help="强制更新内置规则文件（覆盖已有）")
 @click.option("--show", "do_show", is_flag=True, help="显示当前配置")
 @click.option("--rules-dir", "rules_dir", help="设置规则目录路径")
 @click.pass_context
 def config_cmd(
     ctx: click.Context,
     do_init: bool,
+    do_force: bool,
     do_show: bool,
     rules_dir: Optional[str],
 ) -> None:
     """全局配置管理"""
-    if do_init:
+    if do_init or do_force:
         path = init_config_dir()
         console.print(f"[green]OK[/green] 配置目录已初始化: {path}")
         console.print(f"  规则目录: {DEFAULT_RULES_DIR}")
 
         from health_tools.config import sync_builtin_rules
 
-        count = sync_builtin_rules()
-        console.print(f"  已同步 {count} 个内置规则文件到用户目录")
+        count = sync_builtin_rules(force=do_force)
+        if do_force:
+            console.print(f"  已强制更新 {count} 个内置规则文件")
+        else:
+            console.print(f"  已同步 {count} 个内置规则文件到用户目录")
         console.print("  子目录: chip/ parse/ classify/ convert/ evaluate/")
         return
 

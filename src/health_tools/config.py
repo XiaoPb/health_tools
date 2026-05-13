@@ -55,12 +55,15 @@ def init_config_dir() -> Path:
         (DEFAULT_RULES_DIR / subdir).mkdir(parents=True, exist_ok=True)
     if not CONFIG_FILE.exists():
         save_config({"rules_dir": str(DEFAULT_RULES_DIR)})
-    sync_builtin_rules()
     return CONFIG_DIR
 
 
-def sync_builtin_rules() -> int:
-    """将内置规则文件同步到用户规则目录（不覆盖已存在的文件）"""
+def sync_builtin_rules(force: bool = False) -> int:
+    """将内置规则文件同步到用户规则目录。
+
+    force=False: 仅复制不存在的文件
+    force=True: 强制覆盖所有内置规则文件
+    """
     builtin_path = _get_builtin_rules_path()
     if not builtin_path.exists():
         return 0
@@ -74,7 +77,7 @@ def sync_builtin_rules() -> int:
         dst_dir.mkdir(parents=True, exist_ok=True)
         for src_file in src_dir.glob("*.yaml"):
             dst_file = dst_dir / src_file.name
-            if not dst_file.exists():
+            if force or not dst_file.exists():
                 shutil.copy2(src_file, dst_file)
                 count += 1
     return count
