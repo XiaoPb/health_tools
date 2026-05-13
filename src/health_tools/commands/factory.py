@@ -148,10 +148,18 @@ def factory_cmd(
         result_df = calculator.to_dataframe(results, file_name=input_p.name)
 
     if output_path:
-        out_file = Path(output_path)
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        result_df.to_csv(out_file, index=False)
-        console.print(f"[green]OK[/green] 结果已保存: {out_file}")
+        out_p = Path(output_path)
+        if out_p.is_dir() or (not out_p.suffix and not out_p.exists()):
+            out_p.mkdir(parents=True, exist_ok=True)
+            out_file = out_p / f"factory_{input_p.stem}.csv"
+        else:
+            out_file = out_p
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        out_file = input_p.parent / f"factory_{input_p.stem}.csv"
+
+    result_df.to_csv(out_file, index=False)
+    console.print(f"[green]OK[/green] 结果已保存: {out_file}")
 
     table = Table(title="SNR/CTR/Noise 计算结果")
     for col in result_df.columns:
