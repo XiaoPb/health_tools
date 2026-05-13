@@ -95,7 +95,10 @@ class ChipInfoExtractor:
         return None
 
     def extract_gain(self, df: pd.DataFrame, channel_name: str) -> Optional[float]:
-        """从数据中提取通道对应的增益值（TIA电阻 KΩ）"""
+        """从数据中提取通道对应的增益值（TIA电阻 KΩ）
+
+        source 列全为 0 时返回 None（数据无效）。
+        """
         gain_cfg = self.chip_info.get("gain")
         if not gain_cfg or gain_cfg.get("optional"):
             return None
@@ -111,7 +114,7 @@ class ChipInfoExtractor:
             return None
 
         values = pd.to_numeric(df[col], errors="coerce").dropna()
-        if len(values) == 0:
+        if len(values) == 0 or (values == 0).all():
             return None
 
         median_val = int(values.median())
@@ -151,7 +154,7 @@ class ChipInfoExtractor:
             return None
 
         values = pd.to_numeric(df[col], errors="coerce").dropna()
-        if len(values) == 0:
+        if len(values) == 0 or (values == 0).all():
             return None
 
         median_val = int(values.median())
@@ -180,7 +183,7 @@ class ChipInfoExtractor:
                 continue
 
             values = pd.to_numeric(df[col], errors="coerce").dropna()
-            if len(values) == 0:
+            if len(values) == 0 or (values == 0).all():
                 continue
 
             median_val = int(values.median())
