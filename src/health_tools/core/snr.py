@@ -221,13 +221,30 @@ class SNRCalculator:
 
         return noise_raw, noise
 
-    def calculate_ctr(self, stable_data: np.ndarray, current: Optional[float] = None) -> float:
-        """CTR = Ipd_mean / Iled (nA/mA)"""
+    def calculate_ctr(
+        self,
+        stable_data: np.ndarray,
+        current: Optional[float] = None,
+        gain: Optional[float] = None,
+        adc_full_scale: float = 8388608.0,
+        adc_offset: float = 0.0,
+    ) -> float:
+        """CTR (nA/mA) = Ipd / Iled
+
+        Ipd (nA) = RAWDATA_TO_UV(mean) * 1000 / (2 * RF)
+        RAWDATA_TO_UV(x) = (x - ADC_OFFSET) * 1.8 * 1e6 / ADC_FULL_SCALE
+        RF = gain (KΩ)
+        """
+        rf = gain if gain is not None else self.gain
+        if rf is None or rf <= 0:
+            return 0.0
         iled = current if current is not None else self.current
         if iled is None or iled <= 0:
             return 0.0
-        ipd_mean = float(np.mean(stable_data))
-        return ipd_mean / iled
+        mean_val = float(np.mean(stable_data))
+        uv = (mean_val - adc_offset) * 1.8 * 1_000_000.0 / adc_full_scale
+        ipd_nA = uv * 1000.0 / (2.0 * rf)
+        return ipd_nA / iled
 
     def calculate_channel(
         self,
@@ -235,6 +252,8 @@ class SNRCalculator:
         channel_name: str,
         ch_gain: Optional[float] = None,
         ch_current: Optional[float] = None,
+        adc_full_scale: float = 8388608.0,
+        adc_offset: float = 0.0,
     ) -> Optional[ChannelMetrics]:
         values = pd.to_numeric(data, errors="coerce").dropna().values.astype(float)
         if len(values) == 0:
@@ -251,7 +270,13 @@ class SNRCalculator:
 
         snr_raw, snr = self.calculate_snr(stable_data)
         noise_raw, noise = self.calculate_noise(stable_data)
-        ctr = self.calculate_ctr(stable_data, current=ch_current)
+        ctr = self.calculate_ctr(
+            stable_data,
+            current=ch_current,
+            gain=ch_gain,
+            adc_full_scale=adc_full_scale,
+            adc_offset=adc_offset,
+        )
 
         return ChannelMetrics(
             channel=channel_name,
@@ -273,6 +298,8 @@ class SNRCalculator:
         df: pd.DataFrame,
         channels: Optional[List[str]] = None,
         extractor: Optional["ChipInfoExtractor"] = None,
+        adc_full_scale: float = 8388608.0,
+        adc_offset: float = 0.0,
     ) -> List[ChannelMetrics]:
         if channels is None:
             channels = [
@@ -294,7 +321,14 @@ class SNRCalculator:
             if extractor and self.current is None:
                 ch_current = extractor.extract_current(df, ch)
 
-            metrics = self.calculate_channel(df[ch], ch, ch_gain=ch_gain, ch_current=ch_current)
+            metrics = self.calculate_channel(
+                df[ch],
+                ch,
+                ch_gain=ch_gain,
+                ch_current=ch_current,
+                adc_full_scale=adc_full_scale,
+                adc_offset=adc_offset,
+            )
             if metrics is not None:
                 results.append(metrics)
 

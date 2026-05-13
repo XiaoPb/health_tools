@@ -47,6 +47,9 @@ gain_tia_map:
     6: 1000
 
 chip_info:
+  adc_full_scale: 8388608
+  adc_offset: 0
+
   gain:
     source: "AGC_INFO_CH{0-31}"
     bits: "[3:0]"

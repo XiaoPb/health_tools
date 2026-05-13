@@ -97,8 +97,12 @@ def factory_cmd(
     channel_list = channels.split(",") if channels else None
 
     extractor = None
+    adc_full_scale = 8388608.0
+    adc_offset = 0.0
     if chip_rule and chip_rule.chip_info:
         extractor = ChipInfoExtractor(chip_rule.chip_info, chip_rule.gain_tia_map)
+        adc_full_scale = float(chip_rule.chip_info.get("adc_full_scale", 8388608))
+        adc_offset = float(chip_rule.chip_info.get("adc_offset", 0))
 
     if input_p.is_dir():
         csv_files = sorted(input_p.glob("*.csv"))
@@ -118,7 +122,13 @@ def factory_cmd(
                         )
                     continue
                 ch_list = channel_list or _get_channel_list(None, chip_rule, df)
-                results = calculator.calculate(df, ch_list, extractor=extractor)
+                results = calculator.calculate(
+                    df,
+                    ch_list,
+                    extractor=extractor,
+                    adc_full_scale=adc_full_scale,
+                    adc_offset=adc_offset,
+                )
                 if results:
                     file_df = calculator.to_dataframe(results, file_name=f.name)
                     all_dfs.append(file_df)
@@ -139,7 +149,13 @@ def factory_cmd(
             console.print(f"[yellow]SKIP[/yellow] 数据时长不足 {calc_min_duration}s，跳过计算")
             return
         ch_list = channel_list or _get_channel_list(None, chip_rule, df)
-        results = calculator.calculate(df, ch_list, extractor=extractor)
+        results = calculator.calculate(
+            df,
+            ch_list,
+            extractor=extractor,
+            adc_full_scale=adc_full_scale,
+            adc_offset=adc_offset,
+        )
 
         if not results:
             console.print("[yellow]WARN[/yellow] 无有效数据通道")
