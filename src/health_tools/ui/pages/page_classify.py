@@ -16,13 +16,16 @@ with st.sidebar:
 input_dir = dir_input("输入目录", key="cls_input")
 output_dir = dir_input("输出目录", key="cls_output")
 
-rule_options = ["spo2_posture.yaml", "default.yaml", "(自定义)"]
+# 动态列出可用规则文件
+builtin_dir = RuleLoader.get_builtin_rules_path() / "classify"
+available_rules = sorted(f.name for f in builtin_dir.glob("*.yaml")) if builtin_dir.exists() else []
+rule_options = available_rules + ["(自定义)"]
 rule_choice = st.selectbox("分类规则", rule_options, key="cls_rule")
 
 classify_rule = None
 if rule_choice != "(自定义)":
     try:
-        classify_rule = RuleLoader.load_classify_rule(f"classify/{rule_choice}")
+        classify_rule = RuleLoader.load_classify_rule(rule_choice)
     except Exception as e:
         st.warning(f"加载规则失败: {e}")
 
