@@ -8,7 +8,7 @@ import pandas as pd
 from rich.console import Console
 from rich.table import Table
 
-from health_tools.core.snr import SNRCalculator
+from health_tools.core.snr import ChipInfoExtractor, SNRCalculator
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.csv_handler import read_csv_df
 
@@ -96,6 +96,10 @@ def factory_cmd(
     )
     channel_list = channels.split(",") if channels else None
 
+    extractor = None
+    if chip_rule and chip_rule.chip_info:
+        extractor = ChipInfoExtractor(chip_rule.chip_info, chip_rule.gain_tia_map)
+
     if input_p.is_dir():
         csv_files = sorted(input_p.glob("*.csv"))
         if not csv_files:
@@ -114,7 +118,7 @@ def factory_cmd(
                         )
                     continue
                 ch_list = channel_list or _get_channel_list(None, chip_rule, df)
-                results = calculator.calculate(df, ch_list)
+                results = calculator.calculate(df, ch_list, extractor=extractor)
                 if results:
                     file_df = calculator.to_dataframe(results, file_name=f.name)
                     all_dfs.append(file_df)
@@ -135,7 +139,7 @@ def factory_cmd(
             console.print(f"[yellow]SKIP[/yellow] 数据时长不足 {calc_min_duration}s，跳过计算")
             return
         ch_list = channel_list or _get_channel_list(None, chip_rule, df)
-        results = calculator.calculate(df, ch_list)
+        results = calculator.calculate(df, ch_list, extractor=extractor)
 
         if not results:
             console.print("[yellow]WARN[/yellow] 无有效数据通道")

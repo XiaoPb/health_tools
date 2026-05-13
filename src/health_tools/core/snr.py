@@ -9,12 +9,15 @@
 文件总时长不满足 min_duration_seconds 时跳过。
 """
 
+import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy.signal import butter, filtfilt
+
+from health_tools.utils.columns import expand_columns
 
 
 ADC_RESOLUTION = 2**23
@@ -33,6 +36,8 @@ class ChannelMetrics:
     std: float
     min_val: float
     max_val: float
+    gain: Optional[float] = None
+    current: Optional[float] = None
 
 
 MIN_FILTER_SAMPLES = 15
@@ -53,6 +58,105 @@ def highpass_filter(
 
 def rawdata_to_uv(rawdata_value: float) -> float:
     return rawdata_value / ADC_RESOLUTION * VREF * 1_000_000
+
+
+def _parse_bits(bits_str: str) -> Tuple[int, int]:
+    """解析位段字符串 '[high:low]' 返回 (high, low)"""
+    m = re.match(r"\[(\d+):(\d+)\]", bits_str)
+    if not m:
+        raise ValueError(f"无效位段格式: {bits_str}")
+    return int(m.group(1)), int(m.group(2))
+
+
+def _extract_bits(value: int, high: int, low: int) -> int:
+    """从整数中提取 [high:low] 位段"""
+    mask = (1 << (high - low + 1)) - 1
+    return (int(value) >> low) & mask
+
+
+class ChipInfoExtractor:
+    """从 DataFrame 中根据 chip_info 配置提取增益和灯电流"""
+
+    def __init__(self, chip_info: Dict[str, Any], gain_tia_map: Dict[str, Any]):
+        self.chip_info = chip_info
+        self.gain_tia_map = gain_tia_map
+
+    def _find_source_column(
+        self, source_pattern: str, df: pd.DataFrame, ch_idx: int
+    ) -> Optional[str]:
+        """根据 source 模式和通道索引找到实际列名"""
+        expanded = expand_columns([source_pattern])
+        if ch_idx < len(expanded) and expanded[ch_idx] in df.columns:
+            return expanded[ch_idx]
+        for col in expanded:
+            if col in df.columns:
+                return col
+        return None
+
+    def extract_gain(self, df: pd.DataFrame, channel_name: str) -> Optional[float]:
+        """从数据中提取通道对应的增益值（TIA电阻 KΩ）"""
+        gain_cfg = self.chip_info.get("gain")
+        if not gain_cfg or gain_cfg.get("optional"):
+            return None
+
+        source = gain_cfg.get("source", "")
+        bits_str = gain_cfg.get("bits")
+        if not source or not bits_str:
+            return None
+
+        ch_idx = self._get_channel_index(channel_name)
+        col = self._find_source_column(source, df, ch_idx)
+        if col is None or col not in df.columns:
+            return None
+
+        values = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(values) == 0:
+            return None
+
+        median_val = int(values.median())
+        high, low = _parse_bits(bits_str)
+        gain_level = _extract_bits(median_val, high, low)
+
+        tia_map = self.gain_tia_map.get("map", {})
+        if gain_level in tia_map:
+            return float(tia_map[gain_level])
+        if str(gain_level) in tia_map:
+            return float(tia_map[str(gain_level)])
+        return float(gain_level)
+
+    def extract_current(self, df: pd.DataFrame, channel_name: str) -> Optional[float]:
+        """从数据中提取通道对应的 LED 电流（mA）"""
+        current_cfg = self.chip_info.get("led_current_sum")
+        if not current_cfg or current_cfg.get("optional"):
+            return None
+
+        source = current_cfg.get("source", "")
+        bits_str = current_cfg.get("bits")
+        if not source or not bits_str:
+            return None
+
+        ch_idx = self._get_channel_index(channel_name)
+        col = self._find_source_column(source, df, ch_idx)
+        if col is None or col not in df.columns:
+            return None
+
+        values = pd.to_numeric(df[col], errors="coerce").dropna()
+        if len(values) == 0:
+            return None
+
+        median_val = int(values.median())
+        high, low = _parse_bits(bits_str)
+        raw_current = _extract_bits(median_val, high, low)
+
+        unit = current_cfg.get("unit", "")
+        if unit == "0.1mA":
+            return raw_current * 0.1
+        return float(raw_current)
+
+    def _get_channel_index(self, channel_name: str) -> int:
+        """从通道名中提取数字索引"""
+        m = re.search(r"(\d+)$", channel_name)
+        return int(m.group(1)) if m else 0
 
 
 class SNRCalculator:
@@ -117,14 +221,21 @@ class SNRCalculator:
 
         return noise_raw, noise
 
-    def calculate_ctr(self, stable_data: np.ndarray) -> float:
+    def calculate_ctr(self, stable_data: np.ndarray, current: Optional[float] = None) -> float:
         """CTR = Ipd_mean / Iled (nA/mA)"""
-        if self.current is None or self.current <= 0:
+        iled = current if current is not None else self.current
+        if iled is None or iled <= 0:
             return 0.0
         ipd_mean = float(np.mean(stable_data))
-        return ipd_mean / self.current
+        return ipd_mean / iled
 
-    def calculate_channel(self, data: pd.Series, channel_name: str) -> Optional[ChannelMetrics]:
+    def calculate_channel(
+        self,
+        data: pd.Series,
+        channel_name: str,
+        ch_gain: Optional[float] = None,
+        ch_current: Optional[float] = None,
+    ) -> Optional[ChannelMetrics]:
         values = pd.to_numeric(data, errors="coerce").dropna().values.astype(float)
         if len(values) == 0:
             return None
@@ -140,7 +251,7 @@ class SNRCalculator:
 
         snr_raw, snr = self.calculate_snr(stable_data)
         noise_raw, noise = self.calculate_noise(stable_data)
-        ctr = self.calculate_ctr(stable_data)
+        ctr = self.calculate_ctr(stable_data, current=ch_current)
 
         return ChannelMetrics(
             channel=channel_name,
@@ -153,10 +264,15 @@ class SNRCalculator:
             std=std_val,
             min_val=min_val,
             max_val=max_val,
+            gain=ch_gain if ch_gain is not None else self.gain,
+            current=ch_current if ch_current is not None else self.current,
         )
 
     def calculate(
-        self, df: pd.DataFrame, channels: Optional[List[str]] = None
+        self,
+        df: pd.DataFrame,
+        channels: Optional[List[str]] = None,
+        extractor: Optional["ChipInfoExtractor"] = None,
     ) -> List[ChannelMetrics]:
         if channels is None:
             channels = [
@@ -170,7 +286,15 @@ class SNRCalculator:
             numeric = pd.to_numeric(df[ch], errors="coerce").dropna()
             if len(numeric) == 0 or (numeric == 0).all():
                 continue
-            metrics = self.calculate_channel(df[ch], ch)
+
+            ch_gain = None
+            ch_current = None
+            if extractor and self.gain is None:
+                ch_gain = extractor.extract_gain(df, ch)
+            if extractor and self.current is None:
+                ch_current = extractor.extract_current(df, ch)
+
+            metrics = self.calculate_channel(df[ch], ch, ch_gain=ch_gain, ch_current=ch_current)
             if metrics is not None:
                 results.append(metrics)
 
@@ -195,8 +319,8 @@ class SNRCalculator:
                 "mean": round(m.mean, 2),
                 "max": round(m.max_val, 2),
                 "min": round(m.min_val, 2),
-                "gain": self.gain if self.gain is not None else "",
-                "current(mA)": self.current if self.current is not None else "",
+                "gain": m.gain if m.gain is not None else "",
+                "current(mA)": m.current if m.current is not None else "",
             }
             records.append(record)
         return pd.DataFrame(records)

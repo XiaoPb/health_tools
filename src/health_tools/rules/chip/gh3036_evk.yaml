@@ -1,13 +1,12 @@
 version: "1.0"
-chip: gh3220
+chip: gh3036_evk
 
 csv:
-  info_row: 1            # 信息所在行
-  header_row: 2          # 列名所在行（0表示无列名）
-  data_start_row: 3      # 数据开始行
+  info_row: 0            # 信息所在行
+  header_row: 1          # 列名所在行（0表示无列名）
+  data_start_row: 2      # 数据开始行
   delimiter: ","         # 分隔符
   encoding: "utf-8"      # 编码
-  info: "Version: GH3220"  # 信息
 
 columns:                 # 列定义（按顺序）
     - TimeStamp
@@ -15,24 +14,17 @@ columns:                 # 列定义（按顺序）
     - ACCX
     - ACCY
     - ACCZ
-    - CH{0-15}
+    - slotcfg{0-7}rx{0-1}
     - FLAG{0-7}
-    - REF_RESULT{0-15}
-    - ALGO_RESULT{0-7}
-    - AGC_INFO_CH{0-15}
-    - AMB_CH{0-15}
+    - slotcfg{0-7}rx{0-1}_agcinfo
+    - slotcfg{0-7}rx{0-1}_ledinfo
     - GYRO_X
     - GYRO_Y
     - GYRO_Z
-    - CH16-31
-    - ALGO_RESULT{8-15}
-    - AGC_INFO_CH{16-31}
-    - CAP_CH{0-3}
-    - TEMP_CH{0-3}
+    - slotcfg{0-7}rx{0-1}_physics
 
 snr_columns:             # SNR/CTR/Noise 计算列（自动过滤全零列）
-    - CH{0-15}
-    - CH{16-31}
+    - slotcfg{0-7}rx{0-1}
 
 snr_config:              # SNR 计算参数
     sample_rate: 100     # 采样率 Hz
@@ -53,48 +45,63 @@ gain_tia_map:
 
 chip_info:
   gain:
-    source: "AGC_INFO_CH{0-15}"
-    bits: "[3:0]"
+    source: "slotcfg{0-7}rx{0-1}_agcinfo"
+    bits: "[3:0]"       # 低4位
     type: "int"
     unit: ""
     desc: "增益等级"
 
   bg_cancel_level:
-    source: "AGC_INFO_CH{0-15}"
+    source: "slotcfg{0-7}rx{0-1}_agcinfo"
     bits: "[5:4]"
     type: "int"
     unit: ""
     desc: "背景抵消等级"
 
   dc_cancel_level:
-    source: "AGC_INFO_CH{0-15}"
+    source: "slotcfg{0-7}rx{0-1}_agcinfo"
     bits: "[7:6]"
     type: "int"
     unit: ""
     desc: "DC抵消等级"
 
   dc_cancel_code:
-    source: "AGC_INFO_CH{0-15}"
+    source: "slotcfg{0-7}rx{0-1}_agcinfo"
     bits: "[15:8]"
     type: "int"
     unit: ""
     desc: "DC抵消校准码"
 
   led_current_sum:
-    source: "AGC_INFO_CH{0-15}"
+    source: "slotcfg{0-7}rx{0-1}_agcinfo"
     bits: "[29:16]"
     type: "int"
     unit: "0.1mA"
     desc: "LED总电流"
 
   led_current_drv0:
-    optional: true
+    source: "slotcfg{0-7}rx{0-1}_ledinfo"
+    bits: "[11:0]"
+    type: "int"
+    unit: "0.1mA"
+    desc: "DRV0通道电流"
 
   led_current_drv1:
-    optional: true
+    source: "slotcfg{0-7}rx{0-1}_ledinfo"
+    bits: "[23:12]"
+    type: "int"
+    unit: "0.1mA"
+    desc: "DRV1通道电流"
 
   led_current_drv3:
     optional: true
 
   led_current_drv4:
     optional: true
+
+  ipd_pA:
+    source: "slotcfg{0-7}rx{0-1}_physics"
+    bits: null        # 整列使用，无位段
+    type: "float"
+    unit: "pA"
+    desc: "光电流值"
