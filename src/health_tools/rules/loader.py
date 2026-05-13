@@ -23,13 +23,17 @@ class RuleLoader:
     @classmethod
     def get_builtin_rules_path(cls) -> Path:
         if cls._builtin_rules_path is None:
-            candidate = Path(__file__).parent.parent.parent.parent / "rules"
-            if candidate.exists():
-                cls._builtin_rules_path = candidate
+            # 包内规则目录（wheel 安装后可用）
+            pkg_rules = Path(__file__).parent.parent / "rules"
+            if pkg_rules.exists() and any(pkg_rules.glob("*/*.yaml")):
+                cls._builtin_rules_path = pkg_rules
             else:
-                # wheel 安装时 rules 在包内
-                pkg_dir = Path(__file__).parent.parent
-                cls._builtin_rules_path = pkg_dir / "rules"
+                # 开发模式：项目根目录的 rules/
+                project_rules = Path(__file__).parent.parent.parent.parent / "rules"
+                if project_rules.exists():
+                    cls._builtin_rules_path = project_rules
+                else:
+                    cls._builtin_rules_path = pkg_rules
         return cls._builtin_rules_path
 
     @classmethod

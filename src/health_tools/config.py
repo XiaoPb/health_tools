@@ -15,10 +15,15 @@ _config_cache: Optional[dict] = None
 
 
 def _get_builtin_rules_path() -> Path:
-    candidate = Path(__file__).parent.parent.parent / "rules"
-    if candidate.exists():
-        return candidate
-    return Path(__file__).parent / "rules"
+    # 包内规则目录（wheel 安装后可用）
+    pkg_rules = Path(__file__).parent / "rules"
+    if pkg_rules.exists() and any(pkg_rules.glob("*/*.yaml")):
+        return pkg_rules
+    # 开发模式：项目根目录的 rules/
+    project_rules = Path(__file__).parent.parent.parent / "rules"
+    if project_rules.exists():
+        return project_rules
+    return pkg_rules
 
 
 def load_config() -> dict:
