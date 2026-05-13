@@ -26,6 +26,7 @@ def main():
         ],
         "工具": [
             st.Page("pages/page_info.py", title="Info (文件信息)"),
+            st.Page("pages/page_chip_editor.py", title="新增芯片规则"),
         ],
     }
 
