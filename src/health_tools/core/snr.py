@@ -192,6 +192,11 @@ class SNRCalculator:
                 "ctr(nA/mA)": round(m.ctr, 4),
                 "noise_raw(uV)": round(m.noise_raw, 2),
                 "noise(uV)": round(m.noise, 2),
+                "mean": round(m.mean, 2),
+                "max": round(m.max_val, 2),
+                "min": round(m.min_val, 2),
+                "gain": self.gain if self.gain is not None else "",
+                "current(mA)": self.current if self.current is not None else "",
             }
             records.append(record)
         return pd.DataFrame(records)
