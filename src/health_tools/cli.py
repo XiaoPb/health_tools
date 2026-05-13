@@ -27,6 +27,7 @@ COMMAND_MAP = {
     "cfg": ("health_tools.commands.config", "config_cmd"),
     "evaluate": ("health_tools.commands.evaluate", "evaluate_cmd"),
     "eval": ("health_tools.commands.evaluate", "evaluate_cmd"),
+    "ui": ("health_tools.commands.ui", "ui_cmd"),
 }
 
 PRIMARY_COMMANDS = [
@@ -41,6 +42,7 @@ PRIMARY_COMMANDS = [
     "factory",
     "config",
     "evaluate",
+    "ui",
 ]
 
 ALIASES: dict = {}
