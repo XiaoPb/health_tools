@@ -22,9 +22,9 @@ VREF = 1.8
 class ChannelMetrics:
     channel: str
     snr_raw: float
-    snr_db: float
+    snr: float
     noise_raw: float
-    noise_uv: float
+    noise: float
     ctr: float
     mean: float
     std: float
@@ -70,7 +70,7 @@ class SNRCalculator:
         self.middle_seconds = middle_seconds
 
     def calculate_snr(self, values: np.ndarray) -> tuple:
-        """SNR = 20 * log10(Avg / Std) dB, 返回 (snr_raw=Avg/Std, snr_db)"""
+        """返回 (snr_raw_db, snr_filtered_db)，raw 为未滤波，filtered 为高通滤波后"""
         n = len(values)
         skip_samples = int(self.skip_seconds * self.sample_rate)
         if skip_samples >= n:
@@ -87,27 +87,29 @@ class SNRCalculator:
             return 0.0, 0.0
 
         avg = float(np.mean(middle_data))
+        std_raw = float(np.std(middle_data))
 
         filtered = highpass_filter(remaining, cutoff=0.5, fs=self.sample_rate)
         filtered_middle = filtered[mid_start:mid_end]
-        std = float(np.std(filtered_middle))
+        std_filtered = float(np.std(filtered_middle))
 
-        if std <= 0 or avg <= 0:
-            return 0.0, 0.0
-
-        snr_raw = avg / std
-        snr_db = 20.0 * np.log10(snr_raw)
-        return snr_raw, snr_db
+        snr_raw = 20.0 * np.log10(avg / std_raw) if (avg > 0 and std_raw > 0) else 0.0
+        snr = 20.0 * np.log10(avg / std_filtered) if (avg > 0 and std_filtered > 0) else 0.0
+        return snr_raw, snr
 
     def calculate_noise(self, values: np.ndarray) -> tuple:
-        """Noise = 6 * std(filtered_data), 返回 (noise_raw, noise_uv)"""
-        filtered = highpass_filter(values, cutoff=0.5, fs=self.sample_rate)
-        n = len(filtered)
-        use_data = filtered[n // 2 :] if n > 100 else filtered
+        """返回 (noise_raw_uv, noise_filtered_uv)，raw 为未滤波，filtered 为高通滤波后"""
+        n = len(values)
+        use_raw = values[n // 2 :] if n > 100 else values
+        std_raw = float(np.std(use_raw))
+        noise_raw = rawdata_to_uv(6.0 * std_raw)
 
-        std = float(np.std(use_data))
-        noise_raw = 6.0 * std
-        return noise_raw, rawdata_to_uv(noise_raw)
+        filtered = highpass_filter(values, cutoff=0.5, fs=self.sample_rate)
+        use_filtered = filtered[n // 2 :] if n > 100 else filtered
+        std_filtered = float(np.std(use_filtered))
+        noise = rawdata_to_uv(6.0 * std_filtered)
+
+        return noise_raw, noise
 
     def calculate_ctr(self, ipd_values: np.ndarray) -> float:
         """CTR = Ipd_mean / Iled (nA/mA)"""
@@ -122,9 +124,9 @@ class SNRCalculator:
             return ChannelMetrics(
                 channel=channel_name,
                 snr_raw=0.0,
-                snr_db=0.0,
+                snr=0.0,
                 noise_raw=0.0,
-                noise_uv=0.0,
+                noise=0.0,
                 ctr=0.0,
                 mean=0.0,
                 std=0.0,
@@ -137,16 +139,16 @@ class SNRCalculator:
         min_val = float(np.min(values))
         max_val = float(np.max(values))
 
-        snr_raw, snr_db = self.calculate_snr(values)
-        noise_raw, noise_uv = self.calculate_noise(values)
+        snr_raw, snr = self.calculate_snr(values)
+        noise_raw, noise = self.calculate_noise(values)
         ctr = self.calculate_ctr(values)
 
         return ChannelMetrics(
             channel=channel_name,
             snr_raw=snr_raw,
-            snr_db=snr_db,
+            snr=snr,
             noise_raw=noise_raw,
-            noise_uv=noise_uv,
+            noise=noise,
             ctr=ctr,
             mean=mean_val,
             std=std_val,
@@ -180,11 +182,11 @@ class SNRCalculator:
             record = {
                 "file_name": file_name,
                 "ch_num": m.channel,
-                "snr_raw(Avg/Std)": round(m.snr_raw, 4),
-                "snr(dB)": round(m.snr_db, 2),
+                "snr_raw(dB)": round(m.snr_raw, 2),
+                "snr(dB)": round(m.snr, 2),
                 "ctr(nA/mA)": round(m.ctr, 4),
-                "noise_raw(6*Std)": round(m.noise_raw, 4),
-                "noise(uV)": round(m.noise_uv, 2),
+                "noise_raw(uV)": round(m.noise_raw, 2),
+                "noise(uV)": round(m.noise, 2),
             }
             records.append(record)
         return pd.DataFrame(records)
