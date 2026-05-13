@@ -32,9 +32,7 @@ class LogParser:
 
         return None
 
-    def _extract_record_with_pattern(
-        self, line: str, pattern: ParsePattern
-    ) -> Optional[dict]:
+    def _extract_record_with_pattern(self, line: str, pattern: ParsePattern) -> Optional[dict]:
         match = pattern._compiled_regex.search(line)
         if not match:
             return None
@@ -80,9 +78,7 @@ class LogParser:
             return self._expand_to_chip_format(df)
         return None
 
-    def parse_file_multi(
-        self, file_path: Path, encoding: str = "utf-8"
-    ) -> Dict[str, pd.DataFrame]:
+    def parse_file_multi(self, file_path: Path, encoding: str = "utf-8") -> Dict[str, pd.DataFrame]:
         records_map: Dict[str, list] = {name: [] for name in self.rule.patterns}
 
         with open(file_path, "r", encoding=encoding, errors="replace") as f:

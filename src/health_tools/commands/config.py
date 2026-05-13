@@ -49,7 +49,9 @@ def config_cmd(
         console.print(f"配置目录: {CONFIG_DIR}")
         console.print(f"配置文件: {CONFIG_FILE} ({'存在' if CONFIG_FILE.exists() else '不存在'})")
         user_dir = get_user_rules_dir()
-        console.print(f"规则目录: {user_dir if user_dir else DEFAULT_RULES_DIR} ({'有效' if user_dir else '未初始化'})")
+        console.print(
+            f"规则目录: {user_dir if user_dir else DEFAULT_RULES_DIR} ({'有效' if user_dir else '未初始化'})"
+        )
         if user_dir:
             for subdir in ["chip", "parse", "classify", "convert"]:
                 sub_path = user_dir / subdir

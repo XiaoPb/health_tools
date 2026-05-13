@@ -231,8 +231,18 @@ class STFTPlotter:
         zxx_norm = normalize_per_time_column(zxx)
         return freqs, times, zxx_norm
 
-    def _plot_subplot(self, ax, times, freqs_bpm, zxx_norm, title, ref_data=None,
-                      ref_label="REF_RESULT0", algo_data=None, cmap="viridis"):
+    def _plot_subplot(
+        self,
+        ax,
+        times,
+        freqs_bpm,
+        zxx_norm,
+        title,
+        ref_data=None,
+        ref_label="REF_RESULT0",
+        algo_data=None,
+        cmap="viridis",
+    ):
         """绘制单个 STFT 子图"""
         freq_min, freq_max = self.freq_range
         freq_mask = (freqs_bpm >= freq_min) & (freqs_bpm <= freq_max)
@@ -323,8 +333,13 @@ class STFTPlotter:
             if title not in results:
                 continue
             self._plot_subplot(
-                axes[idx], times_out, freqs_bpm, results[title], title,
-                ref_data=ref_data, algo_data=algo_data,
+                axes[idx],
+                times_out,
+                freqs_bpm,
+                results[title],
+                title,
+                ref_data=ref_data,
+                algo_data=algo_data,
             )
             idx += 1
 
@@ -352,8 +367,9 @@ class STFTPlotter:
         freqs_bpm = freqs * 60 if self.freq_bpm else freqs
 
         fig, ax = plt.subplots(figsize=figsize)
-        self._plot_subplot(ax, times, freqs_bpm, zxx_norm, title,
-                           ref_data=ref_data, ref_label=ref_label, cmap=cmap)
+        self._plot_subplot(
+            ax, times, freqs_bpm, zxx_norm, title, ref_data=ref_data, ref_label=ref_label, cmap=cmap
+        )
         ax.set_xlabel("Time (s)")
         plt.tight_layout()
 
@@ -379,9 +395,7 @@ class STFTPlotter:
         if n_channels == 0:
             return None
 
-        fig, axes = plt.subplots(
-            n_channels, 1, figsize=(figsize[0], 4.4 * n_channels), sharex=True
-        )
+        fig, axes = plt.subplots(n_channels, 1, figsize=(figsize[0], 4.4 * n_channels), sharex=True)
         if n_channels == 1:
             axes = [axes]
 
@@ -390,8 +404,16 @@ class STFTPlotter:
             if freqs is None:
                 continue
             freqs_bpm = freqs * 60 if self.freq_bpm else freqs
-            self._plot_subplot(ax, times, freqs_bpm, zxx_norm, channel_name,
-                               ref_data=ref_data, ref_label=ref_label, cmap=cmap)
+            self._plot_subplot(
+                ax,
+                times,
+                freqs_bpm,
+                zxx_norm,
+                channel_name,
+                ref_data=ref_data,
+                ref_label=ref_label,
+                cmap=cmap,
+            )
 
         axes[-1].set_xlabel("Time (s)")
         plt.suptitle(title)

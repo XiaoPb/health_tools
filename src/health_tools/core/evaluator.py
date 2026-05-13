@@ -1,7 +1,7 @@
 """批量准确度评估模块"""
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -12,7 +12,9 @@ from health_tools.utils.csv_handler import CSVHandler
 
 
 class PolarAnomalyDetector:
-    def __init__(self, diff_threshold: float = 30, stale_minutes: float = 2, sample_rate: float = 25):
+    def __init__(
+        self, diff_threshold: float = 30, stale_minutes: float = 2, sample_rate: float = 25
+    ):
         self.diff_threshold = diff_threshold
         self.stale_minutes = stale_minutes
         self.sample_rate = sample_rate
@@ -167,8 +169,12 @@ class BatchEvaluator:
         output_paths = {}
         output_paths["file_details"] = self._write_file_details(results, output_dir)
         output_paths["anomaly_list"] = self._write_anomaly_list(results, output_dir)
-        output_paths["accuracy_summary"] = self._write_summary(results, "metrics_all", output_dir, "accuracy_summary.csv")
-        output_paths["accuracy_filtered"] = self._write_summary(results, "metrics_filtered", output_dir, "accuracy_filtered.csv")
+        output_paths["accuracy_summary"] = self._write_summary(
+            results, "metrics_all", output_dir, "accuracy_summary.csv"
+        )
+        output_paths["accuracy_filtered"] = self._write_summary(
+            results, "metrics_filtered", output_dir, "accuracy_filtered.csv"
+        )
 
         return output_paths
 
@@ -196,13 +202,15 @@ class BatchEvaluator:
         rows = []
         for r in results:
             if r["anomaly_count"] > 0:
-                rows.append({
-                    "file": r["file"],
-                    "category": r["category"],
-                    "anomaly_count": r["anomaly_count"],
-                    "anomaly_ratio(%)": r["anomaly_ratio"],
-                    "total_rows": r["total_rows"],
-                })
+                rows.append(
+                    {
+                        "file": r["file"],
+                        "category": r["category"],
+                        "anomaly_count": r["anomaly_count"],
+                        "anomaly_ratio(%)": r["anomaly_ratio"],
+                        "total_rows": r["total_rows"],
+                    }
+                )
 
         path = output_dir / "anomaly_list.csv"
         pd.DataFrame(rows).to_csv(path, index=False)
@@ -219,8 +227,6 @@ class BatchEvaluator:
             category_data[cat].append(r[metrics_key])
 
         rows = []
-        all_refs = []
-        all_preds = []
 
         for cat, metrics_list in sorted(category_data.items()):
             agg = self._aggregate_metrics(metrics_list)
@@ -234,7 +240,11 @@ class BatchEvaluator:
             total_agg["category"] = "TOTAL"
             total_agg["files"] = len(results)
             if self.rule.first_output_time:
-                fot_values = [r.get("first_output_time_s", -1) for r in results if r.get("first_output_time_s", -1) >= 0]
+                fot_values = [
+                    r.get("first_output_time_s", -1)
+                    for r in results
+                    if r.get("first_output_time_s", -1) >= 0
+                ]
                 if fot_values:
                     total_agg["avg_first_output_time(s)"] = round(np.mean(fot_values), 2)
             rows.insert(0, total_agg)
@@ -255,9 +265,7 @@ class BatchEvaluator:
         keys = [k for k in metrics_list[0].keys() if k != "samples"]
 
         for key in keys:
-            weighted_sum = sum(
-                m.get(key, 0) * m.get("samples", 0) for m in metrics_list
-            )
+            weighted_sum = sum(m.get(key, 0) * m.get("samples", 0) for m in metrics_list)
             result[key] = round(weighted_sum / total_samples, 4) if total_samples > 0 else 0
 
         return result

@@ -128,9 +128,7 @@ def classify_cmd(
                         accuracy_calc.add_file_result(category, df)
                     except Exception as e:
                         if verbose:
-                            console.print(
-                                f"[yellow]WARN[/yellow] 准确率计算跳过 {file.name}: {e}"
-                            )
+                            console.print(f"[yellow]WARN[/yellow] 准确率计算跳过 {file.name}: {e}")
 
                 if verbose:
                     console.print(f"[green]✓[/green] {file.name} -> {category}")

@@ -53,7 +53,6 @@ def plot_cmd(
     """绘制PPG数据的时域/频域/时频图"""
     from health_tools.core.plotter import DataPlotter
     from health_tools.rules.loader import RuleLoader
-    from health_tools.utils.csv_handler import read_csv_df
 
     chip_rule = None
     if chip_name:

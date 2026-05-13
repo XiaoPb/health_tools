@@ -7,7 +7,7 @@
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -33,7 +33,9 @@ class ChannelMetrics:
 MIN_FILTER_SAMPLES = 15
 
 
-def highpass_filter(data: np.ndarray, cutoff: float = 0.5, fs: float = 100.0, order: int = 2) -> np.ndarray:
+def highpass_filter(
+    data: np.ndarray, cutoff: float = 0.5, fs: float = 100.0, order: int = 2
+) -> np.ndarray:
     if len(data) < MIN_FILTER_SAMPLES:
         return data
     nyq = fs / 2.0
@@ -97,7 +99,7 @@ class SNRCalculator:
         """Noise = 6 * std(filtered_data), 转换为 uV"""
         filtered = highpass_filter(values, cutoff=0.5, fs=self.sample_rate)
         n = len(filtered)
-        use_data = filtered[n // 2:] if n > 100 else filtered
+        use_data = filtered[n // 2 :] if n > 100 else filtered
 
         std = float(np.std(use_data))
         noise_raw = 6.0 * std
@@ -115,8 +117,13 @@ class SNRCalculator:
         if len(values) == 0:
             return ChannelMetrics(
                 channel=channel_name,
-                snr_db=0.0, noise_uv=0.0, ctr=0.0,
-                mean=0.0, std=0.0, min_val=0.0, max_val=0.0,
+                snr_db=0.0,
+                noise_uv=0.0,
+                ctr=0.0,
+                mean=0.0,
+                std=0.0,
+                min_val=0.0,
+                max_val=0.0,
             )
 
         mean_val = float(np.mean(values))
@@ -144,8 +151,7 @@ class SNRCalculator:
     ) -> List[ChannelMetrics]:
         if channels is None:
             channels = [
-                col for col in df.columns
-                if pd.to_numeric(df[col], errors="coerce").notna().any()
+                col for col in df.columns if pd.to_numeric(df[col], errors="coerce").notna().any()
             ]
 
         results = []

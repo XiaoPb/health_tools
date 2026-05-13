@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional
 
 import click
-import pandas as pd
 from rich.console import Console
 from rich.table import Table
 

@@ -147,9 +147,7 @@ class DataPlotter:
             nperseg = min(256, len(data) // 4)
             nperseg = max(nperseg, 16)
 
-            freqs, times, Sxx = signal.spectrogram(
-                data, fs=self.sample_rate, nperseg=nperseg
-            )
+            freqs, times, Sxx = signal.spectrogram(data, fs=self.sample_rate, nperseg=nperseg)
             im = ax.pcolormesh(times, freqs, 10 * np.log10(Sxx + 1e-10), shading="gouraud")
             ax.set_ylabel("Frequency (Hz)")
             ax.set_xlabel("Time (s)")
@@ -199,9 +197,7 @@ class DataPlotter:
             data_dict = {}
             for channel in channels:
                 if channel in df.columns:
-                    data_dict[channel] = pd.to_numeric(
-                        df[channel], errors="coerce"
-                    ).dropna().values
+                    data_dict[channel] = pd.to_numeric(df[channel], errors="coerce").dropna().values
 
             if data_dict:
                 plotter.plot_multi_channel_stft(

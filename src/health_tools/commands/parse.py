@@ -76,8 +76,14 @@ def parse_cmd(
             )
         else:
             _parse_file(
-                input_path_obj, output_path_obj, rule, chip_rule, chip_columns, delimiter,
-                encoding, verbose,
+                input_path_obj,
+                output_path_obj,
+                rule,
+                chip_rule,
+                chip_columns,
+                delimiter,
+                encoding,
+                verbose,
             )
     elif input_path_obj.is_dir():
         output_path_obj.mkdir(parents=True, exist_ok=True)

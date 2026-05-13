@@ -99,9 +99,7 @@ class RuleLoader:
                 if user_chip_dir.exists():
                     available.update(f.stem for f in user_chip_dir.glob("*.yaml"))
             supported = ", ".join(sorted(available)) if available else "无"
-            raise click.ClickException(
-                f"不支持的芯片型号: {chip_name}。当前支持: {supported}"
-            )
+            raise click.ClickException(f"不支持的芯片型号: {chip_name}。当前支持: {supported}")
 
         data = cls._load_yaml(rule_path)
 
