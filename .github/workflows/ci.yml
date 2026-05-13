@@ -34,7 +34,7 @@ jobs:
       run: ruff check src/
 
     - name: Format check with black
-      run: black --check src/
+      run: black --check --fast src/
 
     - name: Run tests
       run: pytest --cov=health_tools --cov-report=xml
