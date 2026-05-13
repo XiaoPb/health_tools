@@ -40,6 +40,7 @@ class ChipRule:
     columns: List[str]
     version: str = "1.0"
     snr_columns: List[str] = field(default_factory=list)
+    snr_config: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.columns = expand_columns(self.columns)

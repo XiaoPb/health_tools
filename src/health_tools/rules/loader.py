@@ -109,6 +109,7 @@ class RuleLoader:
             columns=data.get("columns", []),
             version=data.get("version", "1.0"),
             snr_columns=data.get("snr_columns", []),
+            snr_config=data.get("snr_config", {}),
         )
 
     @classmethod

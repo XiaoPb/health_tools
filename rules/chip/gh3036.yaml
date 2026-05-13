@@ -29,3 +29,9 @@ columns:                 # 列定义（按顺序）
 snr_columns:             # SNR/CTR/Noise 计算列（自动过滤全零列）
     - Rawdata{0-31}
 
+snr_config:              # SNR 计算参数
+    sample_rate: 100     # 采样率 Hz
+    skip_head_seconds: 10  # 剔除前 N 秒不稳定数据
+    skip_tail_seconds: 10  # 剔除后 N 秒不稳定数据
+    min_duration_seconds: 90  # 最小数据时长（秒），不满足则跳过
+

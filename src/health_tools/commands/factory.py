@@ -40,7 +40,10 @@ def _process_file(
 @click.option("-r", "--rule", "rule_file", help="转换规则文件（指定CSV格式）")
 @click.option("--gain", type=float, help="增益参数")
 @click.option("--current", type=float, help="灯电流（mA）")
-@click.option("--sample-rate", type=float, default=100.0, help="采样率（Hz，默认: 100）")
+@click.option("--sample-rate", type=float, default=None, help="采样率（Hz，默认使用芯片配置）")
+@click.option("--skip-head", type=float, default=None, help="剔除前N秒（默认使用芯片配置）")
+@click.option("--skip-tail", type=float, default=None, help="剔除后N秒（默认使用芯片配置）")
+@click.option("--min-duration", type=float, default=None, help="最小数据时长秒（默认使用芯片配置）")
 @click.option("--channels", help="指定计算的通道（逗号分隔）")
 @click.option("-o", "--output", "output_path", help="输出结果CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
@@ -52,7 +55,10 @@ def factory_cmd(
     rule_file: Optional[str],
     gain: Optional[float],
     current: Optional[float],
-    sample_rate: float,
+    sample_rate: Optional[float],
+    skip_head: Optional[float],
+    skip_tail: Optional[float],
+    min_duration: Optional[float],
     channels: Optional[str],
     output_path: Optional[str],
     verbose: bool,
@@ -72,7 +78,22 @@ def factory_cmd(
         console.print(f"[red]错误: 路径不存在: {input_path}[/red]")
         raise SystemExit(1)
 
-    calculator = SNRCalculator(gain=gain, current=current, sample_rate=sample_rate)
+    snr_cfg = chip_rule.snr_config if chip_rule else {}
+    calc_sample_rate = sample_rate or snr_cfg.get("sample_rate", 100.0)
+    calc_skip_head = skip_head if skip_head is not None else snr_cfg.get("skip_head_seconds", 10.0)
+    calc_skip_tail = skip_tail if skip_tail is not None else snr_cfg.get("skip_tail_seconds", 10.0)
+    calc_min_duration = (
+        min_duration if min_duration is not None else snr_cfg.get("min_duration_seconds", 90.0)
+    )
+
+    calculator = SNRCalculator(
+        gain=gain,
+        current=current,
+        sample_rate=calc_sample_rate,
+        skip_head_seconds=calc_skip_head,
+        skip_tail_seconds=calc_skip_tail,
+        min_duration_seconds=calc_min_duration,
+    )
     channel_list = channels.split(",") if channels else None
 
     if input_p.is_dir():
@@ -85,6 +106,13 @@ def factory_cmd(
         for f in csv_files:
             try:
                 df = read_csv_df(f, chip_rule)
+                if not calculator.check_duration(df):
+                    if verbose:
+                        console.print(
+                            f"  [yellow]SKIP[/yellow] {f.name}: "
+                            f"数据时长不足 {calc_min_duration}s"
+                        )
+                    continue
                 ch_list = channel_list or _get_channel_list(None, chip_rule, df)
                 results = calculator.calculate(df, ch_list)
                 if results:
@@ -103,6 +131,9 @@ def factory_cmd(
         console.print(f"[green]OK[/green] 处理 {len(all_dfs)} 个文件, 共 {len(result_df)} 条记录")
     else:
         df = read_csv_df(input_p, chip_rule)
+        if not calculator.check_duration(df):
+            console.print(f"[yellow]SKIP[/yellow] 数据时长不足 {calc_min_duration}s，跳过计算")
+            return
         ch_list = channel_list or _get_channel_list(None, chip_rule, df)
         results = calculator.calculate(df, ch_list)
 

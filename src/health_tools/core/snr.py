@@ -4,6 +4,9 @@
 - SNR = 20 * log10(Avg / Std) dB (高通滤波后)
 - Noise = 6 * std (转换为 uV)
 - CTR = Ipd / Iled (nA/mA)
+
+数据处理：剔除前后不稳定数据（默认各10秒），对中间稳定段计算。
+文件总时长不满足 min_duration_seconds 时跳过。
 """
 
 from dataclasses import dataclass
@@ -58,90 +61,86 @@ class SNRCalculator:
         gain: Optional[float] = None,
         current: Optional[float] = None,
         sample_rate: float = 100.0,
-        skip_seconds: float = 10.0,
-        total_seconds: float = 90.0,
-        middle_seconds: float = 50.0,
+        skip_head_seconds: float = 10.0,
+        skip_tail_seconds: float = 10.0,
+        min_duration_seconds: float = 90.0,
     ):
         self.gain = gain
         self.current = current
         self.sample_rate = sample_rate
-        self.skip_seconds = skip_seconds
-        self.total_seconds = total_seconds
-        self.middle_seconds = middle_seconds
+        self.skip_head_seconds = skip_head_seconds
+        self.skip_tail_seconds = skip_tail_seconds
+        self.min_duration_seconds = min_duration_seconds
 
-    def calculate_snr(self, values: np.ndarray) -> tuple:
-        """返回 (snr_raw_db, snr_filtered_db)，raw 为未滤波，filtered 为高通滤波后"""
+    def _trim_data(self, values: np.ndarray) -> Optional[np.ndarray]:
+        """剔除前后不稳定数据，返回中间稳定段。数据不足时返回 None。"""
         n = len(values)
-        skip_samples = int(self.skip_seconds * self.sample_rate)
-        if skip_samples >= n:
-            skip_samples = 0
+        total_seconds = n / self.sample_rate
+        if total_seconds < self.min_duration_seconds:
+            return None
 
-        remaining = values[skip_samples:]
-        n_remaining = len(remaining)
+        head = int(self.skip_head_seconds * self.sample_rate)
+        tail = int(self.skip_tail_seconds * self.sample_rate)
+        end_idx = n - tail if tail > 0 else n
 
-        mid_start = max(0, (n_remaining - int(self.middle_seconds * self.sample_rate)) // 2)
-        mid_end = min(n_remaining, mid_start + int(self.middle_seconds * self.sample_rate))
-        middle_data = remaining[mid_start:mid_end]
+        if head >= end_idx:
+            return None
 
-        if len(middle_data) < 10:
+        return values[head:end_idx]
+
+    def calculate_snr(self, stable_data: np.ndarray) -> tuple:
+        """对稳定段数据计算 (snr_raw_db, snr_filtered_db)"""
+        if len(stable_data) < MIN_FILTER_SAMPLES:
             return 0.0, 0.0
 
-        avg = float(np.mean(middle_data))
-        std_raw = float(np.std(middle_data))
+        avg = float(np.mean(stable_data))
+        std_raw = float(np.std(stable_data))
 
-        filtered = highpass_filter(remaining, cutoff=0.5, fs=self.sample_rate)
-        filtered_middle = filtered[mid_start:mid_end]
-        std_filtered = float(np.std(filtered_middle))
+        filtered = highpass_filter(stable_data, cutoff=0.5, fs=self.sample_rate)
+        std_filtered = float(np.std(filtered))
 
         snr_raw = 20.0 * np.log10(avg / std_raw) if (avg > 0 and std_raw > 0) else 0.0
         snr = 20.0 * np.log10(avg / std_filtered) if (avg > 0 and std_filtered > 0) else 0.0
         return snr_raw, snr
 
-    def calculate_noise(self, values: np.ndarray) -> tuple:
-        """返回 (noise_raw_uv, noise_filtered_uv)，raw 为未滤波，filtered 为高通滤波后"""
-        n = len(values)
-        use_raw = values[n // 2 :] if n > 100 else values
-        std_raw = float(np.std(use_raw))
+    def calculate_noise(self, stable_data: np.ndarray) -> tuple:
+        """对稳定段数据计算 (noise_raw_uv, noise_filtered_uv)"""
+        if len(stable_data) < MIN_FILTER_SAMPLES:
+            return 0.0, 0.0
+
+        std_raw = float(np.std(stable_data))
         noise_raw = rawdata_to_uv(6.0 * std_raw)
 
-        filtered = highpass_filter(values, cutoff=0.5, fs=self.sample_rate)
-        use_filtered = filtered[n // 2 :] if n > 100 else filtered
-        std_filtered = float(np.std(use_filtered))
+        filtered = highpass_filter(stable_data, cutoff=0.5, fs=self.sample_rate)
+        std_filtered = float(np.std(filtered))
         noise = rawdata_to_uv(6.0 * std_filtered)
 
         return noise_raw, noise
 
-    def calculate_ctr(self, ipd_values: np.ndarray) -> float:
+    def calculate_ctr(self, stable_data: np.ndarray) -> float:
         """CTR = Ipd_mean / Iled (nA/mA)"""
         if self.current is None or self.current <= 0:
             return 0.0
-        ipd_mean = float(np.mean(ipd_values))
+        ipd_mean = float(np.mean(stable_data))
         return ipd_mean / self.current
 
-    def calculate_channel(self, data: pd.Series, channel_name: str) -> ChannelMetrics:
+    def calculate_channel(self, data: pd.Series, channel_name: str) -> Optional[ChannelMetrics]:
         values = pd.to_numeric(data, errors="coerce").dropna().values.astype(float)
         if len(values) == 0:
-            return ChannelMetrics(
-                channel=channel_name,
-                snr_raw=0.0,
-                snr=0.0,
-                noise_raw=0.0,
-                noise=0.0,
-                ctr=0.0,
-                mean=0.0,
-                std=0.0,
-                min_val=0.0,
-                max_val=0.0,
-            )
+            return None
 
-        mean_val = float(np.mean(values))
-        std_val = float(np.std(values))
-        min_val = float(np.min(values))
-        max_val = float(np.max(values))
+        stable_data = self._trim_data(values)
+        if stable_data is None:
+            return None
 
-        snr_raw, snr = self.calculate_snr(values)
-        noise_raw, noise = self.calculate_noise(values)
-        ctr = self.calculate_ctr(values)
+        mean_val = float(np.mean(stable_data))
+        std_val = float(np.std(stable_data))
+        min_val = float(np.min(stable_data))
+        max_val = float(np.max(stable_data))
+
+        snr_raw, snr = self.calculate_snr(stable_data)
+        noise_raw, noise = self.calculate_noise(stable_data)
+        ctr = self.calculate_ctr(stable_data)
 
         return ChannelMetrics(
             channel=channel_name,
@@ -172,9 +171,15 @@ class SNRCalculator:
             if len(numeric) == 0 or (numeric == 0).all():
                 continue
             metrics = self.calculate_channel(df[ch], ch)
-            results.append(metrics)
+            if metrics is not None:
+                results.append(metrics)
 
         return results
+
+    def check_duration(self, df: pd.DataFrame) -> bool:
+        """检查数据时长是否满足最小要求"""
+        total_seconds = len(df) / self.sample_rate
+        return total_seconds >= self.min_duration_seconds
 
     def to_dataframe(self, results: List[ChannelMetrics], file_name: str = "") -> pd.DataFrame:
         records = []
