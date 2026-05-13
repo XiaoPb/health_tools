@@ -39,14 +39,14 @@ class ChipRule:
     csv: dict
     columns: List[str]
     version: str = "1.0"
-    snr_columns: List[str] = field(default_factory=list)
-    snr_config: Dict[str, Any] = field(default_factory=dict)
+    factory_columns: List[str] = field(default_factory=list)
+    factory_config: Dict[str, Any] = field(default_factory=dict)
     chip_info: Dict[str, Any] = field(default_factory=dict)
     gain_tia_map: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.columns = expand_columns(self.columns)
-        self.snr_columns = expand_columns(self.snr_columns)
+        self.factory_columns = expand_columns(self.factory_columns)
 
     @property
     def info_row(self) -> int:

@@ -26,14 +26,23 @@ columns:                 # 列定义（按顺序）
     - GYRO_Y
     - GYRO_Z
 
-snr_columns:             # SNR/CTR/Noise 计算列（自动过滤全零列）
+factory_columns:             # SNR/CTR/Noise 计算列（自动过滤全零列）
     - Rawdata{0-31}
 
-snr_config:              # SNR 计算参数
-    sample_rate: 100     # 采样率 Hz
-    skip_head_seconds: 10  # 剔除前 N 秒不稳定数据
-    skip_tail_seconds: 10  # 剔除后 N 秒不稳定数据
-    min_duration_seconds: 90  # 最小数据时长（秒），不满足则跳过
+factory_config:              # SNR 计算参数
+  sample_rate: 100     # 采样率 Hz
+  snr:
+      skip_head_seconds: 10  # 剔除前 N 秒不稳定数据
+      skip_tail_seconds: 10  # 剔除后 N 秒不稳定数据
+      min_duration_seconds: 90  # 最小数据时长（秒），不满足则跳过
+  ctr:
+      skip_head_seconds: 1  # 剔除前 N 秒不稳定数据
+      skip_tail_seconds: 0  # 剔除后 N 秒不稳定数据
+      min_duration_seconds: 2  # 最小数据时长（秒），不满足则跳过
+  noise:
+      skip_head_seconds: 2  # 剔除前 N 秒不稳定数据
+      skip_tail_seconds: 0  # 剔除后 N 秒不稳定数据
+      min_duration_seconds: 4  # 最小数据时长（秒），不满足则跳过
 
 gain_tia_map:
   unit: "KΩ"
@@ -49,6 +58,8 @@ gain_tia_map:
 chip_info:
   adc_full_scale: 8388608
   adc_offset: 0
+  adc_vref: 1.8
+  tia_ratio: 2
 
   gain:
     source: "AGC_INFO_CH{0-31}"

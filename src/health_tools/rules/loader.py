@@ -112,8 +112,8 @@ class RuleLoader:
             csv=data.get("csv", {}),
             columns=data.get("columns", []),
             version=data.get("version", "1.0"),
-            snr_columns=data.get("snr_columns", []),
-            snr_config=data.get("snr_config", {}),
+            factory_columns=data.get("factory_columns", []),
+            factory_config=data.get("factory_config", {}),
             chip_info=data.get("chip_info", {}),
             gain_tia_map=data.get("gain_tia_map", {}),
         )

@@ -1,12 +1,13 @@
-"""SNR/CTR/Noise 产测计算模块
+"""产测计算模块（SNR/CTR/Noise）
 
 基于 Chelsea A 性能测试原理文档:
 - SNR = 20 * log10(Avg / Std) dB (高通滤波后)
 - Noise = 6 * std (转换为 uV)
 - CTR = Ipd / Iled (nA/mA)
 
-数据处理：剔除前后不稳定数据（默认各10秒），对中间稳定段计算。
-文件总时长不满足 min_duration_seconds 时跳过。
+rawdata_uv = (rawdata_value - adc_offset) / adc_full_scale * adc_vref * 1_000_000
+ipd_pA = rawdata_uv / (tia_ratio * gain_tia_map[gain]) * 1000
+ctr = ipd_pA * 1000 / led_current_sum (nA/mA)
 """
 
 import re
@@ -18,10 +19,6 @@ import pandas as pd
 from scipy.signal import butter, filtfilt
 
 from health_tools.utils.columns import expand_columns
-
-
-ADC_RESOLUTION = 2**23
-VREF = 1.8
 
 
 @dataclass
@@ -56,8 +53,13 @@ def highpass_filter(
     return filtfilt(b, a, data)
 
 
-def rawdata_to_uv(rawdata_value: float) -> float:
-    return rawdata_value / ADC_RESOLUTION * VREF * 1_000_000
+def rawdata_to_uv(
+    value: float,
+    adc_full_scale: float,
+    adc_offset: float,
+    adc_vref: float,
+) -> float:
+    return (value - adc_offset) / adc_full_scale * adc_vref * 1_000_000.0
 
 
 def _parse_bits(bits_str: str) -> Tuple[int, int]:
@@ -84,7 +86,6 @@ class ChipInfoExtractor:
     def _find_source_column(
         self, source_pattern: str, df: pd.DataFrame, ch_idx: int
     ) -> Optional[str]:
-        """根据 source 模式和通道索引找到实际列名"""
         expanded = expand_columns([source_pattern])
         if ch_idx < len(expanded) and expanded[ch_idx] in df.columns:
             return expanded[ch_idx]
@@ -154,46 +155,65 @@ class ChipInfoExtractor:
         return float(raw_current)
 
     def _get_channel_index(self, channel_name: str) -> int:
-        """从通道名中提取数字索引"""
         m = re.search(r"(\d+)$", channel_name)
         return int(m.group(1)) if m else 0
 
 
-class SNRCalculator:
+class FactoryCalculator:
     def __init__(
         self,
         gain: Optional[float] = None,
         current: Optional[float] = None,
         sample_rate: float = 100.0,
-        skip_head_seconds: float = 10.0,
-        skip_tail_seconds: float = 10.0,
-        min_duration_seconds: float = 90.0,
+        adc_full_scale: float = 8388608.0,
+        adc_offset: float = 0.0,
+        adc_vref: float = 1.8,
+        tia_ratio: float = 2.0,
+        snr_config: Optional[Dict[str, Any]] = None,
+        ctr_config: Optional[Dict[str, Any]] = None,
+        noise_config: Optional[Dict[str, Any]] = None,
     ):
         self.gain = gain
         self.current = current
         self.sample_rate = sample_rate
-        self.skip_head_seconds = skip_head_seconds
-        self.skip_tail_seconds = skip_tail_seconds
-        self.min_duration_seconds = min_duration_seconds
+        self.adc_full_scale = adc_full_scale
+        self.adc_offset = adc_offset
+        self.adc_vref = adc_vref
+        self.tia_ratio = tia_ratio
 
-    def _trim_data(self, values: np.ndarray) -> Optional[np.ndarray]:
-        """剔除前后不稳定数据，返回中间稳定段。数据不足时返回 None。"""
+        self.snr_cfg = snr_config or {
+            "skip_head_seconds": 10.0,
+            "skip_tail_seconds": 10.0,
+            "min_duration_seconds": 90.0,
+        }
+        self.ctr_cfg = ctr_config or {
+            "skip_head_seconds": 1.0,
+            "skip_tail_seconds": 0.0,
+            "min_duration_seconds": 2.0,
+        }
+        self.noise_cfg = noise_config or {
+            "skip_head_seconds": 2.0,
+            "skip_tail_seconds": 0.0,
+            "min_duration_seconds": 4.0,
+        }
+
+    def _trim_data(self, values: np.ndarray, metric: str) -> Optional[np.ndarray]:
+        """按指标类型剔除前后不稳定数据，数据不足时返回 None。"""
+        cfg = getattr(self, f"{metric}_cfg")
         n = len(values)
         total_seconds = n / self.sample_rate
-        if total_seconds < self.min_duration_seconds:
+        if total_seconds < cfg.get("min_duration_seconds", 0):
             return None
 
-        head = int(self.skip_head_seconds * self.sample_rate)
-        tail = int(self.skip_tail_seconds * self.sample_rate)
+        head = int(cfg.get("skip_head_seconds", 0) * self.sample_rate)
+        tail = int(cfg.get("skip_tail_seconds", 0) * self.sample_rate)
         end_idx = n - tail if tail > 0 else n
 
         if head >= end_idx:
             return None
-
         return values[head:end_idx]
 
     def calculate_snr(self, stable_data: np.ndarray) -> tuple:
-        """对稳定段数据计算 (snr_raw_db, snr_filtered_db)"""
         if len(stable_data) < MIN_FILTER_SAMPLES:
             return 0.0, 0.0
 
@@ -208,17 +228,19 @@ class SNRCalculator:
         return snr_raw, snr
 
     def calculate_noise(self, stable_data: np.ndarray) -> tuple:
-        """对稳定段数据计算 (noise_raw_uv, noise_filtered_uv)"""
         if len(stable_data) < MIN_FILTER_SAMPLES:
             return 0.0, 0.0
 
         std_raw = float(np.std(stable_data))
-        noise_raw = rawdata_to_uv(6.0 * std_raw)
+        noise_raw = rawdata_to_uv(
+            6.0 * std_raw, self.adc_full_scale, self.adc_offset, self.adc_vref
+        )
 
         filtered = highpass_filter(stable_data, cutoff=0.5, fs=self.sample_rate)
         std_filtered = float(np.std(filtered))
-        noise = rawdata_to_uv(6.0 * std_filtered)
-
+        noise = rawdata_to_uv(
+            6.0 * std_filtered, self.adc_full_scale, self.adc_offset, self.adc_vref
+        )
         return noise_raw, noise
 
     def calculate_ctr(
@@ -226,15 +248,12 @@ class SNRCalculator:
         stable_data: np.ndarray,
         current: Optional[float] = None,
         gain: Optional[float] = None,
-        adc_full_scale: float = 8388608.0,
-        adc_offset: float = 0.0,
     ) -> float:
-        """CTR (nA/mA) = Ipd(nA) / Iled(mA)
+        """CTR (nA/mA) = ipd_nA / iled_mA
 
-        Ipd (pA) = RAWDATA_TO_PA(mean, RF) = RAWDATA_TO_UV(x) * 1000 / (2 * RF)
-        Ipd (nA) = Ipd(pA) / 1000
-        RAWDATA_TO_UV(x) = (x - ADC_OFFSET) * 1.8 * 1e6 / ADC_FULL_SCALE
-        RF = gain (KΩ)
+        rawdata_uv = (x - adc_offset) / adc_full_scale * adc_vref * 1e6
+        ipd_pA = rawdata_uv / (tia_ratio * RF_KΩ) * 1000
+        ctr = ipd_pA / 1000 / iled_mA  (nA/mA)
         """
         rf = gain if gain is not None else self.gain
         if rf is None or rf <= 0:
@@ -242,9 +261,10 @@ class SNRCalculator:
         iled = current if current is not None else self.current
         if iled is None or iled <= 0:
             return 0.0
+
         mean_val = float(np.mean(stable_data))
-        uv = (mean_val - adc_offset) * 1.8 * 1_000_000.0 / adc_full_scale
-        ipd_pA = uv * 1000.0 / (2.0 * rf)
+        uv = rawdata_to_uv(mean_val, self.adc_full_scale, self.adc_offset, self.adc_vref)
+        ipd_pA = uv * 1000.0 / (self.tia_ratio * rf)
         ipd_nA = ipd_pA / 1000.0
         return ipd_nA / iled
 
@@ -254,31 +274,36 @@ class SNRCalculator:
         channel_name: str,
         ch_gain: Optional[float] = None,
         ch_current: Optional[float] = None,
-        adc_full_scale: float = 8388608.0,
-        adc_offset: float = 0.0,
     ) -> Optional[ChannelMetrics]:
         values = pd.to_numeric(data, errors="coerce").dropna().values.astype(float)
         if len(values) == 0:
             return None
 
-        stable_data = self._trim_data(values)
-        if stable_data is None:
+        snr_data = self._trim_data(values, "snr")
+        ctr_data = self._trim_data(values, "ctr")
+        noise_data = self._trim_data(values, "noise")
+
+        if snr_data is None and ctr_data is None and noise_data is None:
             return None
 
-        mean_val = float(np.mean(stable_data))
-        std_val = float(np.std(stable_data))
-        min_val = float(np.min(stable_data))
-        max_val = float(np.max(stable_data))
+        snr_raw, snr = (0.0, 0.0)
+        noise_raw, noise = (0.0, 0.0)
+        ctr = 0.0
 
-        snr_raw, snr = self.calculate_snr(stable_data)
-        noise_raw, noise = self.calculate_noise(stable_data)
-        ctr = self.calculate_ctr(
-            stable_data,
-            current=ch_current,
-            gain=ch_gain,
-            adc_full_scale=adc_full_scale,
-            adc_offset=adc_offset,
+        if snr_data is not None:
+            snr_raw, snr = self.calculate_snr(snr_data)
+        if noise_data is not None:
+            noise_raw, noise = self.calculate_noise(noise_data)
+        if ctr_data is not None:
+            ctr = self.calculate_ctr(ctr_data, current=ch_current, gain=ch_gain)
+
+        ref_data = (
+            snr_data if snr_data is not None else (ctr_data if ctr_data is not None else noise_data)
         )
+        mean_val = float(np.mean(ref_data))
+        std_val = float(np.std(ref_data))
+        min_val = float(np.min(ref_data))
+        max_val = float(np.max(ref_data))
 
         return ChannelMetrics(
             channel=channel_name,
@@ -300,8 +325,6 @@ class SNRCalculator:
         df: pd.DataFrame,
         channels: Optional[List[str]] = None,
         extractor: Optional["ChipInfoExtractor"] = None,
-        adc_full_scale: float = 8388608.0,
-        adc_offset: float = 0.0,
     ) -> List[ChannelMetrics]:
         if channels is None:
             channels = [
@@ -323,23 +346,11 @@ class SNRCalculator:
             if extractor and self.current is None:
                 ch_current = extractor.extract_current(df, ch)
 
-            metrics = self.calculate_channel(
-                df[ch],
-                ch,
-                ch_gain=ch_gain,
-                ch_current=ch_current,
-                adc_full_scale=adc_full_scale,
-                adc_offset=adc_offset,
-            )
+            metrics = self.calculate_channel(df[ch], ch, ch_gain=ch_gain, ch_current=ch_current)
             if metrics is not None:
                 results.append(metrics)
 
         return results
-
-    def check_duration(self, df: pd.DataFrame) -> bool:
-        """检查数据时长是否满足最小要求"""
-        total_seconds = len(df) / self.sample_rate
-        return total_seconds >= self.min_duration_seconds
 
     def to_dataframe(self, results: List[ChannelMetrics], file_name: str = "") -> pd.DataFrame:
         records = []
