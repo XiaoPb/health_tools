@@ -229,9 +229,10 @@ class SNRCalculator:
         adc_full_scale: float = 8388608.0,
         adc_offset: float = 0.0,
     ) -> float:
-        """CTR (nA/mA) = Ipd / Iled
+        """CTR (pA/mA) = Ipd(pA) / Iled(mA)
 
-        Ipd (nA) = RAWDATA_TO_UV(mean) * 1000 / (2 * RF)
+        Ipd (pA) = RAWDATA_TO_PA(mean, RF)
+        RAWDATA_TO_PA(x, RF) = RAWDATA_TO_UV(x) * 1000 / (2 * RF)
         RAWDATA_TO_UV(x) = (x - ADC_OFFSET) * 1.8 * 1e6 / ADC_FULL_SCALE
         RF = gain (KΩ)
         """
@@ -243,8 +244,8 @@ class SNRCalculator:
             return 0.0
         mean_val = float(np.mean(stable_data))
         uv = (mean_val - adc_offset) * 1.8 * 1_000_000.0 / adc_full_scale
-        ipd_nA = uv * 1000.0 / (2.0 * rf)
-        return ipd_nA / iled
+        ipd_pA = uv * 1000.0 / (2.0 * rf)
+        return ipd_pA / iled
 
     def calculate_channel(
         self,
@@ -347,7 +348,7 @@ class SNRCalculator:
                 "ch_num": m.channel,
                 "snr_raw(dB)": round(m.snr_raw, 2),
                 "snr(dB)": round(m.snr, 2),
-                "ctr(nA/mA)": round(m.ctr, 2),
+                "ctr(pA/mA)": round(m.ctr, 2),
                 "noise_raw(uV)": round(m.noise_raw, 2),
                 "noise(uV)": round(m.noise, 2),
                 "mean": round(m.mean, 2),
