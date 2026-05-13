@@ -240,3 +240,53 @@ ghealth_tool validate <规则文件> [--strict]
 ```bash
 ghealth_tool process -i <输入目录> -o <输出目录> [选项]
 ```
+
+---
+
+## factory - 产测计算
+
+计算 SNR/CTR/Noise，支持芯片规则自动提取增益和灯电流。别名：`fac`。
+
+```bash
+ghealth_tool factory -i <输入> -c <芯片> [选项]
+ghealth_tool fac -i <输入> -c <芯片> [选项]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `-i, --input` | 输入 CSV 文件或目录（必需） |
+| `-c, --chip` | 芯片类型 |
+| `-r, --rule` | 转换规则文件 |
+| `--gain` | 增益参数（KΩ），覆盖自动提取 |
+| `--current` | 灯电流（mA），覆盖自动提取 |
+| `--sample-rate` | 采样率 Hz |
+| `--snr-cfg` | SNR 配置：skip_head,skip_tail,min_duration |
+| `--ctr-cfg` | CTR 配置：skip_head,skip_tail,min_duration |
+| `--noise-cfg` | Noise 配置：skip_head,skip_tail,min_duration |
+| `--channels` | 指定计算通道（逗号分隔） |
+| `-o, --output` | 输出结果 CSV 文件或目录 |
+| `-v, --verbose` | 详细输出 |
+
+### 示例
+
+```bash
+# 单文件计算
+ghealth_tool fac -i data.csv -c gh3036_evk
+
+# 目录批量（不匹配文件自动跳过）
+ghealth_tool fac -i data_dir/ -c gh3036_evk -v
+
+# 覆盖时长配置
+ghealth_tool fac -i data.csv -c gh3036_evk --snr-cfg "5,5,60"
+
+# 指定增益和电流
+ghealth_tool fac -i data.csv -c gh3036 --gain 10 --current 25.0 -o results.csv
+```
+
+### 工作原理
+
+1. 加载芯片规则，读取 `factory_columns` 和 `factory_config`
+2. 从 `chip_info` 获取 ADC 参数（adc_full_scale, adc_offset, adc_vref, tia_ratio）
+3. 自动从数据中提取每通道的增益和灯电流（source 列全为 0 时跳过 CTR）
+4. 各指标独立判断数据时长：满足哪个算哪个，全不满足才跳过
+5. 输出 chip_info 面板和计算结果表

@@ -25,9 +25,55 @@ columns:
   - ACCX
   - ACCY
   - ACCZ
-  - CH[0-15]             # 展开为 CH0, CH1, ..., CH15
-  - REF_RESULT0
-  - ALGO_RESULT[0-9]     # 展开为 ALGO_RESULT0, ..., ALGO_RESULT9
+  - CH{0-15}             # 展开为 CH0, CH1, ..., CH15
+
+factory_columns:         # 产测计算列（自动过滤全零列）
+  - CH{0-15}
+
+factory_config:          # 产测计算参数（各指标独立配置）
+  sample_rate: 100
+  snr:
+    skip_head_seconds: 10
+    skip_tail_seconds: 10
+    min_duration_seconds: 90
+  ctr:
+    skip_head_seconds: 1
+    skip_tail_seconds: 0
+    min_duration_seconds: 2
+  noise:
+    skip_head_seconds: 2
+    skip_tail_seconds: 0
+    min_duration_seconds: 4
+
+gain_tia_map:            # 增益等级 → TIA电阻映射
+  unit: "KΩ"
+  map:
+    0: 10
+    1: 25
+    2: 50
+    3: 100
+    4: 250
+    5: 500
+    6: 1000
+
+chip_info:               # 芯片参数（用于 CTR/Noise 计算）
+  adc_full_scale: 8388608
+  adc_offset: 8388608
+  adc_vref: 1.8
+  tia_ratio: 2
+
+  gain:
+    source: "AGC_INFO_CH{0-15}"
+    bits: "[3:0]"
+    type: "int"
+    desc: "增益等级"
+
+  led_current_sum:
+    source: "AGC_INFO_CH{0-15}"
+    bits: "[29:16]"
+    type: "int"
+    unit: "0.1mA"
+    desc: "LED总电流"
 ```
 
 ### 字段说明
@@ -41,7 +87,23 @@ columns:
 | `csv.data_start_row` | int | 数据起始行 |
 | `csv.delimiter` | string | 字段分隔符 |
 | `csv.encoding` | string | 文件编码 |
-| `columns` | list | 列名列表，支持 `[start-end]` 展开 |
+| `columns` | list | 列名列表，支持 `{start-end}` 展开 |
+| `factory_columns` | list | 产测计算列，支持 `{start-end}` 展开 |
+| `factory_config` | dict | 产测参数：顶层 sample_rate，子级 snr/ctr/noise 各有独立 skip/duration |
+| `gain_tia_map` | dict | 增益等级到 TIA 电阻（KΩ）的映射 |
+| `chip_info` | dict | 芯片参数（adc_full_scale, adc_offset, adc_vref, tia_ratio, gain, led_current 等） |
+
+### chip_info 字段
+
+| 字段 | 说明 |
+|---|---|
+| `adc_full_scale` | ADC 满量程值 |
+| `adc_offset` | ADC 偏移量 |
+| `adc_vref` | ADC 参考电压（V） |
+| `tia_ratio` | TIA 比率系数 |
+| `gain` | 增益配置：source（数据来源列）、bits（位段）、type |
+| `led_current_sum` | LED 总电流配置，设 `optional: true` 时自动累加各 drv 通道 |
+| `led_current_drv*` | 各 LED 驱动通道电流，支持 `mA/LSB` 单位 |
 
 ---
 

@@ -88,6 +88,24 @@ ghealth_tool convert -i data/ -o merged.csv --merge
 ghealth_tool convert -i large.csv -o split/ --split 10000
 ```
 
+### factory - 产测计算
+
+计算 SNR/CTR/Noise，支持芯片规则自动提取增益和灯电流。
+
+```bash
+# 单文件计算
+ghealth_tool fac -i data.csv -c gh3036_evk
+
+# 目录批量计算
+ghealth_tool fac -i data_dir/ -c gh3036_evk -v
+
+# 指定增益和电流
+ghealth_tool fac -i data.csv -c gh3036 --gain 10 --current 25.0
+
+# 覆盖默认时长配置
+ghealth_tool fac -i data.csv -c gh3036_evk --snr-cfg "5,5,60" --ctr-cfg "1,0,2"
+```
+
 ### info - 信息查看
 
 查看数据文件或规则文件信息。
@@ -116,23 +134,47 @@ ghealth_tool validate rules/parse/gh3220.yaml --strict
 
 ### 芯片规则 (rules/chip/*.yaml)
 
-定义CSV文件的格式：
+定义CSV文件的格式和产测计算参数：
 
 ```yaml
 version: "1.0"
 chip: gh3220
 
 csv:
-  header_row: 1          # 列名所在行
-  data_start_row: 2      # 数据开始行
+  info_row: 1
+  header_row: 2
+  data_start_row: 3
   delimiter: ","
   encoding: "utf-8"
 
 columns:
-  - timestamp
-  - red
-  - ir
-  - green
+  - TimeStamp
+  - FRAME_ID
+  - CH{0-15}
+
+factory_columns:         # 产测计算列
+  - CH{0-15}
+
+factory_config:          # 各指标独立时长配置
+  sample_rate: 100
+  snr:
+    skip_head_seconds: 10
+    skip_tail_seconds: 10
+    min_duration_seconds: 90
+  ctr:
+    skip_head_seconds: 1
+    skip_tail_seconds: 0
+    min_duration_seconds: 2
+  noise:
+    skip_head_seconds: 2
+    skip_tail_seconds: 0
+    min_duration_seconds: 4
+
+chip_info:
+  adc_full_scale: 8388608
+  adc_offset: 8388608
+  adc_vref: 1.8
+  tia_ratio: 2
 ```
 
 ### 解析规则 (rules/parse/*.yaml)
@@ -230,6 +272,7 @@ column_mapping:
 |------|------|------|
 | GH3220 | `rules/chip/gh3220.yaml` | Goodix PPG传感器 |
 | GH3036 | `rules/chip/gh3036.yaml` | Goodix健康传感器 |
+| GH3036_EVK | `rules/chip/gh3036_evk.yaml` | GH3036 评估板 |
 
 ## 开发
 
