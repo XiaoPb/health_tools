@@ -69,6 +69,19 @@ def _build_calculator(
     )
 
 
+def _print_adc_info(calculator: FactoryCalculator):
+    """输出 ADC 参数和计算公式"""
+    console.print(
+        f"[dim]adc_full_scale: {calculator.adc_full_scale:.0f}  "
+        f"adc_offset: {calculator.adc_offset:.0f}  "
+        f"adc_vref: {calculator.adc_vref}  "
+        f"tia_ratio: {calculator.tia_ratio}[/dim]"
+    )
+    console.print("[dim]rawdata_uv = (value - adc_offset) / adc_full_scale * adc_vref * 1e6[/dim]")
+    console.print("[dim]ipd_pA = rawdata_uv / (tia_ratio * RF) * 1000[/dim]")
+    console.print("[dim]ctr(nA/mA) = ipd_pA / 1000 / iled[/dim]")
+
+
 def _print_chip_info(results, file_name: str):
     """输出文件的通道级 chip_info（gain、current）"""
     info_rows = [(m.channel, m.gain, m.current) for m in results if m.gain or m.current]
@@ -138,6 +151,7 @@ def factory_cmd(
     calculator = _build_calculator(
         chip_rule, gain, current, sample_rate, snr_override, ctr_override, noise_override
     )
+    _print_adc_info(calculator)
 
     extractor = None
     if chip_rule and chip_rule.chip_info:
