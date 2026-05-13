@@ -44,6 +44,7 @@ data_start_row = c3.number_input("数据起始行", value=2, min_value=1, key="n
 c1, c2 = st.columns(2)
 delimiter = c1.text_input("分隔符", value=",", key="nc_delim")
 encoding = c2.selectbox("编码", ["utf-8", "gbk", "latin-1"], key="nc_enc")
+csv_info = st.text_input("信息标识 (可选)", placeholder="如 Version: GH3220", key="nc_csv_info")
 
 # 列定义
 st.subheader("列定义")
@@ -89,6 +90,7 @@ noise_min = c3.number_input("最小时长(s)", value=4.0, key="nc_noise_m")
 
 # ADC / chip_info
 st.subheader("芯片参数 (chip_info)")
+st.caption("ADC 基本参数")
 c1, c2, c3, c4 = st.columns(4)
 adc_full_scale = c1.number_input("adc_full_scale", value=8388608, key="nc_adc_fs")
 adc_offset = c2.number_input("adc_offset", value=0, key="nc_adc_off")
@@ -102,31 +104,52 @@ st.caption("增益等级 → TIA 电阻 (KΩ)")
 gain_default = pd.DataFrame({"等级": list(range(7)), "电阻(KΩ)": [10, 25, 50, 100, 250, 500, 1000]})
 gain_edited = st.data_editor(gain_default, num_rows="dynamic", key="nc_gain_map")
 
-# chip_info 扩展字段 (gain/led_current)
-st.subheader("增益/电流提取配置")
-with st.expander("gain 配置"):
-    gain_source = st.text_input("source 列", placeholder="AGC_INFO_CH{0-15}", key="nc_g_src")
-    gain_bits = st.text_input("bits", value="[3:0]", key="nc_g_bits")
-
-with st.expander("led_current_sum 配置"):
-    led_mode = st.radio(
-        "电流模式", ["直接提取 (led_current_sum)", "累加 drv 通道"], key="nc_led_mode"
-    )
-    if led_mode == "直接提取 (led_current_sum)":
-        led_source = st.text_input("source 列", placeholder="AGC_INFO_CH{0-15}", key="nc_l_src")
-        led_bits = st.text_input("bits", value="[29:16]", key="nc_l_bits")
-        led_unit = st.text_input("unit", value="0.1mA", key="nc_l_unit")
-    else:
-        st.markdown("**DRV 通道配置**")
-        drv_data = pd.DataFrame(
-            {
-                "通道": ["drv0", "drv1"],
-                "source": ["", ""],
-                "bits": ["", ""],
-                "unit": ["0.1mA", "0.1mA"],
-            }
-        )
-        drv_edited = st.data_editor(drv_data, num_rows="dynamic", key="nc_drv")
+# chip_info 提取字段（动态表格）
+st.subheader("信号提取字段 (chip_info 扩展)")
+st.caption(
+    "每行定义一个提取字段。name 为字段名，source 为源列名（支持 {start-end} 展开），"
+    "bits 为位段（如 [3:0]，整列使用留空），type 为数据类型（int/float），"
+    "unit 为单位，desc 为描述，optional 勾选表示该字段标记为可选（无需提取）"
+)
+chip_info_default = pd.DataFrame(
+    {
+        "name": [
+            "gain",
+            "bg_cancel_level",
+            "dc_cancel_level",
+            "dc_cancel_code",
+            "led_current_sum",
+            "led_current_drv0",
+            "led_current_drv1",
+            "led_current_drv3",
+            "led_current_drv4",
+            "ipd_pA",
+        ],
+        "source": ["", "", "", "", "", "", "", "", "", ""],
+        "bits": ["[3:0]", "[5:4]", "[7:6]", "[31:23]", "[29:16]", "[15:8]", "[23:12]", "", "", ""],
+        "type": ["int", "int", "int", "int", "int", "int", "int", "int", "int", "float"],
+        "unit": ["", "", "", "", "0.1mA", "0.1mA", "0.1mA", "", "", "pA"],
+        "desc": [
+            "增益等级",
+            "背景抵消等级",
+            "DC抵消等级",
+            "DC抵消校准码",
+            "LED总电流",
+            "DRV0通道电流",
+            "DRV1通道电流",
+            "DRV3通道电流",
+            "DRV4通道电流",
+            "光电流值",
+        ],
+        "optional": [False, False, False, False, False, False, False, True, True, False],
+    }
+)
+chip_info_edited = st.data_editor(
+    chip_info_default,
+    num_rows="dynamic",
+    key="nc_chip_info_fields",
+    use_container_width=True,
+)
 
 st.divider()
 
@@ -140,16 +163,20 @@ if st.button("生成并保存", type="primary", key="nc_save"):
     factory_cols = [c.strip() for c in factory_columns_text.strip().split("\n") if c.strip()]
 
     # 构建 YAML 数据
+    csv_cfg = {
+        "info_row": int(info_row),
+        "header_row": int(header_row),
+        "data_start_row": int(data_start_row),
+        "delimiter": delimiter,
+        "encoding": encoding,
+    }
+    if csv_info.strip():
+        csv_cfg["info"] = csv_info.strip()
+
     rule_data = {
         "version": version,
         "chip": chip_name,
-        "csv": {
-            "info_row": int(info_row),
-            "header_row": int(header_row),
-            "data_start_row": int(data_start_row),
-            "delimiter": delimiter,
-            "encoding": encoding,
-        },
+        "csv": csv_cfg,
         "columns": columns,
     }
 
@@ -189,37 +216,28 @@ if st.button("生成并保存", type="primary", key="nc_save"):
         "tia_ratio": float(tia_ratio),
     }
 
-    if gain_source:
-        chip_info["gain"] = {
-            "source": gain_source,
-            "bits": gain_bits,
-            "type": "int",
-            "desc": "增益等级",
-        }
-
-    if led_mode == "直接提取 (led_current_sum)" and led_source:
-        chip_info["led_current_sum"] = {
-            "source": led_source,
-            "bits": led_bits,
-            "type": "int",
-            "unit": led_unit,
-            "desc": "LED总电流",
-        }
-    elif led_mode != "直接提取 (led_current_sum)":
-        chip_info["led_current_sum"] = {"optional": True}
-        for _, row in drv_edited.iterrows():
-            name = str(row["通道"]).strip()
-            src = str(row["source"]).strip()
+    for _, row in chip_info_edited.iterrows():
+        name = str(row["name"]).strip()
+        if not name:
+            continue
+        if row["optional"]:
+            chip_info[name] = {"optional": True}
+        else:
+            source = str(row["source"]).strip()
             bits_val = str(row["bits"]).strip()
+            type_val = str(row["type"]).strip()
             unit_val = str(row["unit"]).strip()
-            if name and src and bits_val:
-                chip_info[f"led_current_{name}"] = {
-                    "source": src,
-                    "bits": bits_val,
-                    "type": "int",
-                    "unit": unit_val,
-                    "desc": f"{name}通道电流",
-                }
+            desc_val = str(row["desc"]).strip()
+            if not source:
+                continue
+            field = {"source": source, "type": type_val or "int", "desc": desc_val}
+            if bits_val:
+                field["bits"] = bits_val
+            else:
+                field["bits"] = None
+            if unit_val:
+                field["unit"] = unit_val
+            chip_info[name] = field
 
     rule_data["chip_info"] = chip_info
 
