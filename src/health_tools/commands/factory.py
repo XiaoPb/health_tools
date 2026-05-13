@@ -155,7 +155,6 @@ def factory_cmd(
     calculator = _build_calculator(
         chip_rule, gain, current, sample_rate, snr_override, ctr_override, noise_override
     )
-    _print_adc_info(calculator)
 
     extractor = None
     if chip_rule and chip_rule.chip_info:
@@ -228,3 +227,4 @@ def factory_cmd(
         table.add_row(*[str(v) for v in row.values])
 
     console.print(table)
+    _print_adc_info(calculator)
