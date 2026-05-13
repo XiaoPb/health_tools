@@ -126,13 +126,22 @@ class ChipInfoExtractor:
         return float(gain_level)
 
     def extract_current(self, df: pd.DataFrame, channel_name: str) -> Optional[float]:
-        """从数据中提取通道对应的 LED 电流（mA）"""
-        current_cfg = self.chip_info.get("led_current_sum")
-        if not current_cfg or current_cfg.get("optional"):
-            return None
+        """从数据中提取通道对应的 LED 电流（mA）
 
-        source = current_cfg.get("source", "")
-        bits_str = current_cfg.get("bits")
+        led_current_sum 存在且非 optional 时直接提取；
+        led_current_sum 为 optional 时，自动累加各 led_current_drv* 通道。
+        """
+        current_cfg = self.chip_info.get("led_current_sum")
+        if current_cfg and not current_cfg.get("optional"):
+            return self._extract_single_current(current_cfg, df, channel_name)
+
+        return self._extract_sum_from_drvs(df, channel_name)
+
+    def _extract_single_current(
+        self, cfg: Dict[str, Any], df: pd.DataFrame, channel_name: str
+    ) -> Optional[float]:
+        source = cfg.get("source", "")
+        bits_str = cfg.get("bits")
         if not source or not bits_str:
             return None
 
@@ -149,10 +158,47 @@ class ChipInfoExtractor:
         high, low = _parse_bits(bits_str)
         raw_current = _extract_bits(median_val, high, low)
 
-        unit = current_cfg.get("unit", "")
+        return self._convert_current_unit(raw_current, cfg.get("unit", ""))
+
+    def _extract_sum_from_drvs(self, df: pd.DataFrame, channel_name: str) -> Optional[float]:
+        """累加所有 led_current_drv* 通道的电流"""
+        total = 0.0
+        found_any = False
+        for key, cfg in self.chip_info.items():
+            if not key.startswith("led_current_drv"):
+                continue
+            if not isinstance(cfg, dict) or cfg.get("optional"):
+                continue
+            source = cfg.get("source", "")
+            bits_str = cfg.get("bits")
+            if not source or not bits_str:
+                continue
+
+            ch_idx = self._get_channel_index(channel_name)
+            col = self._find_source_column(source, df, ch_idx)
+            if col is None or col not in df.columns:
+                continue
+
+            values = pd.to_numeric(df[col], errors="coerce").dropna()
+            if len(values) == 0:
+                continue
+
+            median_val = int(values.median())
+            high, low = _parse_bits(bits_str)
+            raw_current = _extract_bits(median_val, high, low)
+            drv_ma = self._convert_current_unit(raw_current, cfg.get("unit", ""))
+            total += drv_ma
+            found_any = True
+
+        return total if found_any else None
+
+    def _convert_current_unit(self, raw_value: int, unit: str) -> float:
         if unit == "0.1mA":
-            return raw_current * 0.1
-        return float(raw_current)
+            return raw_value * 0.1
+        if "mA/LSB" in unit:
+            factor = float(unit.replace("mA/LSB", ""))
+            return raw_value * factor
+        return float(raw_value)
 
     def _get_channel_index(self, channel_name: str) -> int:
         m = re.search(r"(\d+)$", channel_name)
