@@ -156,9 +156,13 @@ class SNRCalculator:
 
         results = []
         for ch in channels:
-            if ch in df.columns:
-                metrics = self.calculate_channel(df[ch], ch)
-                results.append(metrics)
+            if ch not in df.columns:
+                continue
+            numeric = pd.to_numeric(df[ch], errors="coerce").dropna()
+            if len(numeric) == 0 or (numeric == 0).all():
+                continue
+            metrics = self.calculate_channel(df[ch], ch)
+            results.append(metrics)
 
         return results
 

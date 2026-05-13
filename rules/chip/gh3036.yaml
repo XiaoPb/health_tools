@@ -26,3 +26,6 @@ columns:                 # 列定义（按顺序）
     - GYRO_Y
     - GYRO_Z
 
+snr_columns:             # SNR/CTR/Noise 计算列（自动过滤全零列）
+    - Rawdata{0-31}
+

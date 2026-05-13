@@ -53,7 +53,13 @@ def factory_cmd(
         raise SystemExit(1)
 
     df = read_csv_df(input_file, chip_rule)
-    channel_list = channels.split(",") if channels else None
+
+    if channels:
+        channel_list = channels.split(",")
+    elif chip_rule and chip_rule.snr_columns:
+        channel_list = [c for c in chip_rule.snr_columns if c in df.columns]
+    else:
+        channel_list = None
 
     calculator = SNRCalculator(gain=gain, current=current, sample_rate=sample_rate)
     results = calculator.calculate(df, channel_list)

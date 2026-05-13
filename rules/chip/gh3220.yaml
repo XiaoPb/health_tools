@@ -29,3 +29,7 @@ columns:                 # 列定义（按顺序）
     - AGC_INFO_CH{16-31}
     - CAP_CH{0-3}
     - TEMP_CH{0-3}
+
+snr_columns:             # SNR/CTR/Noise 计算列（自动过滤全零列）
+    - CH{0-15}
+    - CH16-31
