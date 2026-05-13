@@ -8,7 +8,7 @@ import yaml
 from rich.console import Console
 
 from health_tools.core.converter import DataConverter
-from health_tools.models.rules import ChipRule, ConvertRule
+from health_tools.models.rules import ChipRule
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.csv_handler import CSVHandler
 
@@ -198,11 +198,10 @@ def convert_cmd(
         rule = RuleLoader.load_convert_rule(rule_file)
         if rule.target_chip:
             chip_rule = RuleLoader.load_chip_rule(rule.target_chip)
-    elif chip_name:
-        chip_rule = RuleLoader.load_chip_rule(chip_name)
-        rule = ConvertRule(target_chip=chip_name)
+        elif chip_name:
+            chip_rule = RuleLoader.load_chip_rule(chip_name)
     else:
-        console.print("[red]错误: 需要指定 --rule 或 --chip 参数[/red]")
+        console.print("[red]错误: 需要指定 --rule 参数[/red]")
         raise SystemExit(1)
 
     chip_columns = chip_rule.columns if chip_rule else None

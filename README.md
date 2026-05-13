@@ -78,14 +78,17 @@ ghealth_tool classify -i data/ -o classified/ -r classify/default.yaml --move
 CSV格式转换（紧凑型↔展开型，芯片特定格式）。
 
 ```bash
-# 转换为芯片格式
-ghealth_tool convert -i input.csv -o output.csv --chip gh3220
+# 使用转换规则
+ghealth_tool cv -i input.csv -o output.csv -r convert/my_rule.yaml
 
 # 合并多个文件
-ghealth_tool convert -i data/ -o merged.csv --merge
+ghealth_tool cv -i data/ -o merged.csv -r convert/rule.yaml --merge
 
 # 按大小分割
-ghealth_tool convert -i large.csv -o split/ --split 10000
+ghealth_tool cv -i large.csv -o split/ -r convert/rule.yaml --split 10000
+
+# 生成规则模板
+ghealth_tool convert --init-rule -c gh3220 -o my_convert_rule.yaml
 ```
 
 ### factory - 产测计算
@@ -253,14 +256,13 @@ expand_repeat:
 
 ## 列名展开语法
 
-支持两种范围展开语法：
+使用 `{start-end}` 进行范围展开，`[]` 保留为字面量：
 
 ```yaml
-# chip/parse 规则中：[] 表示范围展开
 columns:
-  - ch[0-15]             # 展开为 ch0, ch1, ..., ch15
+  - CH{0-15}             # 展开为 CH0, CH1, ..., CH15
+  - ALGO{0-1}_CH{0-2}   # 多段展开: ALGO0_CH0, ALGO0_CH1, ..., ALGO1_CH2
 
-# convert 规则中：{} 表示范围展开，[] 为字面量
 column_mapping:
   rawdata[{0-1}]: Rawdata{0-1}  # rawdata[0]->Rawdata0, rawdata[1]->Rawdata1
   acc[0]: ACCX                   # acc[0] 是字面量列名

@@ -103,17 +103,15 @@ ghealth_tool cls -i data/ -o classified/ --accuracy
 CSV格式转换，支持列映射、前值填充、频率扩展、合并和分割。
 
 ```bash
-ghealth_tool convert -i <输入> -o <输出> [-r <规则>] [-c <芯片>] [--merge] [--split <行数>]
+ghealth_tool convert -i <输入> -o <输出> -r <规则> [--merge] [--split <行数>]
 ```
 
 | 参数 | 说明 |
 |---|---|
 | `-i, --input` | 输入CSV文件或目录（必需） |
 | `-o, --output` | 输出文件或目录（必需） |
-| `-r, --rule` | 转换规则文件 |
-| `-c, --chip` | 目标芯片格式 |
-| `--from` | 源格式 |
-| `--to` | 目标格式 |
+| `-r, --rule` | 转换规则文件（必需） |
+| `-c, --chip` | 目标芯片格式（仅用于 --init-rule） |
 | `--merge` | 合并目录中所有CSV |
 | `--split` | 按行数分割输出 |
 | `--init-rule` | 生成转换规则模板 |
@@ -123,19 +121,16 @@ ghealth_tool convert -i <输入> -o <输出> [-r <规则>] [-c <芯片>] [--merg
 
 ```bash
 # 使用转换规则
-ghealth_tool convert -i input.csv -o output.csv -r convert/my_rule.yaml -v
-
-# 直接指定目标芯片
-ghealth_tool convert -i input.csv -o output.csv -c gh3036
+ghealth_tool cv -i input.csv -o output.csv -r convert/my_rule.yaml -v
 
 # 合并目录并分割
-ghealth_tool convert -i data/ -o merged.csv --merge --split 5000 -r convert/rule.yaml
+ghealth_tool cv -i data/ -o merged.csv -r convert/rule.yaml --merge --split 5000
 
 # 生成规则模板
 ghealth_tool convert --init-rule -c gh3220 -o my_convert_rule.yaml
 
-# 使用别名
-ghealth_tool cv -i input.csv -o output.csv -r convert/rule.yaml
+# 从输入文件自动匹配列名生成模板
+ghealth_tool convert --init-rule -c gh3220 -i input.csv -o my_convert_rule.yaml
 ```
 
 ### 转换流程

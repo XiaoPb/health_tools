@@ -3,18 +3,18 @@
 from health_tools.utils.columns import expand_columns
 
 
-def test_expand_bracket_syntax():
-    result = expand_columns(["ch[0-3]"])
+def test_brace_syntax():
+    result = expand_columns(["ch{0-3}"])
     assert result == ["ch0", "ch1", "ch2", "ch3"]
 
 
-def test_expand_brace_syntax():
-    result = expand_columns(["rawdata[{0-2}]"], brace_only=True)
+def test_brace_with_brackets_literal():
+    result = expand_columns(["rawdata[{0-2}]"])
     assert result == ["rawdata[0]", "rawdata[1]", "rawdata[2]"]
 
 
-def test_brace_only_preserves_brackets():
-    result = expand_columns(["ch[0-3]"], brace_only=True)
+def test_brackets_preserved_as_literal():
+    result = expand_columns(["ch[0-3]"])
     assert result == ["ch[0-3]"]
 
 
@@ -24,7 +24,7 @@ def test_no_expansion():
 
 
 def test_mixed_columns():
-    result = expand_columns(["timestamp", "ch[0-2]", "flag"])
+    result = expand_columns(["timestamp", "ch{0-2}", "flag"])
     assert result == ["timestamp", "ch0", "ch1", "ch2", "flag"]
 
 

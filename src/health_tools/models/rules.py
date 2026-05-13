@@ -93,7 +93,7 @@ class ConvertRule:
         self.expand_repeat = self._expand_repeat_keys(self.expand_repeat)
 
     def _expand_columns(self, columns: List[str]) -> List[str]:
-        return expand_columns(columns, brace_only=True)
+        return expand_columns(columns)
 
     def _expand_mapping(self, mapping: Dict[str, str]) -> Dict[str, str]:
         expanded = {}
