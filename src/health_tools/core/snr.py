@@ -313,14 +313,14 @@ class SNRCalculator:
                 "ch_num": m.channel,
                 "snr_raw(dB)": round(m.snr_raw, 2),
                 "snr(dB)": round(m.snr, 2),
-                "ctr(nA/mA)": round(m.ctr, 4),
+                "ctr(nA/mA)": round(m.ctr, 2),
                 "noise_raw(uV)": round(m.noise_raw, 2),
                 "noise(uV)": round(m.noise, 2),
                 "mean": round(m.mean, 2),
                 "max": round(m.max_val, 2),
                 "min": round(m.min_val, 2),
-                "gain": m.gain if m.gain is not None else "",
-                "current(mA)": m.current if m.current is not None else "",
+                "gain": round(m.gain, 2) if m.gain is not None else "",
+                "current(mA)": round(m.current, 2) if m.current is not None else "",
             }
             records.append(record)
         return pd.DataFrame(records)
