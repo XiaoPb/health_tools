@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import pandas as pd
 from rich.console import Console
 from rich.table import Table
 
@@ -14,8 +15,27 @@ from health_tools.utils.csv_handler import read_csv_df
 console = Console()
 
 
+def _get_channel_list(channels: Optional[str], chip_rule, df: pd.DataFrame):
+    if channels:
+        return channels.split(",")
+    if chip_rule and chip_rule.snr_columns:
+        return [c for c in chip_rule.snr_columns if c in df.columns]
+    return None
+
+
+def _process_file(
+    file_path: Path, chip_rule, calculator: SNRCalculator, channel_list_override=None
+) -> pd.DataFrame:
+    df = read_csv_df(file_path, chip_rule)
+    ch_list = channel_list_override or _get_channel_list(None, chip_rule, df)
+    results = calculator.calculate(df, ch_list)
+    if not results:
+        return pd.DataFrame()
+    return calculator.to_dataframe(results, file_name=file_path.name)
+
+
 @click.command()
-@click.option("-i", "--input", "input_path", required=True, help="输入CSV文件")
+@click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-c", "--chip", "chip_name", help="芯片类型（指定CSV格式）")
 @click.option("-r", "--rule", "rule_file", help="转换规则文件（指定CSV格式）")
 @click.option("--gain", type=float, help="增益参数")
@@ -47,28 +67,50 @@ def factory_cmd(
 
         chip_rule = _ChipRule(chip="", csv=convert_rule.csv, columns=[])
 
-    input_file = Path(input_path)
-    if not input_file.exists():
-        console.print(f"[red]错误: 文件不存在: {input_path}[/red]")
+    input_p = Path(input_path)
+    if not input_p.exists():
+        console.print(f"[red]错误: 路径不存在: {input_path}[/red]")
         raise SystemExit(1)
 
-    df = read_csv_df(input_file, chip_rule)
-
-    if channels:
-        channel_list = channels.split(",")
-    elif chip_rule and chip_rule.snr_columns:
-        channel_list = [c for c in chip_rule.snr_columns if c in df.columns]
-    else:
-        channel_list = None
-
     calculator = SNRCalculator(gain=gain, current=current, sample_rate=sample_rate)
-    results = calculator.calculate(df, channel_list)
+    channel_list = channels.split(",") if channels else None
 
-    if not results:
-        console.print("[yellow]WARN[/yellow] 无有效数据通道")
-        return
+    if input_p.is_dir():
+        csv_files = sorted(input_p.glob("*.csv"))
+        if not csv_files:
+            console.print(f"[yellow]WARN[/yellow] 目录中无CSV文件: {input_path}")
+            return
 
-    result_df = calculator.to_dataframe(results)
+        all_dfs = []
+        for f in csv_files:
+            try:
+                df = read_csv_df(f, chip_rule)
+                ch_list = channel_list or _get_channel_list(None, chip_rule, df)
+                results = calculator.calculate(df, ch_list)
+                if results:
+                    file_df = calculator.to_dataframe(results, file_name=f.name)
+                    all_dfs.append(file_df)
+                    if verbose:
+                        console.print(f"  [dim]{f.name}: {len(results)} 通道[/dim]")
+            except Exception as e:
+                console.print(f"  [yellow]WARN[/yellow] {f.name}: {e}")
+
+        if not all_dfs:
+            console.print("[yellow]WARN[/yellow] 无有效数据通道")
+            return
+
+        result_df = pd.concat(all_dfs, ignore_index=True)
+        console.print(f"[green]OK[/green] 处理 {len(all_dfs)} 个文件, 共 {len(result_df)} 条记录")
+    else:
+        df = read_csv_df(input_p, chip_rule)
+        ch_list = channel_list or _get_channel_list(None, chip_rule, df)
+        results = calculator.calculate(df, ch_list)
+
+        if not results:
+            console.print("[yellow]WARN[/yellow] 无有效数据通道")
+            return
+
+        result_df = calculator.to_dataframe(results, file_name=input_p.name)
 
     if output_path:
         out_file = Path(output_path)
@@ -78,14 +120,14 @@ def factory_cmd(
 
     table = Table(title="SNR/CTR/Noise 计算结果")
     for col in result_df.columns:
-        table.add_column(col, style="cyan" if col == "Channel" else "green")
+        table.add_column(col, style="cyan" if col in ("file_name", "ch_num") else "green")
     for _, row in result_df.iterrows():
         table.add_row(*[str(v) for v in row.values])
 
     console.print(table)
 
     if verbose:
-        console.print(f"\n[dim]数据行数: {len(df)}, 计算通道数: {len(results)}[/dim]")
+        console.print(f"\n[dim]计算通道数: {len(result_df)}[/dim]")
         if gain is not None:
             console.print(f"[dim]增益: {gain}[/dim]")
         if current is not None:

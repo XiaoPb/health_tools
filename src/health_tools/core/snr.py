@@ -21,7 +21,9 @@ VREF = 1.8
 @dataclass
 class ChannelMetrics:
     channel: str
+    snr_raw: float
     snr_db: float
+    noise_raw: float
     noise_uv: float
     ctr: float
     mean: float
@@ -67,8 +69,8 @@ class SNRCalculator:
         self.total_seconds = total_seconds
         self.middle_seconds = middle_seconds
 
-    def calculate_snr(self, values: np.ndarray) -> float:
-        """SNR = 20 * log10(Avg / Std) dB, 高通滤波去基线后计算"""
+    def calculate_snr(self, values: np.ndarray) -> tuple:
+        """SNR = 20 * log10(Avg / Std) dB, 返回 (snr_raw=Avg/Std, snr_db)"""
         n = len(values)
         skip_samples = int(self.skip_seconds * self.sample_rate)
         if skip_samples >= n:
@@ -82,7 +84,7 @@ class SNRCalculator:
         middle_data = remaining[mid_start:mid_end]
 
         if len(middle_data) < 10:
-            return 0.0
+            return 0.0, 0.0
 
         avg = float(np.mean(middle_data))
 
@@ -91,19 +93,21 @@ class SNRCalculator:
         std = float(np.std(filtered_middle))
 
         if std <= 0 or avg <= 0:
-            return 0.0
+            return 0.0, 0.0
 
-        return 20.0 * np.log10(avg / std)
+        snr_raw = avg / std
+        snr_db = 20.0 * np.log10(snr_raw)
+        return snr_raw, snr_db
 
-    def calculate_noise(self, values: np.ndarray) -> float:
-        """Noise = 6 * std(filtered_data), 转换为 uV"""
+    def calculate_noise(self, values: np.ndarray) -> tuple:
+        """Noise = 6 * std(filtered_data), 返回 (noise_raw, noise_uv)"""
         filtered = highpass_filter(values, cutoff=0.5, fs=self.sample_rate)
         n = len(filtered)
         use_data = filtered[n // 2 :] if n > 100 else filtered
 
         std = float(np.std(use_data))
         noise_raw = 6.0 * std
-        return rawdata_to_uv(noise_raw)
+        return noise_raw, rawdata_to_uv(noise_raw)
 
     def calculate_ctr(self, ipd_values: np.ndarray) -> float:
         """CTR = Ipd_mean / Iled (nA/mA)"""
@@ -117,7 +121,9 @@ class SNRCalculator:
         if len(values) == 0:
             return ChannelMetrics(
                 channel=channel_name,
+                snr_raw=0.0,
                 snr_db=0.0,
+                noise_raw=0.0,
                 noise_uv=0.0,
                 ctr=0.0,
                 mean=0.0,
@@ -131,13 +137,15 @@ class SNRCalculator:
         min_val = float(np.min(values))
         max_val = float(np.max(values))
 
-        snr_db = self.calculate_snr(values)
-        noise_uv = self.calculate_noise(values)
+        snr_raw, snr_db = self.calculate_snr(values)
+        noise_raw, noise_uv = self.calculate_noise(values)
         ctr = self.calculate_ctr(values)
 
         return ChannelMetrics(
             channel=channel_name,
+            snr_raw=snr_raw,
             snr_db=snr_db,
+            noise_raw=noise_raw,
             noise_uv=noise_uv,
             ctr=ctr,
             mean=mean_val,
@@ -166,22 +174,17 @@ class SNRCalculator:
 
         return results
 
-    def to_dataframe(self, results: List[ChannelMetrics]) -> pd.DataFrame:
+    def to_dataframe(self, results: List[ChannelMetrics], file_name: str = "") -> pd.DataFrame:
         records = []
         for m in results:
             record = {
-                "Channel": m.channel,
-                "SNR(dB)": round(m.snr_db, 2),
-                "Noise(uV)": round(m.noise_uv, 2),
-                "CTR(nA/mA)": round(m.ctr, 4),
-                "Mean": round(m.mean, 2),
-                "Std": round(m.std, 2),
-                "Min": round(m.min_val, 2),
-                "Max": round(m.max_val, 2),
+                "file_name": file_name,
+                "ch_num": m.channel,
+                "snr_raw(Avg/Std)": round(m.snr_raw, 4),
+                "snr(dB)": round(m.snr_db, 2),
+                "ctr(nA/mA)": round(m.ctr, 4),
+                "noise_raw(6*Std)": round(m.noise_raw, 4),
+                "noise(uV)": round(m.noise_uv, 2),
             }
-            if self.gain is not None:
-                record["Gain"] = self.gain
-            if self.current is not None:
-                record["Current(mA)"] = self.current
             records.append(record)
         return pd.DataFrame(records)
