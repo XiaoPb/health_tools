@@ -167,6 +167,7 @@ class ChipInfoExtractor:
         """累加所有 led_current_drv* 通道的电流"""
         total = 0.0
         found_any = False
+        ch_idx = self._get_channel_index(channel_name)
         for key, cfg in self.chip_info.items():
             if not key.startswith("led_current_drv"):
                 continue
@@ -177,7 +178,6 @@ class ChipInfoExtractor:
             if not source or not bits_str:
                 continue
 
-            ch_idx = self._get_channel_index(channel_name)
             col = self._find_source_column(source, df, ch_idx)
             if col is None or col not in df.columns:
                 continue
@@ -199,7 +199,10 @@ class ChipInfoExtractor:
         if unit == "0.1mA":
             return raw_value * 0.1
         if "mA/LSB" in unit:
-            factor = float(unit.replace("mA/LSB", ""))
+            try:
+                factor = float(unit.replace("mA/LSB", "").strip())
+            except ValueError:
+                return float(raw_value)
             return raw_value * factor
         return float(raw_value)
 
@@ -281,15 +284,12 @@ class FactoryCalculator:
             return 0.0, 0.0
 
         std_raw = float(np.std(stable_data))
-        noise_raw = rawdata_to_uv(
-            6.0 * std_raw, self.adc_full_scale, self.adc_offset, self.adc_vref
-        )
+        noise_raw = 6.0 * std_raw / self.adc_full_scale * self.adc_vref * 1_000_000.0
 
         filtered = highpass_filter(stable_data, cutoff=0.5, fs=self.sample_rate)
         std_filtered = float(np.std(filtered))
-        noise = rawdata_to_uv(
-            6.0 * std_filtered, self.adc_full_scale, self.adc_offset, self.adc_vref
-        )
+        noise = 6.0 * std_filtered / self.adc_full_scale * self.adc_vref * 1_000_000.0
+
         return noise_raw, noise
 
     def calculate_ctr(

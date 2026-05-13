@@ -67,45 +67,49 @@ chip_info:
   tia_ratio: 2
 
   gain:
-    source: "AGC_INFO_CH{0-15}"
+    source: "AGC_INFO_CH{0-31}"
     bits: "[3:0]"
     type: "int"
     unit: ""
     desc: "增益等级"
 
   bg_cancel_level:
-    source: "AGC_INFO_CH{0-15}"
+    source: "AGC_INFO_CH{0-31}"
     bits: "[5:4]"
     type: "int"
     unit: ""
     desc: "背景抵消等级"
 
   dc_cancel_level:
-    source: "AGC_INFO_CH{0-15}"
+    source: "AGC_INFO_CH{0-31}"
     bits: "[7:6]"
     type: "int"
     unit: ""
     desc: "DC抵消等级"
 
   dc_cancel_code:
-    source: "AGC_INFO_CH{0-15}"
-    bits: "[15:8]"
+    source: "AGC_INFO_CH{0-31}"
+    bits: "[31:23]"
     type: "int"
     unit: ""
     desc: "DC抵消校准码"
 
-  led_current_sum:
-    source: "AGC_INFO_CH{0-15}"
-    bits: "[29:16]"
-    type: "int"
-    unit: "0.1mA"
-    desc: "LED总电流"
+  led_cur rent_sum:
+    optional: true
 
   led_current_drv0:
-    optional: true
+    source: "AGC_INFO_CH{0-31}"
+    bits: "[15:8]"
+    type: "int"
+    unit: "0.784mA/LSB"
+    desc: "DRV0通道电流"
 
   led_current_drv1:
-    optional: true
+    source: "AGC_INFO_CH{0-31}"
+    bits: "[23:16]"
+    type: "int"
+    unit: "0.784mA/LSB"
+    desc: "DRV1通道电流"
 
   led_current_drv3:
     optional: true

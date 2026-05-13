@@ -72,18 +72,18 @@ def _build_calculator(
 def _print_adc_info(calculator: FactoryCalculator):
     """输出 ADC 参数和计算公式"""
     console.print(
-        f"[dim]adc_full_scale: {calculator.adc_full_scale:.0f}  "
+        f"[green]adc_full_scale: {calculator.adc_full_scale:.0f}  "
         f"adc_offset: {calculator.adc_offset:.0f}  "
         f"adc_vref: {calculator.adc_vref}  "
-        f"tia_ratio: {calculator.tia_ratio}[/dim]"
+        f"tia_ratio: {calculator.tia_ratio}[/green]"
     )
-    console.print("[blue]SNR(dB) = 20 * log10(Mean / Std_filtered)[/blue]")
-    console.print("[blue]Noise(uV) = 6 * Std_filtered * adc_vref * 1e6 / adc_full_scale[/blue]")
+    console.print("[green]SNR(dB) = 20 * log10(Mean / Std_filtered)[/green]")
+    console.print("[green]Noise(uV) = 6 * Std_filtered * adc_vref * 1e6 / adc_full_scale[/green]")
     console.print(
-        "[blue]rawdata_uv = (value - adc_offset) / adc_full_scale * adc_vref * 1e6[/blue]"
+        "[green]rawdata_uv = (value - adc_offset) / adc_full_scale * adc_vref * 1e6[/green]"
     )
-    console.print("[blue]ipd_pA = rawdata_uv / (tia_ratio * RF) * 1000[/blue]")
-    console.print("[blue]CTR(nA/mA) = ipd_pA / 1000 / iled[/blue]")
+    console.print("[green]ipd_pA = rawdata_uv / (tia_ratio * RF) * 1000[/green]")
+    console.print("[green]CTR(nA/mA) = ipd_pA / 1000 / iled[/green]")
 
 
 def _print_chip_info(results, file_name: str):
