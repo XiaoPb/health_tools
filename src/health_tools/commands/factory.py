@@ -24,7 +24,23 @@ def _get_channel_list(channels: Optional[str], chip_rule, df: pd.DataFrame):
     return None
 
 
-def _build_calculator(chip_rule, gain, current, sample_rate) -> FactoryCalculator:
+def _parse_metric_cfg(value: Optional[str]) -> Optional[dict]:
+    """解析 'skip_head,skip_tail,min_duration' 格式为配置字典"""
+    if not value:
+        return None
+    parts = [float(x.strip()) for x in value.split(",")]
+    if len(parts) != 3:
+        raise click.BadParameter("格式: skip_head,skip_tail,min_duration (如 10,10,90)")
+    return {
+        "skip_head_seconds": parts[0],
+        "skip_tail_seconds": parts[1],
+        "min_duration_seconds": parts[2],
+    }
+
+
+def _build_calculator(
+    chip_rule, gain, current, sample_rate, snr_override, ctr_override, noise_override
+) -> FactoryCalculator:
     """从 chip_rule 构建 FactoryCalculator"""
     fc = chip_rule.factory_config if chip_rule else {}
     calc_sample_rate = sample_rate or fc.get("sample_rate", 100.0)
@@ -47,9 +63,9 @@ def _build_calculator(chip_rule, gain, current, sample_rate) -> FactoryCalculato
         adc_offset=adc_offset,
         adc_vref=adc_vref,
         tia_ratio=tia_ratio,
-        snr_config=fc.get("snr"),
-        ctr_config=fc.get("ctr"),
-        noise_config=fc.get("noise"),
+        snr_config=snr_override or fc.get("snr"),
+        ctr_config=ctr_override or fc.get("ctr"),
+        noise_config=noise_override or fc.get("noise"),
     )
 
 
@@ -78,6 +94,9 @@ def _print_chip_info(results, file_name: str):
 @click.option("--gain", type=float, help="增益参数")
 @click.option("--current", type=float, help="灯电流（mA）")
 @click.option("--sample-rate", type=float, default=None, help="采样率（Hz，默认使用芯片配置）")
+@click.option("--snr-cfg", help="SNR配置: skip_head,skip_tail,min_duration (如 10,10,90)")
+@click.option("--ctr-cfg", help="CTR配置: skip_head,skip_tail,min_duration (如 1,0,2)")
+@click.option("--noise-cfg", help="Noise配置: skip_head,skip_tail,min_duration (如 2,0,4)")
 @click.option("--channels", help="指定计算的通道（逗号分隔）")
 @click.option("-o", "--output", "output_path", help="输出结果CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
@@ -90,11 +109,18 @@ def factory_cmd(
     gain: Optional[float],
     current: Optional[float],
     sample_rate: Optional[float],
+    snr_cfg: Optional[str],
+    ctr_cfg: Optional[str],
+    noise_cfg: Optional[str],
     channels: Optional[str],
     output_path: Optional[str],
     verbose: bool,
 ) -> None:
     """计算SNR/CTR/Noise（产测）"""
+    snr_override = _parse_metric_cfg(snr_cfg)
+    ctr_override = _parse_metric_cfg(ctr_cfg)
+    noise_override = _parse_metric_cfg(noise_cfg)
+
     chip_rule = None
     if chip_name:
         chip_rule = RuleLoader.load_chip_rule(chip_name)
@@ -109,7 +135,9 @@ def factory_cmd(
         console.print(f"[red]错误: 路径不存在: {input_path}[/red]")
         raise SystemExit(1)
 
-    calculator = _build_calculator(chip_rule, gain, current, sample_rate)
+    calculator = _build_calculator(
+        chip_rule, gain, current, sample_rate, snr_override, ctr_override, noise_override
+    )
 
     extractor = None
     if chip_rule and chip_rule.chip_info:
