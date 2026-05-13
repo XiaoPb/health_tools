@@ -29,10 +29,31 @@ COMMAND_MAP = {
     "eval": ("health_tools.commands.evaluate", "evaluate_cmd"),
 }
 
+PRIMARY_COMMANDS = [
+    "parse",
+    "plot",
+    "classify",
+    "convert",
+    "info",
+    "validate",
+    "split",
+    "process",
+    "factory",
+    "config",
+    "evaluate",
+]
+
+ALIASES: dict = {}
+for _name, _target in COMMAND_MAP.items():
+    for _primary in PRIMARY_COMMANDS:
+        if _name != _primary and COMMAND_MAP.get(_primary) == _target:
+            ALIASES.setdefault(_primary, []).append(_name)
+            break
+
 
 class LazyGroup(click.Group):
     def list_commands(self, ctx: click.Context) -> list:
-        return sorted(set(COMMAND_MAP.keys()))
+        return PRIMARY_COMMANDS
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> Any:
         if cmd_name not in COMMAND_MAP:
@@ -43,6 +64,21 @@ class LazyGroup(click.Group):
         except ImportError:
             return None
         return getattr(module, attr_name)
+
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        commands = []
+        for subcommand in self.list_commands(ctx):
+            cmd = self.get_command(ctx, subcommand)
+            if cmd is None:
+                continue
+            help_text = cmd.get_short_help_str(limit=formatter.width)
+            aliases = ALIASES.get(subcommand, [])
+            name_col = f"{subcommand} ({', '.join(aliases)})" if aliases else subcommand
+            commands.append((name_col, help_text))
+
+        if commands:
+            with formatter.section("Commands"):
+                formatter.write_dl(commands)
 
 
 @click.group(cls=LazyGroup)

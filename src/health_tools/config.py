@@ -1,5 +1,6 @@
 """全局配置管理"""
 
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,13 @@ DEFAULT_RULES_DIR = CONFIG_DIR / "rules"
 RULE_SUBDIRS = ["chip", "parse", "classify", "convert", "evaluate"]
 
 _config_cache: Optional[dict] = None
+
+
+def _get_builtin_rules_path() -> Path:
+    candidate = Path(__file__).parent.parent.parent / "rules"
+    if candidate.exists():
+        return candidate
+    return Path(__file__).parent / "rules"
 
 
 def load_config() -> dict:
@@ -47,4 +55,26 @@ def init_config_dir() -> Path:
         (DEFAULT_RULES_DIR / subdir).mkdir(parents=True, exist_ok=True)
     if not CONFIG_FILE.exists():
         save_config({"rules_dir": str(DEFAULT_RULES_DIR)})
+    sync_builtin_rules()
     return CONFIG_DIR
+
+
+def sync_builtin_rules() -> int:
+    """将内置规则文件同步到用户规则目录（不覆盖已存在的文件）"""
+    builtin_path = _get_builtin_rules_path()
+    if not builtin_path.exists():
+        return 0
+
+    count = 0
+    for subdir in RULE_SUBDIRS:
+        src_dir = builtin_path / subdir
+        dst_dir = DEFAULT_RULES_DIR / subdir
+        if not src_dir.exists():
+            continue
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for src_file in src_dir.glob("*.yaml"):
+            dst_file = dst_dir / src_file.name
+            if not dst_file.exists():
+                shutil.copy2(src_file, dst_file)
+                count += 1
+    return count

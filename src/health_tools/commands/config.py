@@ -34,7 +34,12 @@ def config_cmd(
         path = init_config_dir()
         console.print(f"[green]OK[/green] 配置目录已初始化: {path}")
         console.print(f"  规则目录: {DEFAULT_RULES_DIR}")
-        console.print("  子目录: chip/ parse/ classify/ convert/")
+
+        from health_tools.config import sync_builtin_rules
+
+        count = sync_builtin_rules()
+        console.print(f"  已同步 {count} 个内置规则文件到用户目录")
+        console.print("  子目录: chip/ parse/ classify/ convert/ evaluate/")
         return
 
     if rules_dir:
@@ -53,7 +58,7 @@ def config_cmd(
             f"规则目录: {user_dir if user_dir else DEFAULT_RULES_DIR} ({'有效' if user_dir else '未初始化'})"
         )
         if user_dir:
-            for subdir in ["chip", "parse", "classify", "convert"]:
+            for subdir in ["chip", "parse", "classify", "convert", "evaluate"]:
                 sub_path = user_dir / subdir
                 count = len(list(sub_path.glob("*.yaml"))) if sub_path.exists() else 0
                 console.print(f"  {subdir}/: {count} 个规则文件")
