@@ -24,15 +24,15 @@ from health_tools.utils.columns import expand_columns
 @dataclass
 class ChannelMetrics:
     channel: str
-    snr_raw: float
     snr: float
-    noise_raw: float
     noise: float
     ctr: float
     mean: float
     std: float
     min_val: float
     max_val: float
+    sample_rate: float = 100.0
+    duration_seconds: float = 0.0
     gain: Optional[float] = None
     current: Optional[float] = None
 
@@ -286,14 +286,14 @@ class FactoryCalculator:
         if snr_data is None and ctr_data is None and noise_data is None:
             return None
 
-        snr_raw, snr = (0.0, 0.0)
-        noise_raw, noise = (0.0, 0.0)
+        snr = 0.0
+        noise = 0.0
         ctr = 0.0
 
         if snr_data is not None:
-            snr_raw, snr = self.calculate_snr(snr_data)
+            _, snr = self.calculate_snr(snr_data)
         if noise_data is not None:
-            noise_raw, noise = self.calculate_noise(noise_data)
+            _, noise = self.calculate_noise(noise_data)
         if ctr_data is not None:
             ctr = self.calculate_ctr(ctr_data, current=ch_current, gain=ch_gain)
 
@@ -305,17 +305,19 @@ class FactoryCalculator:
         min_val = float(np.min(ref_data))
         max_val = float(np.max(ref_data))
 
+        duration_seconds = len(values) / self.sample_rate
+
         return ChannelMetrics(
             channel=channel_name,
-            snr_raw=snr_raw,
             snr=snr,
-            noise_raw=noise_raw,
             noise=noise,
             ctr=ctr,
             mean=mean_val,
             std=std_val,
             min_val=min_val,
             max_val=max_val,
+            sample_rate=self.sample_rate,
+            duration_seconds=duration_seconds,
             gain=ch_gain if ch_gain is not None else self.gain,
             current=ch_current if ch_current is not None else self.current,
         )
@@ -358,16 +360,16 @@ class FactoryCalculator:
             record = {
                 "file_name": file_name,
                 "ch_num": m.channel,
-                "snr_raw(dB)": round(m.snr_raw, 2),
                 "snr(dB)": round(m.snr, 2),
                 "ctr(nA/mA)": round(m.ctr, 2),
-                "noise_raw(uV)": round(m.noise_raw, 2),
                 "noise(uV)": round(m.noise, 2),
                 "mean": round(m.mean, 2),
                 "max": round(m.max_val, 2),
                 "min": round(m.min_val, 2),
                 "gain": round(m.gain, 2) if m.gain is not None else "",
                 "current(mA)": round(m.current, 2) if m.current is not None else "",
+                "sample_rate(Hz)": round(m.sample_rate, 1),
+                "duration(s)": round(m.duration_seconds, 1),
             }
             records.append(record)
         return pd.DataFrame(records)
