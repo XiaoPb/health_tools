@@ -77,9 +77,13 @@ def _print_adc_info(calculator: FactoryCalculator):
         f"adc_vref: {calculator.adc_vref}  "
         f"tia_ratio: {calculator.tia_ratio}[/dim]"
     )
-    console.print("[dim]rawdata_uv = (value - adc_offset) / adc_full_scale * adc_vref * 1e6[/dim]")
-    console.print("[dim]ipd_pA = rawdata_uv / (tia_ratio * RF) * 1000[/dim]")
-    console.print("[dim]ctr(nA/mA) = ipd_pA / 1000 / iled[/dim]")
+    console.print("[blue]SNR(dB) = 20 * log10(Mean / Std_filtered)[/blue]")
+    console.print("[blue]Noise(uV) = 6 * Std_filtered * adc_vref * 1e6 / adc_full_scale[/blue]")
+    console.print(
+        "[blue]rawdata_uv = (value - adc_offset) / adc_full_scale * adc_vref * 1e6[/blue]"
+    )
+    console.print("[blue]ipd_pA = rawdata_uv / (tia_ratio * RF) * 1000[/blue]")
+    console.print("[blue]CTR(nA/mA) = ipd_pA / 1000 / iled[/blue]")
 
 
 def _print_chip_info(results, file_name: str):
