@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from health_tools.core.converter import DataConverter
-from health_tools.models.rules import ConvertRule
+from health_tools.models.rules import ChipRule, ConvertRule
 from health_tools.rules.loader import RuleLoader
 from health_tools.ui.components.chip_selector import chip_select
 from health_tools.ui.components.file_picker import output_input, path_input
@@ -37,11 +37,18 @@ output_path = output_input("输出路径", key="cv_output")
 csv_defaults = loaded_convert_rule.csv if loaded_convert_rule else None
 csv_config = csv_format_form(defaults=csv_defaults)
 
+
+# 用页面 csv_config 构建读取用的规则（芯片 csv 只影响输出格式）
+def _make_read_rule(csv_cfg: dict) -> ChipRule:
+    return ChipRule(chip="_input", csv=csv_cfg, columns=[])
+
+
 # 读取源文件列名用于辅助映射
 source_columns = []
 if input_path and input_path.is_file():
     try:
-        preview_df = read_csv_df(input_path, chip_rule)
+        input_rule = _make_read_rule(csv_config)
+        preview_df = read_csv_df(input_path, input_rule)
         source_columns = list(preview_df.columns)
         with st.expander("源文件预览 (前5行)"):
             st.dataframe(preview_df.head(), use_container_width=True)
@@ -155,8 +162,9 @@ if st.button("执行转换", type="primary", key="cv_run"):
     chip_columns = chip_rule.columns if chip_rule else None
     converter = DataConverter(rule, chip_columns=chip_columns)
 
+    input_rule = _make_read_rule(csv_config)
     if input_path.is_file():
-        df = read_csv_df(input_path, chip_rule)
+        df = read_csv_df(input_path, input_rule)
         result_df = converter.convert(df)
         save_and_show(result_df, output_path, title="转换结果")
     elif input_path.is_dir():
@@ -167,7 +175,7 @@ if st.button("执行转换", type="primary", key="cv_run"):
         all_dfs = []
         for f in csv_files:
             try:
-                df = read_csv_df(f, chip_rule)
+                df = read_csv_df(f, input_rule)
                 all_dfs.append(converter.convert(df))
             except Exception:
                 continue
