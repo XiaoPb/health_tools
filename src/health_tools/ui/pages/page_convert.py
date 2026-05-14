@@ -58,9 +58,11 @@ if loaded_convert_rule and loaded_convert_rule.column_mapping:
         {"源列名": [k for k, v in mapping_items], "目标列名": [v for k, v in mapping_items]}
     )
 else:
-    default_rows = max(len(source_columns), 5)
+    default_rows = max(len(source_columns), len(target_columns), 5)
+    src_list = source_columns[:default_rows] + [""] * (default_rows - len(source_columns))
+    tgt_list = target_columns[:default_rows] + [""] * (default_rows - len(target_columns))
     mapping_df = pd.DataFrame(
-        {"源列名": source_columns[:default_rows], "目标列名": target_columns[:default_rows]}
+        {"源列名": src_list[:default_rows], "目标列名": tgt_list[:default_rows]}
     )
     if len(mapping_df) < default_rows:
         extra = pd.DataFrame(
