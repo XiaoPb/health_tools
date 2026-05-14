@@ -99,15 +99,22 @@ with st.expander("高级选项"):
     ff_options = source_columns if source_columns else ff_default
     forward_fill_cols = st.multiselect("前值填充列", ff_options, default=ff_default, key="cv_ff")
 
-    st.markdown("**频率扩展** (列名: 重复次数)")
+    st.markdown("**频率扩展** (选择源列并设置重复次数)")
+    expand_options = source_columns if source_columns else []
     if loaded_convert_rule and loaded_convert_rule.expand_repeat:
-        expand_items = [
-            {"列名": k, "重复次数": v} for k, v in loaded_convert_rule.expand_repeat.items()
-        ]
+        expand_default_cols = [k for k in loaded_convert_rule.expand_repeat if k in expand_options]
     else:
-        expand_items = [{"列名": "", "重复次数": 1}]
-    expand_df = pd.DataFrame(expand_items)
-    edited_expand = st.data_editor(expand_df, num_rows="dynamic", key="cv_expand")
+        expand_default_cols = []
+    expand_selected = st.multiselect(
+        "扩展列", expand_options, default=expand_default_cols, key="cv_expand_cols"
+    )
+    expand_repeat_state: Dict[str, int] = {}
+    for col in expand_selected:
+        default_n = 1
+        if loaded_convert_rule and col in loaded_convert_rule.expand_repeat:
+            default_n = loaded_convert_rule.expand_repeat[col]
+        n = st.number_input(f"{col} 重复次数", value=default_n, min_value=2, key=f"cv_exp_{col}")
+        expand_repeat_state[col] = n
 
     st.markdown("**计算列** (列名: 公式)")
     if loaded_convert_rule and loaded_convert_rule.computed:
@@ -127,12 +134,7 @@ if st.button("执行转换", type="primary", key="cv_run"):
 
     column_mapping = column_mapping_state
 
-    expand_repeat: Dict[str, int] = {}
-    for _, row in edited_expand.iterrows():
-        col = str(row["列名"]).strip()
-        n = int(row["重复次数"])
-        if col and n > 1:
-            expand_repeat[col] = n
+    expand_repeat = expand_repeat_state
 
     computed: Dict[str, str] = {}
     for _, row in edited_computed.iterrows():
@@ -193,14 +195,8 @@ if cur_mapping:
 if forward_fill_cols:
     current_cv_data["forward_fill"] = forward_fill_cols
 
-cur_expand: Dict[str, int] = {}
-for _, row in edited_expand.iterrows():
-    col = str(row["列名"]).strip()
-    n = int(row["重复次数"])
-    if col and n > 1:
-        cur_expand[col] = n
-if cur_expand:
-    current_cv_data["expand_repeat"] = cur_expand
+if expand_repeat_state:
+    current_cv_data["expand_repeat"] = expand_repeat_state
 
 cur_computed: Dict[str, str] = {}
 for _, row in edited_computed.iterrows():
