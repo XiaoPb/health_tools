@@ -50,32 +50,48 @@ if input_path and input_path.is_file():
 
 target_columns = chip_rule.columns if chip_rule else []
 
-# 列映射（从规则加载）
+# 列映射（源列来自文件，目标列从芯片下拉选择）
 st.markdown("**列映射** (源列名 → 目标列名)")
-if loaded_convert_rule and loaded_convert_rule.column_mapping:
+column_mapping_state: Dict[str, str] = {}
+
+if source_columns:
+    target_options = ["(不映射)"] + target_columns
+    # 从加载的规则获取默认映射
+    loaded_mapping = {}
+    if loaded_convert_rule and loaded_convert_rule.column_mapping:
+        loaded_mapping = loaded_convert_rule.column_mapping
+
+    for i, src_col in enumerate(source_columns):
+        c1, c2 = st.columns([1, 1])
+        c1.text(src_col)
+        default_idx = 0
+        if src_col in loaded_mapping and loaded_mapping[src_col] in target_options:
+            default_idx = target_options.index(loaded_mapping[src_col])
+        selected = c2.selectbox(
+            "目标列",
+            target_options,
+            index=default_idx,
+            key=f"cv_map_{i}",
+            label_visibility="collapsed",
+        )
+        if selected != "(不映射)":
+            column_mapping_state[src_col] = selected
+elif loaded_convert_rule and loaded_convert_rule.column_mapping:
+    st.caption("未加载源文件，显示规则中的映射配置")
     mapping_items = list(loaded_convert_rule.column_mapping.items())
     mapping_df = pd.DataFrame(
         {"源列名": [k for k, v in mapping_items], "目标列名": [v for k, v in mapping_items]}
     )
-else:
-    default_rows = max(len(source_columns), len(target_columns), 5)
-    src_list = source_columns[:default_rows] + [""] * (default_rows - len(source_columns))
-    tgt_list = target_columns[:default_rows] + [""] * (default_rows - len(target_columns))
-    mapping_df = pd.DataFrame(
-        {"源列名": src_list[:default_rows], "目标列名": tgt_list[:default_rows]}
+    edited_mapping = st.data_editor(
+        mapping_df, num_rows="dynamic", key="cv_mapping", use_container_width=True
     )
-    if len(mapping_df) < default_rows:
-        extra = pd.DataFrame(
-            {
-                "源列名": [""] * (default_rows - len(mapping_df)),
-                "目标列名": [""] * (default_rows - len(mapping_df)),
-            }
-        )
-        mapping_df = pd.concat([mapping_df, extra], ignore_index=True)
-
-edited_mapping = st.data_editor(
-    mapping_df, num_rows="dynamic", key="cv_mapping", use_container_width=True
-)
+    for _, row in edited_mapping.iterrows():
+        src = str(row["源列名"]).strip()
+        tgt = str(row["目标列名"]).strip()
+        if src and tgt:
+            column_mapping_state[src] = tgt
+else:
+    st.caption("请先选择输入文件以加载源列名，或加载历史规则")
 
 with st.expander("高级选项"):
     st.markdown("**前值填充** (选择需要填充的源列)")
@@ -109,12 +125,7 @@ if st.button("执行转换", type="primary", key="cv_run"):
         st.error("请输入有效路径")
         st.stop()
 
-    column_mapping: Dict[str, str] = {}
-    for _, row in edited_mapping.iterrows():
-        src = str(row["源列名"]).strip()
-        tgt = str(row["目标列名"]).strip()
-        if src and tgt:
-            column_mapping[src] = tgt
+    column_mapping = column_mapping_state
 
     expand_repeat: Dict[str, int] = {}
     for _, row in edited_expand.iterrows():
@@ -175,12 +186,7 @@ if chip_rule:
 if csv_config:
     current_cv_data["csv"] = csv_config
 
-cur_mapping: Dict[str, str] = {}
-for _, row in edited_mapping.iterrows():
-    src = str(row["源列名"]).strip()
-    tgt = str(row["目标列名"]).strip()
-    if src and tgt:
-        cur_mapping[src] = tgt
+cur_mapping: Dict[str, str] = column_mapping_state
 if cur_mapping:
     current_cv_data["column_mapping"] = cur_mapping
 
