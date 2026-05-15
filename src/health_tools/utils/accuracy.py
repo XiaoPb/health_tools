@@ -121,6 +121,16 @@ def calculate_accuracy(
     mask = ~(np.isnan(ref) | np.isnan(pred))
     ref = ref[mask]
     pred = pred[mask]
+
+    # 金标列全为0时，直接返回0
+    if len(ref) == 0 or np.all(ref == 0):
+        results = {m: 0.0 for m in methods}
+        if thresholds:
+            for th in thresholds:
+                results[th.get("name", "")] = 0.0
+        results["samples"] = len(ref)
+        return results
+
     diff = ref - pred
 
     results = {}
@@ -156,6 +166,11 @@ def calculate_accuracy(
                 results[name] = calculate_within_percent(ref, pred, th["percent"])
 
     results["samples"] = len(ref)
+
+    # 所有数值保留两位小数
+    for key in results:
+        if key != "samples" and isinstance(results[key], float):
+            results[key] = round(results[key], 2)
 
     return results
 

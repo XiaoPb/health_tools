@@ -211,7 +211,7 @@ class BatchEvaluator:
                 "total_rows": r["total_rows"],
             }
             if self.rule.first_output_time:
-                row["first_output_time(s)"] = r.get("first_output_time_s", -1)
+                row["first_output_time(s)"] = round(r.get("first_output_time_s", -1), 2)
             for k, v in r["metrics_all"].items():
                 row[k] = v
             rows.append(row)
@@ -288,6 +288,6 @@ class BatchEvaluator:
 
         for key in keys:
             weighted_sum = sum(m.get(key, 0) * m.get("samples", 0) for m in metrics_list)
-            result[key] = round(weighted_sum / total_samples, 4) if total_samples > 0 else 0
+            result[key] = round(weighted_sum / total_samples, 2) if total_samples > 0 else 0
 
         return result
