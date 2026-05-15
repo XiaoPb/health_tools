@@ -13,6 +13,7 @@ from health_tools.core.offline import (
     find_exe,
     get_offline_config,
     list_versions,
+    reorganize_output,
 )
 
 console = Console()
@@ -108,22 +109,27 @@ def offline_cmd(
         console.print("[red]FAIL[/red] 离线跑库失败")
         raise SystemExit(1)
 
+    console.print("\n[bold]数据整理[/bold]")
+    reorg_dir = reorganize_output(input_dir, output_dir)
+    console.print(f"[green]OK[/green] 已整理到: {reorg_dir}")
+
     if not no_plot:
-        _run_psd_plot(output_dir)
+        psd_save_dir = output_dir / "psd_bmpfile"
+        _run_psd_plot(reorg_dir, psd_save_dir)
 
     if not no_accuracy:
-        _run_accuracy(output_dir)
+        _run_accuracy(reorg_dir)
 
 
-def _run_psd_plot(output_dir: Path) -> None:
+def _run_psd_plot(result_dir: Path, save_dir: Path) -> None:
     """生成PSD时频图"""
     console.print("\n[bold]PSD时频图[/bold]")
     from health_tools.core.psd_plotter import PsdPlotter
 
     plotter = PsdPlotter()
-    saved = plotter.plot(output_dir)
+    saved = plotter.plot(result_dir, save_dir=save_dir)
     if saved:
-        console.print(f"[green]OK[/green] 生成 {len(saved)} 张时频图: {saved[0].parent}")
+        console.print(f"[green]OK[/green] 生成 {len(saved)} 张时频图: {save_dir}")
     else:
         console.print("[yellow]WARN[/yellow] 未找到PSD数据文件")
 

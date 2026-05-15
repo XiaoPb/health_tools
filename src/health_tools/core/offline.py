@@ -203,6 +203,50 @@ class OfflineRunner:
             os.chdir(old_cwd)
 
 
+RESULT_EXTENSIONS = [
+    "_result.vshb",
+    ".prepsd",
+    ".accxpsd",
+    ".accypsd",
+    ".acczpsd",
+    ".accrmspsd",
+]
+
+
+def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
+    """按输入目录的子目录结构重新整理输出文件
+
+    将 output_dir 根目录下平铺的结果文件，按源 CSV 所在子目录归类到
+    {output_dir}/数据整理/{子目录}/ 下。
+
+    Returns:
+        整理后的根目录路径
+    """
+    reorg_dir = output_dir / "数据整理"
+
+    source_map: Dict[str, str] = {}
+    for csv_file in input_dir.rglob("*.csv"):
+        rel = csv_file.relative_to(input_dir)
+        subdir = str(rel.parent) if len(rel.parts) > 1 else ""
+        source_map[csv_file.stem] = subdir
+
+    for result_file in output_dir.iterdir():
+        if not result_file.is_file():
+            continue
+        stem = result_file.stem
+        for ext in RESULT_EXTENSIONS:
+            if result_file.name.endswith(ext):
+                stem = result_file.name[: -len(ext)]
+                break
+
+        subdir = source_map.get(stem, "")
+        target_dir = reorg_dir / subdir if subdir else reorg_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(result_file, target_dir / result_file.name)
+
+    return reorg_dir
+
+
 class VshbParser:
     """解析 _result.vshb 文件"""
 

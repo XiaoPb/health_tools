@@ -57,7 +57,7 @@ class PsdPlotter:
             save_dir = result_dir / "bmpfile"
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        vshb_files = sorted(result_dir.glob("*_result.vshb"))
+        vshb_files = sorted(result_dir.rglob("*_result.vshb"))
         if not vshb_files:
             return []
 
@@ -75,8 +75,9 @@ class PsdPlotter:
                 mcu_hr = result[:, -2] if result.shape[1] >= 2 else np.zeros_like(second)
 
                 psd_all = []
+                psd_dir = vshb_path.parent
                 for ext in self.PSD_EXTENSIONS:
-                    psd_path = result_dir / (base_name + ext)
+                    psd_path = psd_dir / (base_name + ext)
                     if psd_path.exists():
                         psd_all.append(_load_csv_like_matlab(psd_path))
                     else:
