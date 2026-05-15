@@ -212,6 +212,17 @@ RESULT_EXTENSIONS = [
     ".accrmspsd",
 ]
 
+# exe输出文件名前缀格式: 数字序号_原始文件名
+_EXE_PREFIX_SEP = "_"
+
+
+def _strip_exe_prefix(name: str) -> str:
+    """去掉exe输出文件名的序号前缀，如 '000000_动态-夏-158' -> '动态-夏-158'"""
+    idx = name.find(_EXE_PREFIX_SEP)
+    if idx > 0 and name[:idx].isdigit():
+        return name[idx + 1 :]
+    return name
+
 
 def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
     """按输入目录的子目录结构重新整理输出文件
@@ -239,10 +250,21 @@ def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
                 stem = result_file.name[: -len(ext)]
                 break
 
-        if stem not in source_map:
+        bare_stem = _strip_exe_prefix(stem)
+
+        matched_key = None
+        if bare_stem in source_map:
+            matched_key = bare_stem
+        else:
+            for csv_stem in source_map:
+                if bare_stem.startswith(csv_stem) or csv_stem.startswith(bare_stem):
+                    matched_key = csv_stem
+                    break
+
+        if matched_key is None:
             continue
 
-        subdir = source_map[stem]
+        subdir = source_map[matched_key]
         target_dir = reorg_dir / subdir if subdir else reorg_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(result_file, target_dir / result_file.name)
