@@ -29,6 +29,12 @@ columns:                 # 列定义（按顺序）
 factory_columns:             # SNR/CTR/Noise 计算列（自动过滤全零列）
     - Rawdata{0-31}
 
+hr_ref_column:               # 心率参考列（列名: 1-based列索引）
+    REF_RESULT0: 46
+
+spo_ref_column:              # 血氧参考列（列名: 1-based列索引）
+    REF_RESULT5: 51
+
 factory_config:              # SNR 计算参数
   sample_rate: 100     # 采样率 Hz
   snr:

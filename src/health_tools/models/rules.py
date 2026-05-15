@@ -43,6 +43,8 @@ class ChipRule:
     factory_config: Dict[str, Any] = field(default_factory=dict)
     chip_info: Dict[str, Any] = field(default_factory=dict)
     gain_tia_map: Dict[str, Any] = field(default_factory=dict)
+    hr_ref_column: Dict[str, int] = field(default_factory=dict)
+    spo_ref_column: Dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self):
         self.columns = expand_columns(self.columns)

@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -232,22 +232,23 @@ ACCURACY_METHODS = ["mae", "within_5", "within_10", "rmse", "correlation"]
 
 def calculate_offline_accuracy(
     output_dir: Path,
-) -> Tuple[Optional[pd.DataFrame], Dict[str, pd.DataFrame]]:
+) -> Optional[pd.DataFrame]:
     """计算离线跑库准确度
+
+    输出格式：每个文件一行，然后分类平均行，最后TOTAL行。
 
     Args:
         output_dir: 离线跑库输出根目录
 
     Returns:
-        (summary_df, per_file_dict): 汇总DataFrame和每个文件的详细DataFrame
+        完整报告DataFrame（含文件行+分类汇总+整体汇总）
     """
     vshb_files = sorted(output_dir.rglob("*_result.vshb"))
     if not vshb_files:
-        return None, {}
+        return None
 
     parser = VshbParser()
-    category_data: Dict[str, List[Dict]] = {}
-    per_file: Dict[str, pd.DataFrame] = {}
+    file_rows: List[Dict] = []
 
     for vshb_path in vshb_files:
         df = parser.parse(vshb_path)
@@ -256,61 +257,60 @@ def calculate_offline_accuracy(
 
         rel = vshb_path.relative_to(output_dir)
         category = rel.parts[0] if len(rel.parts) > 1 else "default"
-        per_file[str(rel)] = df
 
         offline_metrics = calculate_accuracy(df, "ref", "offline", ACCURACY_METHODS)
         online_metrics = calculate_accuracy(df, "ref", "online", ACCURACY_METHODS)
 
-        entry = {
+        row: Dict = {
             "file": vshb_path.stem.replace("_result", ""),
             "category": category,
             "samples": offline_metrics.get("samples", 0),
         }
         for key, val in offline_metrics.items():
             if key != "samples":
-                entry[f"offline_{key}"] = val
+                row[f"offline_{key}"] = round(val, 2)
         for key, val in online_metrics.items():
             if key != "samples":
-                entry[f"online_{key}"] = val
+                row[f"online_{key}"] = round(val, 2)
 
-        category_data.setdefault(category, []).append(entry)
+        file_rows.append(row)
 
-    if not category_data:
-        return None, per_file
+    if not file_rows:
+        return None
 
-    all_rows = []
-    all_rows = []
-    for entries in category_data.values():
-        all_rows.extend(entries)
+    # 按分类分组计算加权平均
+    category_data: Dict[str, List[Dict]] = {}
+    for row in file_rows:
+        category_data.setdefault(row["category"], []).append(row)
 
-    summary_rows = []
+    metric_cols = [c for c in file_rows[0] if c.startswith(("offline_", "online_"))]
+    summary_rows: List[Dict] = []
+
     total_samples = 0
-    total_metrics: Dict[str, float] = {}
+    total_weighted: Dict[str, float] = {col: 0.0 for col in metric_cols}
 
     for category, entries in sorted(category_data.items()):
-        cat_df = pd.DataFrame(entries)
-        samples = int(cat_df["samples"].sum())
-        total_samples += samples
-        row = {"category": category, "files": len(entries), "samples": samples}
+        cat_samples = sum(e["samples"] for e in entries)
+        total_samples += cat_samples
+        cat_row: Dict = {
+            "file": f"{category}(avg)",
+            "category": category,
+            "samples": cat_samples,
+        }
+        for col in metric_cols:
+            weighted = sum(e[col] * e["samples"] for e in entries)
+            total_weighted[col] += weighted
+            cat_row[col] = round(weighted / cat_samples, 2) if cat_samples > 0 else 0.0
+        summary_rows.append(cat_row)
 
-        for col in cat_df.columns:
-            if col.startswith(("offline_", "online_")) and col not in row:
-                weighted = (cat_df[col] * cat_df["samples"]).sum()
-                avg = weighted / samples if samples > 0 else 0.0
-                row[col] = round(avg, 2)
-                total_metrics[col] = total_metrics.get(col, 0.0) + weighted
-
-        summary_rows.append(row)
-
-    total_row = {
-        "category": "TOTAL",
-        "files": sum(len(e) for e in category_data.values()),
+    total_row: Dict = {
+        "file": "TOTAL",
+        "category": "",
         "samples": total_samples,
     }
-    for col, weighted_sum in total_metrics.items():
-        total_row[col] = round(weighted_sum / total_samples, 2) if total_samples > 0 else 0.0
+    for col in metric_cols:
+        total_row[col] = round(total_weighted[col] / total_samples, 2) if total_samples > 0 else 0.0
+    summary_rows.append(total_row)
 
-    summary_rows.insert(0, total_row)
-    summary_df = pd.DataFrame(summary_rows)
-
-    return summary_df, per_file
+    all_rows = file_rows + summary_rows
+    return pd.DataFrame(all_rows)

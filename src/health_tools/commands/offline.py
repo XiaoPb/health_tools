@@ -1,7 +1,7 @@
 """offline 命令：离线跑库"""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import click
 from rich.console import Console
@@ -18,13 +18,6 @@ from health_tools.core.offline import (
 console = Console()
 
 
-def _find_data_dirs(input_dir: Path) -> List[Path]:
-    """找到所有包含CSV文件的目录"""
-    csv_files = list(input_dir.rglob("*.csv"))
-    dirs = sorted(set(f.parent for f in csv_files))
-    return dirs
-
-
 @click.command("offline")
 @click.option("-i", "--input", "input_path", type=click.Path(), help="输入数据目录")
 @click.option("-o", "--output", "output_path", type=click.Path(), help="输出结果目录")
@@ -33,7 +26,9 @@ def _find_data_dirs(input_dir: Path) -> List[Path]:
 @click.option("--hba-fs", type=int, default=25, help="采样率 (默认25)")
 @click.option("--scene-en", type=int, default=0, help="场景适配 0=关 1=开")
 @click.option("--ch-num", type=int, default=2, help="有效PPG通道数 (默认2)")
+@click.option("--ref-col", type=int, help="源CSV中金标列索引(1-based，覆盖芯片配置)")
 @click.option("--no-accuracy", is_flag=True, help="跳过准确度统计")
+@click.option("--no-plot", is_flag=True, help="跳过PSD时频图绘制")
 @click.option("--list", "do_list", is_flag=True, help="列出可用芯片和版本")
 @click.option("--timeout", type=int, default=300, help="超时时间（秒，默认300）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
@@ -45,7 +40,9 @@ def offline_cmd(
     hba_fs: int,
     scene_en: int,
     ch_num: int,
+    ref_col: Optional[int],
     no_accuracy: bool,
+    no_plot: bool,
     do_list: bool,
     timeout: int,
     verbose: bool,
@@ -77,12 +74,21 @@ def offline_cmd(
         console.print("请先配置: ghealth_tool cfg --offline-path <路径>")
         raise SystemExit(1)
 
+    # 构建列索引覆盖
+    column_indices = None
+    if ref_col is not None:
+        from health_tools.core.offline import DEFAULT_COLUMN_INDICES
+
+        column_indices = dict(DEFAULT_COLUMN_INDICES.get(chip_name, {}))
+        column_indices["polar"] = ref_col
+
     runner = OfflineRunner(
         chip=chip_name,
         version=ver,
         hba_fs=hba_fs,
         scene_en=scene_en,
         ch_num=ch_num,
+        column_indices=column_indices,
     )
 
     console.print("[bold]离线跑库[/bold]")
@@ -91,58 +97,54 @@ def offline_cmd(
     console.print(f"  输入: {input_dir}")
     console.print(f"  输出: {output_dir}")
     console.print(f"  参数: hba_fs={hba_fs}, scene_en={scene_en}, ch_num={ch_num}")
+    if ref_col is not None:
+        console.print(f"  金标列: {ref_col}")
     console.print("")
 
-    data_dirs = _find_data_dirs(input_dir)
-    if not data_dirs:
-        console.print(f"[yellow]WARN[/yellow] 未找到CSV文件: {input_dir}")
-        return
+    success = runner.run(input_dir, output_dir, timeout=timeout)
+    if success:
+        console.print(f"[green]OK[/green] 离线跑库完成: {output_dir}")
+    else:
+        console.print("[red]FAIL[/red] 离线跑库失败")
+        raise SystemExit(1)
 
-    success_count = 0
-    fail_count = 0
-
-    for data_dir in data_dirs:
-        relative = data_dir.relative_to(input_dir)
-        out_dir = output_dir / relative if str(relative) != "." else output_dir
-
-        if verbose:
-            console.print(f"  处理: {relative}")
-
-        ok = runner.run(data_dir, out_dir, timeout=timeout)
-        if ok:
-            success_count += 1
-            if verbose:
-                console.print(f"  [green]OK[/green] {relative}")
-        else:
-            fail_count += 1
-            console.print(f"  [red]FAIL[/red] {relative}")
-
-    console.print(
-        f"\n[green]OK[/green] 离线跑库完成: {success_count} 成功"
-        + (f", {fail_count} 失败" if fail_count else "")
-    )
+    if not no_plot:
+        _run_psd_plot(output_dir)
 
     if not no_accuracy:
         _run_accuracy(output_dir)
+
+
+def _run_psd_plot(output_dir: Path) -> None:
+    """生成PSD时频图"""
+    console.print("\n[bold]PSD时频图[/bold]")
+    from health_tools.core.psd_plotter import PsdPlotter
+
+    plotter = PsdPlotter()
+    saved = plotter.plot(output_dir)
+    if saved:
+        console.print(f"[green]OK[/green] 生成 {len(saved)} 张时频图: {saved[0].parent}")
+    else:
+        console.print("[yellow]WARN[/yellow] 未找到PSD数据文件")
 
 
 def _run_accuracy(output_dir: Path) -> None:
     """执行准确度统计"""
     console.print("\n[bold]准确度统计[/bold]")
 
-    summary_df, _ = calculate_offline_accuracy(output_dir)
-    if summary_df is None or summary_df.empty:
+    report_df = calculate_offline_accuracy(output_dir)
+    if report_df is None or report_df.empty:
         console.print("[yellow]WARN[/yellow] 未找到有效的 .vshb 结果文件")
         return
 
     report_path = output_dir / "accuracy_report.csv"
-    summary_df.to_csv(report_path, index=False)
+    report_df.to_csv(report_path, index=False)
     console.print(f"[green]OK[/green] 报告已保存: {report_path}")
 
     table = Table(title="在线/离线准确度")
-    for col in summary_df.columns:
+    for col in report_df.columns:
         table.add_column(col)
-    for _, row in summary_df.iterrows():
+    for _, row in report_df.iterrows():
         table.add_row(*[str(v) for v in row.values])
     console.print(table)
 
