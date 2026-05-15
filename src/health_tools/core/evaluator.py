@@ -90,6 +90,28 @@ class BatchEvaluator:
             default=rule.default_category,
         )
 
+    def _resolve_column(self, df: pd.DataFrame, col_name: str, col_type: str) -> Optional[str]:
+        """解析列名，支持按名称或按芯片规则的列索引查找"""
+        if col_name in df.columns:
+            return col_name
+
+        if self.chip_rule:
+            ref_map = {}
+            if col_type == "ref":
+                if self.rule.type == "hr":
+                    ref_map = self.chip_rule.hr_ref_column
+                elif self.rule.type == "spo2":
+                    ref_map = self.chip_rule.spo_ref_column
+            if ref_map:
+                for name, idx in ref_map.items():
+                    col_idx = idx - 1
+                    if 0 <= col_idx < len(df.columns):
+                        actual_col = df.columns[col_idx]
+                        if pd.to_numeric(df[actual_col], errors="coerce").ne(0).any():
+                            return actual_col
+
+        return None
+
     def _calculate_first_output_time(self, pred_series: pd.Series) -> float:
         values = pd.to_numeric(pred_series, errors="coerce")
         valid = values[(values.notna()) & (values != 0)]
@@ -108,10 +130,10 @@ class BatchEvaluator:
         if df is None or df.empty:
             return None
 
-        ref_col = self.rule.ref_column
-        pred_col = self.rule.pred_column
+        ref_col = self._resolve_column(df, self.rule.ref_column, "ref")
+        pred_col = self._resolve_column(df, self.rule.pred_column, "pred")
 
-        if ref_col not in df.columns or pred_col not in df.columns:
+        if ref_col is None or pred_col is None:
             return None
 
         category = self.classifier.classify(file_path)

@@ -116,6 +116,8 @@ class RuleLoader:
             factory_config=data.get("factory_config", {}),
             chip_info=data.get("chip_info", {}),
             gain_tia_map=data.get("gain_tia_map", {}),
+            hr_ref_column=data.get("hr_ref_column", {}),
+            spo_ref_column=data.get("spo_ref_column", {}),
         )
 
     @classmethod
