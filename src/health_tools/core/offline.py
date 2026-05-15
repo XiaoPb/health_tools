@@ -267,7 +267,7 @@ def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
         subdir = source_map[matched_key]
         target_dir = reorg_dir / subdir if subdir else reorg_dir
         target_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(result_file, target_dir / result_file.name)
+        shutil.move(str(result_file), str(target_dir / result_file.name))
 
     return reorg_dir
 
