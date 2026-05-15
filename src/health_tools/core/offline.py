@@ -217,7 +217,7 @@ def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
     """按输入目录的子目录结构重新整理输出文件
 
     将 output_dir 根目录下平铺的结果文件，按源 CSV 所在子目录归类到
-    {output_dir}/数据整理/{子目录}/ 下。
+    {output_dir}/数据整理/{子目录}/ 下。仅整理能匹配到源 CSV 的文件。
 
     Returns:
         整理后的根目录路径
@@ -239,7 +239,10 @@ def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
                 stem = result_file.name[: -len(ext)]
                 break
 
-        subdir = source_map.get(stem, "")
+        if stem not in source_map:
+            continue
+
+        subdir = source_map[stem]
         target_dir = reorg_dir / subdir if subdir else reorg_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(result_file, target_dir / result_file.name)
