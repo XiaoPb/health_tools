@@ -1,7 +1,7 @@
 """PSD时频图绘制（离线跑库结果可视化）"""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,6 +17,18 @@ def _load_csv_like_matlab(path: Path) -> np.ndarray:
         data = data.reshape(1, -1)
     mask = ~np.all(np.isnan(data), axis=0)
     return data[:, mask]
+
+
+def _calc_metrics(ref: np.ndarray, pred: np.ndarray) -> Dict[str, float]:
+    """计算±10bpm准确度和MAE"""
+    valid = ~(np.isnan(ref) | np.isnan(pred)) & (ref > 0)
+    r, p = ref[valid], pred[valid]
+    if len(r) == 0:
+        return {"within_10": 0.0, "mae": 0.0}
+    diff = np.abs(r - p)
+    within_10 = float(np.mean(diff <= 10) * 100)
+    mae = float(np.mean(diff))
+    return {"within_10": round(within_10, 1), "mae": round(mae, 2)}
 
 
 def _imagesc_exact(ax, psd: np.ndarray, title: str) -> None:
@@ -101,7 +113,35 @@ class PsdPlotter:
                         ax.legend(["pred(offline)", "polar(ref)", "mcu(online)"])
 
                 fig.subplots_adjust(
-                    left=0.03, right=0.995, bottom=0.05, top=0.95, wspace=0.08, hspace=0.25
+                    left=0.03, right=0.995, bottom=0.05, top=0.88, wspace=0.08, hspace=0.25
+                )
+
+                offline_m = _calc_metrics(polar_hr, hba_out)
+                online_m = _calc_metrics(polar_hr, mcu_hr)
+                fig.text(
+                    0.5,
+                    0.98,
+                    base_name,
+                    ha="center",
+                    va="top",
+                    fontsize=12,
+                    fontweight="bold",
+                )
+                fig.text(
+                    0.5,
+                    0.95,
+                    f"Offline: ±10bpm={offline_m['within_10']}%  MAE={offline_m['mae']}",
+                    ha="center",
+                    va="top",
+                    fontsize=10,
+                )
+                fig.text(
+                    0.5,
+                    0.92,
+                    f"Online:  ±10bpm={online_m['within_10']}%  MAE={online_m['mae']}",
+                    ha="center",
+                    va="top",
+                    fontsize=10,
                 )
 
                 save_path = save_dir / f"{base_name}.png"
