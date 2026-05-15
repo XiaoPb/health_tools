@@ -270,13 +270,14 @@ class FactoryCalculator:
             return 0.0, 0.0
 
         avg = float(np.mean(stable_data))
+        signal = avg - self.adc_offset
         std_raw = float(np.std(stable_data))
 
         filtered = highpass_filter(stable_data, cutoff=0.5, fs=self.sample_rate)
         std_filtered = float(np.std(filtered))
 
-        snr_raw = 20.0 * np.log10(avg / std_raw) if (avg > 0 and std_raw > 0) else 0.0
-        snr = 20.0 * np.log10(avg / std_filtered) if (avg > 0 and std_filtered > 0) else 0.0
+        snr_raw = 20.0 * np.log10(signal / std_raw) if (signal > 0 and std_raw > 0) else 0.0
+        snr = 20.0 * np.log10(signal / std_filtered) if (signal > 0 and std_filtered > 0) else 0.0
         return snr_raw, snr
 
     def calculate_noise(self, stable_data: np.ndarray) -> tuple:

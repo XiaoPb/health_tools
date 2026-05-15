@@ -27,6 +27,7 @@ COMMAND_MAP = {
     "cfg": ("health_tools.commands.config", "config_cmd"),
     "evaluate": ("health_tools.commands.evaluate", "evaluate_cmd"),
     "eval": ("health_tools.commands.evaluate", "evaluate_cmd"),
+    "offline": ("health_tools.commands.offline", "offline_cmd"),
     "ui": ("health_tools.commands.ui", "ui_cmd"),
 }
 
@@ -42,6 +43,7 @@ PRIMARY_COMMANDS = [
     "factory",
     "config",
     "evaluate",
+    "offline",
     "ui",
 ]
 

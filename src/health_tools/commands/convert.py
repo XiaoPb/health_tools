@@ -231,9 +231,11 @@ def convert_cmd(
             )
         else:
             output_path_obj.mkdir(parents=True, exist_ok=True)
-            files = list(input_path_obj.glob("*.csv"))
+            files = list(input_path_obj.rglob("*.csv"))
             for file in files:
-                out_file = output_path_obj / file.name
+                relative = file.relative_to(input_path_obj)
+                out_file = output_path_obj / relative
+                out_file.parent.mkdir(parents=True, exist_ok=True)
                 _convert_file(
                     file, out_file, converter, input_csv_config, output_csv_config, verbose
                 )

@@ -39,7 +39,14 @@ def _parse_metric_cfg(value: Optional[str]) -> Optional[dict]:
 
 
 def _build_calculator(
-    chip_rule, gain, current, sample_rate, snr_override, ctr_override, noise_override
+    chip_rule,
+    gain,
+    current,
+    sample_rate,
+    snr_override,
+    ctr_override,
+    noise_override,
+    adc_offset_override=None,
 ) -> FactoryCalculator:
     """从 chip_rule 构建 FactoryCalculator"""
     fc = chip_rule.factory_config if chip_rule else {}
@@ -54,6 +61,9 @@ def _build_calculator(
         adc_offset = float(chip_rule.chip_info.get("adc_offset", 0))
         adc_vref = float(chip_rule.chip_info.get("adc_vref", 1.8))
         tia_ratio = float(chip_rule.chip_info.get("tia_ratio", 2.0))
+
+    if adc_offset_override is not None:
+        adc_offset = adc_offset_override
 
     return FactoryCalculator(
         gain=gain,
@@ -77,7 +87,7 @@ def _print_adc_info(calculator: FactoryCalculator):
         f"adc_vref: {calculator.adc_vref}  "
         f"tia_ratio: {calculator.tia_ratio}[/green]"
     )
-    console.print("[green]SNR(dB) = 20 * log10(Mean / Std_filtered)[/green]")
+    console.print("[green]SNR(dB) = 20 * log10((Mean - adc_offset) / Std_filtered)[/green]")
     console.print("[green]Noise(uV) = 6 * Std_filtered * adc_vref * 1e6 / adc_full_scale[/green]")
     console.print(
         "[green]rawdata_uv = (value - adc_offset) / adc_full_scale * adc_vref * 1e6[/green]"
@@ -114,6 +124,7 @@ def _print_chip_info(results, file_name: str):
 @click.option("--snr-cfg", help="SNR配置: skip_head,skip_tail,min_duration (如 10,10,90)")
 @click.option("--ctr-cfg", help="CTR配置: skip_head,skip_tail,min_duration (如 1,0,2)")
 @click.option("--noise-cfg", help="Noise配置: skip_head,skip_tail,min_duration (如 2,0,4)")
+@click.option("--adc-offset", type=float, help="ADC偏移量（覆盖芯片配置）")
 @click.option("--channels", help="指定计算的通道（逗号分隔）")
 @click.option("-o", "--output", "output_path", help="输出结果CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
@@ -129,6 +140,7 @@ def factory_cmd(
     snr_cfg: Optional[str],
     ctr_cfg: Optional[str],
     noise_cfg: Optional[str],
+    adc_offset: Optional[float],
     channels: Optional[str],
     output_path: Optional[str],
     verbose: bool,
@@ -153,7 +165,14 @@ def factory_cmd(
         raise SystemExit(1)
 
     calculator = _build_calculator(
-        chip_rule, gain, current, sample_rate, snr_override, ctr_override, noise_override
+        chip_rule,
+        gain,
+        current,
+        sample_rate,
+        snr_override,
+        ctr_override,
+        noise_override,
+        adc_offset_override=adc_offset,
     )
 
     extractor = None
@@ -163,7 +182,7 @@ def factory_cmd(
     channel_list = channels.split(",") if channels else None
 
     if input_p.is_dir():
-        csv_files = sorted(input_p.glob("*.csv"))
+        csv_files = sorted(input_p.rglob("*.csv"))
         if not csv_files:
             console.print(f"[yellow]WARN[/yellow] 目录中无CSV文件: {input_path}")
             return
@@ -177,11 +196,12 @@ def factory_cmd(
             ch_list = channel_list or _get_channel_list(None, chip_rule, df)
             results = calculator.calculate(df, ch_list, extractor=extractor)
             if results:
-                _print_chip_info(results, f.name)
-                file_df = calculator.to_dataframe(results, file_name=f.name)
+                rel_name = str(f.relative_to(input_p))
+                _print_chip_info(results, rel_name)
+                file_df = calculator.to_dataframe(results, file_name=rel_name)
                 all_dfs.append(file_df)
                 if verbose:
-                    console.print(f"  [dim]{f.name}: {len(results)} 通道[/dim]")
+                    console.print(f"  [dim]{rel_name}: {len(results)} 通道[/dim]")
 
         if not all_dfs:
             console.print("[yellow]WARN[/yellow] 无有效数据通道")
