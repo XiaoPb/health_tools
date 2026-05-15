@@ -1,7 +1,7 @@
 """offline 命令：离线跑库"""
 
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import click
 from rich.console import Console
@@ -9,12 +9,20 @@ from rich.table import Table
 
 from health_tools.core.offline import (
     OfflineRunner,
+    calculate_offline_accuracy,
     find_exe,
     get_offline_config,
     list_versions,
 )
 
 console = Console()
+
+
+def _find_data_dirs(input_dir: Path) -> List[Path]:
+    """找到所有包含CSV文件的目录"""
+    csv_files = list(input_dir.rglob("*.csv"))
+    dirs = sorted(set(f.parent for f in csv_files))
+    return dirs
 
 
 @click.command("offline")
@@ -25,6 +33,7 @@ console = Console()
 @click.option("--hba-fs", type=int, default=25, help="采样率 (默认25)")
 @click.option("--scene-en", type=int, default=0, help="场景适配 0=关 1=开")
 @click.option("--ch-num", type=int, default=2, help="有效PPG通道数 (默认2)")
+@click.option("--no-accuracy", is_flag=True, help="跳过准确度统计")
 @click.option("--list", "do_list", is_flag=True, help="列出可用芯片和版本")
 @click.option("--timeout", type=int, default=300, help="超时时间（秒，默认300）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
@@ -36,6 +45,7 @@ def offline_cmd(
     hba_fs: int,
     scene_en: int,
     ch_num: int,
+    no_accuracy: bool,
     do_list: bool,
     timeout: int,
     verbose: bool,
@@ -83,12 +93,58 @@ def offline_cmd(
     console.print(f"  参数: hba_fs={hba_fs}, scene_en={scene_en}, ch_num={ch_num}")
     console.print("")
 
-    success = runner.run(input_dir, output_dir, timeout=timeout)
-    if success:
-        console.print(f"[green]OK[/green] 离线跑库完成: {output_dir}")
-    else:
-        console.print("[red]FAIL[/red] 离线跑库失败")
-        raise SystemExit(1)
+    data_dirs = _find_data_dirs(input_dir)
+    if not data_dirs:
+        console.print(f"[yellow]WARN[/yellow] 未找到CSV文件: {input_dir}")
+        return
+
+    success_count = 0
+    fail_count = 0
+
+    for data_dir in data_dirs:
+        relative = data_dir.relative_to(input_dir)
+        out_dir = output_dir / relative if str(relative) != "." else output_dir
+
+        if verbose:
+            console.print(f"  处理: {relative}")
+
+        ok = runner.run(data_dir, out_dir, timeout=timeout)
+        if ok:
+            success_count += 1
+            if verbose:
+                console.print(f"  [green]OK[/green] {relative}")
+        else:
+            fail_count += 1
+            console.print(f"  [red]FAIL[/red] {relative}")
+
+    console.print(
+        f"\n[green]OK[/green] 离线跑库完成: {success_count} 成功"
+        + (f", {fail_count} 失败" if fail_count else "")
+    )
+
+    if not no_accuracy:
+        _run_accuracy(output_dir)
+
+
+def _run_accuracy(output_dir: Path) -> None:
+    """执行准确度统计"""
+    console.print("\n[bold]准确度统计[/bold]")
+
+    summary_df, _ = calculate_offline_accuracy(output_dir)
+    if summary_df is None or summary_df.empty:
+        console.print("[yellow]WARN[/yellow] 未找到有效的 .vshb 结果文件")
+        return
+
+    report_path = output_dir / "accuracy_report.csv"
+    summary_df.to_csv(report_path, index=False)
+    console.print(f"[green]OK[/green] 报告已保存: {report_path}")
+
+    table = Table(title="在线/离线准确度")
+    for col in summary_df.columns:
+        table.add_column(col)
+    for _, row in summary_df.iterrows():
+        table.add_row(*[str(v) for v in row.values])
+    console.print(table)
 
 
 def _show_versions(chip: Optional[str]) -> None:

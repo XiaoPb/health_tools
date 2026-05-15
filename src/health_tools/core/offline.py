@@ -5,9 +5,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
+
+import pandas as pd
 
 from health_tools.config import CONFIG_DIR, load_config, save_config
+from health_tools.utils.accuracy import calculate_accuracy
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"
@@ -198,3 +201,116 @@ class OfflineRunner:
             return False
         finally:
             os.chdir(old_cwd)
+
+
+class VshbParser:
+    """解析 _result.vshb 文件"""
+
+    COL_TIME = 0
+    COL_OFFLINE = 1
+    COL_REF = 2
+    COL_ONLINE = 30
+
+    def parse(self, vshb_path: Path) -> pd.DataFrame:
+        """解析vshb为DataFrame，列名: time, offline, ref, online"""
+        df = pd.read_csv(vshb_path, header=None)
+        if df.shape[1] <= self.COL_ONLINE:
+            return pd.DataFrame(columns=["time", "offline", "ref", "online"])
+        result = pd.DataFrame(
+            {
+                "time": pd.to_numeric(df.iloc[:, self.COL_TIME], errors="coerce"),
+                "offline": pd.to_numeric(df.iloc[:, self.COL_OFFLINE], errors="coerce"),
+                "ref": pd.to_numeric(df.iloc[:, self.COL_REF], errors="coerce"),
+                "online": pd.to_numeric(df.iloc[:, self.COL_ONLINE], errors="coerce"),
+            }
+        )
+        return result[result["ref"] > 0].reset_index(drop=True)
+
+
+ACCURACY_METHODS = ["mae", "within_5", "within_10", "rmse", "correlation"]
+
+
+def calculate_offline_accuracy(
+    output_dir: Path,
+) -> Tuple[Optional[pd.DataFrame], Dict[str, pd.DataFrame]]:
+    """计算离线跑库准确度
+
+    Args:
+        output_dir: 离线跑库输出根目录
+
+    Returns:
+        (summary_df, per_file_dict): 汇总DataFrame和每个文件的详细DataFrame
+    """
+    vshb_files = sorted(output_dir.rglob("*_result.vshb"))
+    if not vshb_files:
+        return None, {}
+
+    parser = VshbParser()
+    category_data: Dict[str, List[Dict]] = {}
+    per_file: Dict[str, pd.DataFrame] = {}
+
+    for vshb_path in vshb_files:
+        df = parser.parse(vshb_path)
+        if df.empty:
+            continue
+
+        rel = vshb_path.relative_to(output_dir)
+        category = rel.parts[0] if len(rel.parts) > 1 else "default"
+        per_file[str(rel)] = df
+
+        offline_metrics = calculate_accuracy(df, "ref", "offline", ACCURACY_METHODS)
+        online_metrics = calculate_accuracy(df, "ref", "online", ACCURACY_METHODS)
+
+        entry = {
+            "file": vshb_path.stem.replace("_result", ""),
+            "category": category,
+            "samples": offline_metrics.get("samples", 0),
+        }
+        for key, val in offline_metrics.items():
+            if key != "samples":
+                entry[f"offline_{key}"] = val
+        for key, val in online_metrics.items():
+            if key != "samples":
+                entry[f"online_{key}"] = val
+
+        category_data.setdefault(category, []).append(entry)
+
+    if not category_data:
+        return None, per_file
+
+    all_rows = []
+    all_rows = []
+    for entries in category_data.values():
+        all_rows.extend(entries)
+
+    summary_rows = []
+    total_samples = 0
+    total_metrics: Dict[str, float] = {}
+
+    for category, entries in sorted(category_data.items()):
+        cat_df = pd.DataFrame(entries)
+        samples = int(cat_df["samples"].sum())
+        total_samples += samples
+        row = {"category": category, "files": len(entries), "samples": samples}
+
+        for col in cat_df.columns:
+            if col.startswith(("offline_", "online_")) and col not in row:
+                weighted = (cat_df[col] * cat_df["samples"]).sum()
+                avg = weighted / samples if samples > 0 else 0.0
+                row[col] = round(avg, 2)
+                total_metrics[col] = total_metrics.get(col, 0.0) + weighted
+
+        summary_rows.append(row)
+
+    total_row = {
+        "category": "TOTAL",
+        "files": sum(len(e) for e in category_data.values()),
+        "samples": total_samples,
+    }
+    for col, weighted_sum in total_metrics.items():
+        total_row[col] = round(weighted_sum / total_samples, 2) if total_samples > 0 else 0.0
+
+    summary_rows.insert(0, total_row)
+    summary_df = pd.DataFrame(summary_rows)
+
+    return summary_df, per_file
