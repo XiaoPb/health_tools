@@ -144,7 +144,7 @@ def _run_accuracy(output_dir: Path) -> None:
         return
 
     report_path = output_dir / "accuracy_report.csv"
-    report_df.to_csv(report_path, index=False)
+    report_df.to_csv(report_path, index=False, encoding="utf-8-sig")
     console.print(f"[green]OK[/green] 报告已保存: {report_path}")
 
     table = Table(title="在线/离线准确度")
