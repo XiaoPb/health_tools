@@ -247,9 +247,20 @@ def convert_cmd(
 def _read_input_csv(file_path: Path, csv_config: Optional[dict]) -> pd.DataFrame:
     if csv_config:
         handler = CSVHandler(ChipRule(chip="input", csv=csv_config, columns=[]))
-        _, df = handler.read(file_path, auto_detect_encoding=False)
-        return df
-    return pd.read_csv(file_path)
+        try:
+            _, df = handler.read(file_path, auto_detect_encoding=False)
+            return df
+        except Exception:
+            header_row = csv_config.get("header_row", 1) - 1
+            data_start = csv_config.get("data_start_row", 2) - 1
+            skip = list(range(0, header_row)) + list(range(header_row + 1, data_start))
+            return pd.read_csv(
+                file_path,
+                header=0,
+                skiprows=skip if skip else None,
+                on_bad_lines="skip",
+            )
+    return pd.read_csv(file_path, on_bad_lines="skip")
 
 
 def _write_output_csv(df: pd.DataFrame, output_file: Path, csv_config: Optional[dict]) -> None:
