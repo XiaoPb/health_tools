@@ -30,6 +30,7 @@ console = Console()
 @click.option("--ref-col", type=int, help="源CSV中金标列索引(1-based，覆盖芯片配置)")
 @click.option("--no-accuracy", is_flag=True, help="跳过准确度统计")
 @click.option("--no-plot", is_flag=True, help="跳过PSD时频图绘制")
+@click.option("--no-run", is_flag=True, help="跳过跑库，直接整理/统计/绘图")
 @click.option("--list", "do_list", is_flag=True, help="列出可用芯片和版本")
 @click.option("--timeout", type=int, default=300, help="超时时间（秒，默认300）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
@@ -44,6 +45,7 @@ def offline_cmd(
     ref_col: Optional[int],
     no_accuracy: bool,
     no_plot: bool,
+    no_run: bool,
     do_list: bool,
     timeout: int,
     verbose: bool,
@@ -53,9 +55,6 @@ def offline_cmd(
         _show_versions(chip_name)
         return
 
-    if not chip_name:
-        console.print("[red]错误: 需要指定 --chip 参数[/red]")
-        raise SystemExit(1)
     if not input_path:
         console.print("[red]错误: 需要指定 --input 参数[/red]")
         raise SystemExit(1)
@@ -69,45 +68,49 @@ def offline_cmd(
         output_path = str(input_dir.parent / f"{input_dir.name}_offline_result")
     output_dir = Path(output_path)
 
-    exe_path = find_exe(chip_name, ver)
-    if not exe_path:
-        console.print(f"[red]错误: 未找到 {chip_name} 的离线工具[/red]")
-        console.print("请先配置: ghealth_tool cfg --offline-path <路径>")
-        raise SystemExit(1)
+    if not no_run:
+        if not chip_name:
+            console.print("[red]错误: 需要指定 --chip 参数[/red]")
+            raise SystemExit(1)
 
-    # 构建列索引覆盖
-    column_indices = None
-    if ref_col is not None:
-        from health_tools.core.offline import DEFAULT_COLUMN_INDICES
+        exe_path = find_exe(chip_name, ver)
+        if not exe_path:
+            console.print(f"[red]错误: 未找到 {chip_name} 的离线工具[/red]")
+            console.print("请先配置: ghealth_tool cfg --offline-path <路径>")
+            raise SystemExit(1)
 
-        column_indices = dict(DEFAULT_COLUMN_INDICES.get(chip_name, {}))
-        column_indices["polar"] = ref_col
+        column_indices = None
+        if ref_col is not None:
+            from health_tools.core.offline import DEFAULT_COLUMN_INDICES
 
-    runner = OfflineRunner(
-        chip=chip_name,
-        version=ver,
-        hba_fs=hba_fs,
-        scene_en=scene_en,
-        ch_num=ch_num,
-        column_indices=column_indices,
-    )
+            column_indices = dict(DEFAULT_COLUMN_INDICES.get(chip_name, {}))
+            column_indices["polar"] = ref_col
 
-    console.print("[bold]离线跑库[/bold]")
-    console.print(f"  芯片: {chip_name}")
-    console.print(f"  版本: {exe_path.parent.name}")
-    console.print(f"  输入: {input_dir}")
-    console.print(f"  输出: {output_dir}")
-    console.print(f"  参数: hba_fs={hba_fs}, scene_en={scene_en}, ch_num={ch_num}")
-    if ref_col is not None:
-        console.print(f"  金标列: {ref_col}")
-    console.print("")
+        runner = OfflineRunner(
+            chip=chip_name,
+            version=ver,
+            hba_fs=hba_fs,
+            scene_en=scene_en,
+            ch_num=ch_num,
+            column_indices=column_indices,
+        )
 
-    success = runner.run(input_dir, output_dir, timeout=timeout)
-    if success:
-        console.print(f"[green]OK[/green] 离线跑库完成: {output_dir}")
-    else:
-        console.print("[red]FAIL[/red] 离线跑库失败")
-        raise SystemExit(1)
+        console.print("[bold]离线跑库[/bold]")
+        console.print(f"  芯片: {chip_name}")
+        console.print(f"  版本: {exe_path.parent.name}")
+        console.print(f"  输入: {input_dir}")
+        console.print(f"  输出: {output_dir}")
+        console.print(f"  参数: hba_fs={hba_fs}, scene_en={scene_en}, ch_num={ch_num}")
+        if ref_col is not None:
+            console.print(f"  金标列: {ref_col}")
+        console.print("")
+
+        success = runner.run(input_dir, output_dir, timeout=timeout)
+        if success:
+            console.print(f"[green]OK[/green] 离线跑库完成: {output_dir}")
+        else:
+            console.print("[red]FAIL[/red] 离线跑库失败")
+            raise SystemExit(1)
 
     console.print("\n[bold]数据整理[/bold]")
     reorg_dir = reorganize_output(input_dir, output_dir)
