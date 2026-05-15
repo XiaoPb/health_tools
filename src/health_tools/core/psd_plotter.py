@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from rich.console import Console
 
+plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei"]
+plt.rcParams["axes.unicode_minus"] = False
+
 console = Console()
 
 
