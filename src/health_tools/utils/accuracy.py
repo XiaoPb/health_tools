@@ -347,6 +347,23 @@ class AccuracyCalculator:
         console.print(f"\n[green]报告已保存: {output_path}[/green]")
 
 
+def format_metric_name(metric: str) -> str:
+    """将指标名转换为显示格式（如 within_5 → ±5BPM, mae → MAE）"""
+    if metric.startswith("within_"):
+        threshold = metric.split("_")[1]
+        return f"±{threshold}BPM"
+    name_map = {
+        "mae": "MAE",
+        "rmse": "RMSE",
+        "std": "STD",
+        "correlation": "CORR",
+        "bias": "BIAS",
+        "mape": "MAPE",
+        "r2": "R²",
+    }
+    return name_map.get(metric, metric.upper())
+
+
 ACCURACY_FUNCTIONS = {
     "std": calculate_std,
     "rmse": calculate_rmse,

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from health_tools.config import CONFIG_DIR, load_config, save_config
-from health_tools.utils.accuracy import calculate_accuracy
+from health_tools.utils.accuracy import calculate_accuracy, format_metric_name
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"
@@ -337,10 +337,10 @@ def calculate_offline_accuracy(
         }
         for key, val in offline_metrics.items():
             if key != "samples":
-                row[f"offline_{key}"] = round(val, 2)
+                row[f"{format_metric_name(key)}(offline)"] = round(val, 2)
         for key, val in online_metrics.items():
             if key != "samples":
-                row[f"online_{key}"] = round(val, 2)
+                row[f"{format_metric_name(key)}(online)"] = round(val, 2)
 
         file_rows.append(row)
 
@@ -352,7 +352,7 @@ def calculate_offline_accuracy(
     for row in file_rows:
         category_data.setdefault(row["category"], []).append(row)
 
-    metric_cols = [c for c in file_rows[0] if c.startswith(("offline_", "online_"))]
+    metric_cols = [c for c in file_rows[0] if c not in ("file", "category", "samples")]
     summary_rows: List[Dict] = []
 
     total_samples = 0
