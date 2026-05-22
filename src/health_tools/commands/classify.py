@@ -94,7 +94,7 @@ def classify_cmd(
     if input_path_obj.is_file():
         files = [input_path_obj]
     elif input_path_obj.is_dir():
-        files = list(input_path_obj.glob("*.csv"))
+        files = list(input_path_obj.rglob("*.csv"))
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
