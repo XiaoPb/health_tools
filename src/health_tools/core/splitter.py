@@ -221,11 +221,12 @@ class DataSplitter:
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
 
-        files = list(input_dir.glob("*.csv"))
+        files = list(input_dir.rglob("*.csv"))
         all_output_files = []
 
         for file in files:
-            file_output_dir = output_dir / file.stem
+            relative = file.relative_to(input_dir)
+            file_output_dir = output_dir / relative.parent / file.stem
             output_files = self.split_file(
                 file,
                 file_output_dir,
