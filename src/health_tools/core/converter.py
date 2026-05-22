@@ -85,14 +85,27 @@ class DataConverter:
             resolved = self._resolve_column_name(col, df)
             if resolved is None:
                 continue
-            series = df[resolved].reset_index(drop=True)
-            nonzero_mask = series.ne(0)
-            if not nonzero_mask.any():
+            values = df[resolved].to_numpy(dtype=np.int64, copy=True)
+            first_nonzero = None
+            for i in range(len(values)):
+                v = values[i]
+                if isinstance(v, np.ndarray):
+                    v = v.item() if v.size == 1 else 0
+                if v != 0:
+                    first_nonzero = i
+                    break
+            if first_nonzero is None:
                 continue
-            first_pos = int(nonzero_mask.idxmax())
-            filled = series.iloc[first_pos:].replace(0, pd.NA).ffill().fillna(0)
-            series.iloc[first_pos:] = filled.values
-            df[resolved] = series.values
+            last_val = values[first_nonzero]
+            for i in range(first_nonzero + 1, len(values)):
+                cur = values[i]
+                if isinstance(cur, np.ndarray):
+                    cur = cur.item() if cur.size == 1 else 0
+                if cur == 0:
+                    values[i] = last_val
+                else:
+                    last_val = cur
+            df[resolved] = values
         return df
 
     def _compute_column(self, formula: str, df: pd.DataFrame) -> pd.Series:
