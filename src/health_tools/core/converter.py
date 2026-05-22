@@ -91,7 +91,7 @@ class DataConverter:
                 continue
             first_pos = int(nonzero_mask.idxmax())
             filled = series.iloc[first_pos:].replace(0, pd.NA).ffill().fillna(0)
-            series.iloc[first_pos:] = filled
+            series.iloc[first_pos:] = filled.values
             df[resolved] = series.values
         return df
 
