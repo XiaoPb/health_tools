@@ -300,7 +300,7 @@ def _merge_and_convert(
     split: Optional[int],
     verbose: bool,
 ) -> None:
-    files = list(input_dir.glob("*.csv"))
+    files = list(input_dir.rglob("*.csv"))
     dfs = []
     for file in files:
         try:

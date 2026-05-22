@@ -87,7 +87,7 @@ def parse_cmd(
             )
     elif input_path_obj.is_dir():
         output_path_obj.mkdir(parents=True, exist_ok=True)
-        files = list(input_path_obj.glob("*.log")) + list(input_path_obj.glob("*.txt"))
+        files = list(input_path_obj.rglob("*.log")) + list(input_path_obj.rglob("*.txt"))
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),

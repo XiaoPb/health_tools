@@ -101,7 +101,7 @@ def plot_cmd(
             chip_rule,
         )
     elif input_path_obj.is_dir():
-        files = list(input_path_obj.glob("*.csv"))
+        files = list(input_path_obj.rglob("*.csv"))
         for file in files:
             _plot_file(
                 file,
