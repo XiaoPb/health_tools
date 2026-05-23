@@ -61,6 +61,8 @@ def classify_cmd(
     chip_rule = None
     if chip_name:
         chip_rule = RuleLoader.load_chip_rule(chip_name)
+    elif rule.target_chip:
+        chip_rule = RuleLoader.load_chip_rule(rule.target_chip)
 
     classifier = DataClassifier(rule, chip_rule)
 

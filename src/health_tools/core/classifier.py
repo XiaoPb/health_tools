@@ -187,7 +187,12 @@ class DataClassifier:
                         if "patterns" in params:
                             value = func(file_path, params["patterns"])
                         elif "column" in params:
-                            value = func(df, params["column"], params.get("samples", 50))
+                            column = params["column"]
+                            column_col = params.get("column_col")
+                            if column not in df.columns and column_col is not None:
+                                if isinstance(column_col, int) and column_col < len(df.columns):
+                                    column = df.columns[column_col]
+                            value = func(df, column, params.get("samples", 50))
                         else:
                             value = func(df, **params)
 
