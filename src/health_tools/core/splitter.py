@@ -234,7 +234,7 @@ class DataSplitter:
 
         for file in files:
             relative = file.relative_to(input_dir)
-            file_output_dir = output_dir / relative.parent / file.stem
+            file_output_dir = output_dir / relative.parent
             try:
                 output_files = self.split_file(
                     file,
