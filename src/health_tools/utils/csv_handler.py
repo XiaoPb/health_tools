@@ -72,6 +72,7 @@ class CSVHandler:
             chunks = pd.read_csv(
                 file_path,
                 header=0,
+                index_col=False,
                 skiprows=skiprows if skiprows else None,
                 delimiter=delimiter,
                 encoding=encoding,
@@ -82,6 +83,7 @@ class CSVHandler:
             chunks = pd.read_csv(
                 file_path,
                 header=header_row - 1,
+                index_col=False,
                 delimiter=delimiter,
                 encoding=encoding,
                 chunksize=MAX_CHUNK_SIZE,
@@ -91,6 +93,7 @@ class CSVHandler:
             chunks = pd.read_csv(
                 file_path,
                 header=None,
+                index_col=False,
                 skiprows=data_start_row - 1 if data_start_row > 1 else None,
                 delimiter=delimiter,
                 encoding=encoding,
