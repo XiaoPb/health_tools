@@ -14,7 +14,7 @@ console = Console()
 @click.option("-i", "--input", "input_path", required=True, help="输入文件或目录")
 @click.option("-o", "--output", "output_path", required=True, help="输出目录")
 @click.option("-c", "--chip", "chip_name", help="芯片类型（决定CSV格式）")
-@click.option("--by-column", "by_column", help="按指定列分割（如FRAME_ID）")
+@click.option("--by-column", "by_column", default="FRAME_ID", help="按指定列分割（默认: FRAME_ID）")
 @click.option("--column-value", "column_value", default=0, type=float, help="分割值（默认: 0）")
 @click.option("--by-size", "by_size", type=int, help="按行数分割")
 @click.option("--by-time", "by_time", type=float, help="按时间分割（秒）")
@@ -27,7 +27,7 @@ def split_cmd(
     input_path: str,
     output_path: str,
     chip_name: Optional[str],
-    by_column: Optional[str],
+    by_column: str,
     column_value: float,
     by_size: Optional[int],
     by_time: Optional[float],

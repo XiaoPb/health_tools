@@ -170,12 +170,12 @@ class DataSplitter:
         if df.empty:
             return []
 
-        if by_column:
-            dfs = split_by_column_value(df, by_column, column_value)
-        elif by_size:
+        if by_size:
             dfs = split_by_size(df, by_size)
         elif by_time and time_column:
             dfs = split_by_time(df, time_column, by_time)
+        elif by_column:
+            dfs = split_by_column_value(df, by_column, column_value)
         else:
             dfs = [df]
 
