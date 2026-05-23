@@ -12,44 +12,30 @@ class LogParser:
         self.chip_columns = chip_columns
 
     def _extract_record(self, line: str) -> Optional[dict]:
-        match = self.rule._compiled_regex.search(line)
-        if not match:
-            return None
-
-        groups = match.groups()
-        num_columns = len(self.rule.columns)
-
-        if len(groups) == num_columns:
-            return dict(zip(self.rule.columns, groups))
-
-        if len(groups) == 1 and num_columns > 1:
-            raw = groups[0].strip().rstrip(self.rule.separator)
-            parts = [p.strip() for p in raw.split(self.rule.separator)]
-            if len(parts) == num_columns:
-                return dict(zip(self.rule.columns, parts))
-            if len(parts) > num_columns:
-                return dict(zip(self.rule.columns, parts[:num_columns]))
-
-        return None
+        return self._extract_with_obj(line, self.rule)
 
     def _extract_record_with_pattern(self, line: str, pattern: ParsePattern) -> Optional[dict]:
-        match = pattern._compiled_regex.search(line)
+        return self._extract_with_obj(line, pattern)
+
+    @staticmethod
+    def _extract_with_obj(line: str, obj) -> Optional[dict]:
+        match = obj._compiled_regex.search(line)
         if not match:
             return None
 
         groups = match.groups()
-        num_columns = len(pattern.columns)
+        num_columns = len(obj.columns)
 
         if len(groups) == num_columns:
-            return dict(zip(pattern.columns, groups))
+            return dict(zip(obj.columns, groups))
 
         if len(groups) == 1 and num_columns > 1:
-            raw = groups[0].strip().rstrip(pattern.separator)
-            parts = [p.strip() for p in raw.split(pattern.separator)]
+            raw = groups[0].strip().rstrip(obj.separator)
+            parts = [p.strip() for p in raw.split(obj.separator)]
             if len(parts) == num_columns:
-                return dict(zip(pattern.columns, parts))
+                return dict(zip(obj.columns, parts))
             if len(parts) > num_columns:
-                return dict(zip(pattern.columns, parts[:num_columns]))
+                return dict(zip(obj.columns, parts[:num_columns]))
 
         return None
 

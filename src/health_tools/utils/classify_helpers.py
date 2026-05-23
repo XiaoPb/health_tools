@@ -1,10 +1,13 @@
 """分类辅助函数模块"""
 
+import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_median(
@@ -34,7 +37,8 @@ def calculate_median(
             return 0.0
 
         return float(np.median(values))
-    except Exception:
+    except Exception as e:
+        logger.warning("calculate_median 失败: %s", e)
         return 0.0
 
 
@@ -59,7 +63,8 @@ def calculate_mean(
             values = pd.to_numeric(df[column], errors="coerce")
 
         return float(values.mean())
-    except Exception:
+    except Exception as e:
+        logger.warning("calculate_mean 失败: %s", e)
         return 0.0
 
 
@@ -84,7 +89,8 @@ def calculate_std(
             values = pd.to_numeric(df[column], errors="coerce")
 
         return float(values.std())
-    except Exception:
+    except Exception as e:
+        logger.warning("calculate_std 失败: %s", e)
         return 0.0
 
 
@@ -160,7 +166,8 @@ def get_column_value(
         if isinstance(column, int):
             return df.iloc[row, column]
         return df[column].iloc[row]
-    except Exception:
+    except Exception as e:
+        logger.warning("get_column_value 失败: %s", e)
         return None
 
 
@@ -187,7 +194,8 @@ def calculate_percentile(
             values = pd.to_numeric(df[column], errors="coerce")
 
         return float(np.percentile(values.dropna(), percentile))
-    except Exception:
+    except Exception as e:
+        logger.warning("calculate_percentile 失败: %s", e)
         return 0.0
 
 
@@ -212,7 +220,8 @@ def count_values(
             values = df[column]
 
         return values.value_counts().to_dict()
-    except Exception:
+    except Exception as e:
+        logger.warning("count_values 失败: %s", e)
         return {}
 
 

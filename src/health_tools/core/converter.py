@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import List, Optional
 
@@ -5,6 +6,8 @@ import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import ConvertRule  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 
 class DataConverter:
@@ -142,5 +145,6 @@ class DataConverter:
                         result = result / (value if value != 0 else 1)
 
             return result if result is not None else pd.Series([0] * len(df))
-        except Exception:
+        except Exception as e:
+            logger.warning("计算列公式失败 [%s]: %s", formula, e)
             return pd.Series([0] * len(df))

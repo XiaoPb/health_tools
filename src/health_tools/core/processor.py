@@ -1,5 +1,6 @@
 """批量处理模块"""
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -9,6 +10,8 @@ from health_tools.models.rules import ChipRule
 from health_tools.core.splitter import DataSplitter
 from health_tools.utils.csv_handler import CSVHandler
 from health_tools.utils.parallel import parallel_process
+
+logger = logging.getLogger(__name__)
 
 
 class BatchProcessor:
@@ -125,7 +128,8 @@ class BatchProcessor:
                 return df
 
             return df[mask].reset_index(drop=True)
-        except Exception:
+        except Exception as e:
+            logger.warning("过滤操作失败 column=%s condition=%s: %s", column, condition, e)
             return df
 
     def process_directory(

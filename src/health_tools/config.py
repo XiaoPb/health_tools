@@ -1,6 +1,7 @@
 """全局配置管理"""
 
 import shutil
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +13,7 @@ DEFAULT_RULES_DIR = CONFIG_DIR / "rules"
 RULE_SUBDIRS = ["chip", "parse", "classify", "convert", "evaluate"]
 
 _config_cache: Optional[dict] = None
+_config_lock = threading.Lock()
 
 
 def _get_builtin_rules_path() -> Path:
@@ -28,14 +30,15 @@ def _get_builtin_rules_path() -> Path:
 
 def load_config() -> dict:
     global _config_cache
-    if _config_cache is not None:
+    with _config_lock:
+        if _config_cache is not None:
+            return _config_cache
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                _config_cache = yaml.safe_load(f) or {}
+        else:
+            _config_cache = {}
         return _config_cache
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            _config_cache = yaml.safe_load(f) or {}
-    else:
-        _config_cache = {}
-    return _config_cache
 
 
 def save_config(config: dict) -> None:
@@ -43,7 +46,8 @@ def save_config(config: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    _config_cache = config
+    with _config_lock:
+        _config_cache = config
 
 
 def get_user_rules_dir() -> Optional[Path]:

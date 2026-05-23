@@ -1,5 +1,6 @@
 """统一CSV读写模块"""
 
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -9,6 +10,15 @@ from health_tools.models.rules import ChipRule
 from health_tools.utils.file import detect_file_encoding
 
 MAX_CHUNK_SIZE = 50000
+
+_CSV_INJECTION_PATTERN = re.compile(r"^[=+\-@\t\r]")
+
+
+def _sanitize_csv_cell(value: str) -> str:
+    """防止CSV公式注入（给危险前缀加单引号）"""
+    if value and _CSV_INJECTION_PATTERN.match(value):
+        return "'" + value
+    return value
 
 
 class CSVHandler:
@@ -105,13 +115,13 @@ class CSVHandler:
 
         with open(file_path, "w", encoding=encoding, newline="") as f:
             if info_row > 0 and info:
-                f.write(info + "\n")
+                f.write(_sanitize_csv_cell(info) + "\n")
             df.to_csv(f, index=False, sep=delimiter)
 
     def read_with_columns(
         self,
         file_path: Union[str, Path],
-        columns: Optional[list] = None,
+        columns: Optional[List] = None,
         auto_detect_encoding: bool = True,
     ) -> Tuple[str, pd.DataFrame]:
         info, df = self.read(file_path, auto_detect_encoding)
