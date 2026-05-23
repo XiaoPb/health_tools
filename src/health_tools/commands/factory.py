@@ -210,7 +210,11 @@ def factory_cmd(
         result_df = pd.concat(all_dfs, ignore_index=True)
         console.print(f"[green]OK[/green] 处理 {len(all_dfs)} 个文件, 共 {len(result_df)} 条记录")
     else:
-        df = read_csv_df(input_p, chip_rule)
+        try:
+            df = read_csv_df(input_p, chip_rule)
+        except Exception as e:
+            console.print(f"[red]错误[/red] 读取失败: {input_p}: {e}")
+            raise SystemExit(1)
         ch_list = channel_list or _get_channel_list(None, chip_rule, df)
         results = calculator.calculate(df, ch_list, extractor=extractor)
 

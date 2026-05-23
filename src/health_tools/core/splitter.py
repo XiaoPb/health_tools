@@ -161,7 +161,11 @@ class DataSplitter:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        info, df = self.csv_handler.read(input_file)
+        try:
+            info, df = self.csv_handler.read(input_file)
+        except Exception as e:
+            print(f"  [FAIL] {input_file.name}: {e}")
+            return []
 
         if df.empty:
             return []
@@ -227,16 +231,19 @@ class DataSplitter:
         for file in files:
             relative = file.relative_to(input_dir)
             file_output_dir = output_dir / relative.parent / file.stem
-            output_files = self.split_file(
-                file,
-                file_output_dir,
-                by_column,
-                column_value,
-                by_size,
-                by_time,
-                time_column,
-                verbose,
-            )
-            all_output_files.extend(output_files)
+            try:
+                output_files = self.split_file(
+                    file,
+                    file_output_dir,
+                    by_column,
+                    column_value,
+                    by_size,
+                    by_time,
+                    time_column,
+                    verbose,
+                )
+                all_output_files.extend(output_files)
+            except Exception as e:
+                print(f"  [FAIL] {file.name}: {e}")
 
         return all_output_files
