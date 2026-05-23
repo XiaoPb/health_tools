@@ -26,6 +26,7 @@ console = Console()
 @click.option("--freq-range", default="30-240", help="频率范围（BPM，默认: 30-240）")
 @click.option("--ref-column", help="参考曲线列名")
 @click.option("--no-show", is_flag=True, help="不显示图片，仅保存")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件（目录模式）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def plot_cmd(
@@ -48,6 +49,7 @@ def plot_cmd(
     freq_range: str,
     ref_column: Optional[str],
     no_show: bool,
+    filter_name: Optional[str],
     verbose: bool,
 ) -> None:
     """绘制PPG数据的时域/频域/时频图"""
@@ -102,6 +104,8 @@ def plot_cmd(
         )
     elif input_path_obj.is_dir():
         files = list(input_path_obj.rglob("*.csv"))
+        if filter_name:
+            files = [f for f in files if filter_name in f.name]
         for file in files:
             _plot_file(
                 file,

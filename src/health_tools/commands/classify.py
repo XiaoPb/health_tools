@@ -35,6 +35,7 @@ console = Console()
 @click.option("--report", is_flag=True, help="生成分类报告")
 @click.option("--unknown", "unknown_dir", help="未匹配文件的存放目录")
 @click.option("-c", "--chip", "chip_name", help="芯片类型（决定CSV格式）")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def classify_cmd(
@@ -50,6 +51,7 @@ def classify_cmd(
     report: bool,
     unknown_dir: Optional[str],
     chip_name: Optional[str],
+    filter_name: Optional[str],
     verbose: bool,
 ) -> None:
     """根据规则对数据进行分类保存"""
@@ -95,6 +97,8 @@ def classify_cmd(
         files = [input_path_obj]
     elif input_path_obj.is_dir():
         files = list(input_path_obj.rglob("*.csv"))
+        if filter_name:
+            files = [f for f in files if filter_name in f.name]
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)

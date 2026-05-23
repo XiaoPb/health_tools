@@ -25,6 +25,7 @@ from health_tools.rules.loader import RuleLoader
 @click.option("--rule", "rule_file", help="评估规则文件")
 @click.option("--diff-threshold", type=float, help="差分异常阈值")
 @click.option("--stale-minutes", type=float, help="静止异常时间(分钟)")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
 def evaluate_cmd(
     input_path,
@@ -36,6 +37,7 @@ def evaluate_cmd(
     rule_file,
     diff_threshold,
     stale_minutes,
+    filter_name,
     verbose,
 ):
     """批量准确度评估（心率/血氧）"""
@@ -71,7 +73,9 @@ def evaluate_cmd(
     click.echo(f"输出: {output_dir}")
     click.echo("")
 
-    output_paths = evaluator.evaluate_directory(input_dir, output_dir, verbose=verbose)
+    output_paths = evaluator.evaluate_directory(
+        input_dir, output_dir, filter_name=filter_name, verbose=verbose
+    )
 
     if output_paths:
         click.echo("")

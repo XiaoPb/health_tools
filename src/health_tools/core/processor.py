@@ -142,6 +142,7 @@ class BatchProcessor:
         max_workers: int = 4,
         frame_split: bool = False,
         frame_column: str = "FRAME_ID",
+        filter_name: Optional[str] = None,
         verbose: bool = False,
     ) -> List[Dict[str, Any]]:
         """
@@ -156,6 +157,7 @@ class BatchProcessor:
             max_workers: 最大线程数
             frame_split: 是否按帧分割
             frame_column: 帧ID列名
+            filter_name: 文件名过滤（仅处理包含此字符串的文件）
             verbose: 详细输出
 
         Returns:
@@ -169,6 +171,9 @@ class BatchProcessor:
             files = list(input_dir.rglob(pattern))
         else:
             files = list(input_dir.glob(pattern))
+
+        if filter_name:
+            files = [f for f in files if filter_name in f.name]
 
         if not files:
             return []

@@ -167,13 +167,19 @@ class BatchEvaluator:
         return result
 
     def evaluate_directory(
-        self, input_dir: Path, output_dir: Path, verbose: bool = False
+        self,
+        input_dir: Path,
+        output_dir: Path,
+        filter_name: Optional[str] = None,
+        verbose: bool = False,
     ) -> Dict[str, Path]:
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         csv_files = sorted(input_dir.rglob("*.csv"))
+        if filter_name:
+            csv_files = [f for f in csv_files if filter_name in f.name]
         if not csv_files:
             return {}
 

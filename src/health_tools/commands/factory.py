@@ -127,6 +127,7 @@ def _print_chip_info(results, file_name: str):
 @click.option("--adc-offset", type=float, help="ADC偏移量（覆盖芯片配置）")
 @click.option("--channels", help="指定计算的通道（逗号分隔）")
 @click.option("-o", "--output", "output_path", help="输出结果CSV文件")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def factory_cmd(
@@ -143,6 +144,7 @@ def factory_cmd(
     adc_offset: Optional[float],
     channels: Optional[str],
     output_path: Optional[str],
+    filter_name: Optional[str],
     verbose: bool,
 ) -> None:
     """计算SNR/CTR/Noise（产测）"""
@@ -183,6 +185,8 @@ def factory_cmd(
 
     if input_p.is_dir():
         csv_files = sorted(input_p.rglob("*.csv"))
+        if filter_name:
+            csv_files = [f for f in csv_files if filter_name in f.name]
         if not csv_files:
             console.print(f"[yellow]WARN[/yellow] 目录中无CSV文件: {input_path}")
             return

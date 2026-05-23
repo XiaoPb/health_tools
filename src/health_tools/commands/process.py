@@ -18,6 +18,7 @@ console = Console()
 @click.option("--frame-column", "frame_column", default="FRAME_ID", help="帧ID列名")
 @click.option("--workers", "max_workers", default=4, type=int, help="并行线程数")
 @click.option("--pattern", default="*.csv", help="文件匹配模式")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def process_cmd(
@@ -29,6 +30,7 @@ def process_cmd(
     frame_column: str,
     max_workers: int,
     pattern: str,
+    filter_name: Optional[str],
     verbose: bool,
 ) -> None:
     """批量处理命令"""
@@ -53,6 +55,7 @@ def process_cmd(
         max_workers=max_workers,
         frame_split=frame_split,
         frame_column=frame_column,
+        filter_name=filter_name,
         verbose=verbose,
     )
 

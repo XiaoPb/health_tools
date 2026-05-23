@@ -162,6 +162,7 @@ def _generate_rule_template(
 @click.option("--merge", is_flag=True, help="合并多个文件")
 @click.option("--split", type=int, help="按大小分割文件（行数）")
 @click.option("--init-rule", is_flag=True, help="生成转换规则模板")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件（目录模式）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def convert_cmd(
@@ -175,6 +176,7 @@ def convert_cmd(
     merge: bool,
     split: Optional[int],
     init_rule: bool,
+    filter_name: Optional[str],
     verbose: bool,
 ) -> None:
     """CSV格式转换"""
@@ -227,11 +229,14 @@ def convert_cmd(
                 input_csv_config,
                 output_csv_config,
                 split,
+                filter_name,
                 verbose,
             )
         else:
             output_path_obj.mkdir(parents=True, exist_ok=True)
             files = list(input_path_obj.rglob("*.csv"))
+            if filter_name:
+                files = [f for f in files if filter_name in f.name]
             for file in files:
                 relative = file.relative_to(input_path_obj)
                 out_file = output_path_obj / relative
@@ -298,9 +303,12 @@ def _merge_and_convert(
     input_csv_config: Optional[dict],
     output_csv_config: Optional[dict],
     split: Optional[int],
+    filter_name: Optional[str],
     verbose: bool,
 ) -> None:
     files = list(input_dir.rglob("*.csv"))
+    if filter_name:
+        files = [f for f in files if filter_name in f.name]
     dfs = []
     for file in files:
         try:

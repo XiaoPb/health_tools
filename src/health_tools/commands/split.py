@@ -19,6 +19,7 @@ console = Console()
 @click.option("--by-size", "by_size", type=int, help="按行数分割")
 @click.option("--by-time", "by_time", type=float, help="按时间分割（秒）")
 @click.option("--time-column", "time_column", help="时间列名")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件（目录模式）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def split_cmd(
@@ -31,6 +32,7 @@ def split_cmd(
     by_size: Optional[int],
     by_time: Optional[float],
     time_column: Optional[str],
+    filter_name: Optional[str],
     verbose: bool,
 ) -> None:
     """数据分割命令"""
@@ -64,6 +66,7 @@ def split_cmd(
             by_size=by_size,
             by_time=by_time,
             time_column=time_column,
+            filter_name=filter_name,
             verbose=verbose,
         )
         console.print(f"[green]✓[/green] 生成 {len(output_files)} 个文件")

@@ -19,6 +19,7 @@ console = Console()
 @click.option("-c", "--chip", "chip_name", help="芯片类型")
 @click.option("--delimiter", default=",", help="字段分隔符（默认: 逗号）")
 @click.option("--encoding", default="utf-8", help="输入文件编码")
+@click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的文件（目录模式）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.option("--dry-run", is_flag=True, help="仅验证规则，不生成文件")
 @click.pass_context
@@ -30,6 +31,7 @@ def parse_cmd(
     chip_name: Optional[str],
     delimiter: str,
     encoding: str,
+    filter_name: Optional[str],
     verbose: bool,
     dry_run: bool,
 ) -> None:
@@ -88,6 +90,8 @@ def parse_cmd(
     elif input_path_obj.is_dir():
         output_path_obj.mkdir(parents=True, exist_ok=True)
         files = list(input_path_obj.rglob("*.log")) + list(input_path_obj.rglob("*.txt"))
+        if filter_name:
+            files = [f for f in files if filter_name in f.name]
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),

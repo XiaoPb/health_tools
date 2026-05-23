@@ -204,6 +204,7 @@ class DataSplitter:
         by_size: Optional[int] = None,
         by_time: Optional[float] = None,
         time_column: Optional[str] = None,
+        filter_name: Optional[str] = None,
         verbose: bool = False,
     ) -> List[Path]:
         """
@@ -217,6 +218,7 @@ class DataSplitter:
             by_size: 按行数分割
             by_time: 按时间分割（秒）
             time_column: 时间列名
+            filter_name: 文件名过滤（仅处理包含此字符串的文件）
             verbose: 详细输出
 
         Returns:
@@ -226,6 +228,8 @@ class DataSplitter:
         output_dir = Path(output_dir)
 
         files = list(input_dir.rglob("*.csv"))
+        if filter_name:
+            files = [f for f in files if filter_name in f.name]
         all_output_files = []
 
         for file in files:
