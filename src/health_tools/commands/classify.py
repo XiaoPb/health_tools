@@ -114,6 +114,7 @@ def classify_cmd(
             try:
                 target_dir = classifier.classify(file, output_path_obj)
                 if target_dir:
+                    target_dir.mkdir(parents=True, exist_ok=True)
                     target_path = target_dir / file.name
                     if mode == "copy":
                         shutil.copy2(file, target_path)

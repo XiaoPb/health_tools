@@ -1,11 +1,15 @@
 version: "1.0"
 description: "血氧+体位分类规则（默认）"
 
+target_chip: gh3036
+
 extends: posture_patterns.yaml
 
 accuracy:
-  ref_column: REF_RESULT0
+  ref_column: REF_RESULT5
+  ref_column_col: 51
   pred_column: ALGO_RESULT0
+  pred_column_col: 62
   methods:
     - std
     - rmse
@@ -24,7 +28,8 @@ extract:
   - name: spo2_median
     function: calculate_median
     params:
-      column: ALGO_RESULT5
+      column: REF_RESULT5
+      column_col: 51
       samples: 50
   
   - name: posture
