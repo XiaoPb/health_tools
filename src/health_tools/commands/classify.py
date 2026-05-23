@@ -153,6 +153,11 @@ def classify_cmd(
                         stats[unknown_dir] = stats.get(unknown_dir, 0) + 1
                     if verbose:
                         console.print(f"[yellow]![/yellow] {file.name}: 未匹配")
+                        debug_info = classifier.get_last_values()
+                        if debug_info["filename"]:
+                            console.print(f"  文件名字段: {debug_info['filename']}")
+                        if debug_info["extracted"]:
+                            console.print(f"  提取值: {debug_info['extracted']}")
             except Exception as e:
                 console.print(f"[red]FAIL[/red] {file.name}: {e}")
 

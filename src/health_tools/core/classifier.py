@@ -148,6 +148,12 @@ class DataClassifier:
 
         return None
 
+    def get_last_values(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            "filename": dict(self._filename_fields),
+            "extracted": dict(self._extracted_values),
+        }
+
     def _parse_filename(self, file_path: Path) -> None:
         self._filename_fields = {}
 
