@@ -75,9 +75,17 @@ class FileClassifier:
 
 
 class BatchEvaluator:
-    def __init__(self, rule: EvaluateRule, chip_rule=None):
+    def __init__(
+        self,
+        rule: EvaluateRule,
+        chip_rule=None,
+        ref_column_col: Optional[int] = None,
+        pred_column_col: Optional[int] = None,
+    ):
         self.rule = rule
         self.chip_rule = chip_rule
+        self.ref_column_col = ref_column_col
+        self.pred_column_col = pred_column_col
         self.csv_handler = CSVHandler(chip_rule)
         self.detector = PolarAnomalyDetector(
             diff_threshold=rule.diff_threshold,
@@ -90,8 +98,17 @@ class BatchEvaluator:
             default=rule.default_category,
         )
 
-    def _resolve_column(self, df: pd.DataFrame, col_name: str, col_type: str) -> Optional[str]:
-        """解析列名，支持按名称或按芯片规则的列索引查找"""
+    def _resolve_column(self, df: pd.DataFrame, col_type: str) -> Optional[str]:
+        """解析列: 显式列索引 > 列名匹配 > chip_rule映射回退"""
+        col_idx_override = self.ref_column_col if col_type == "ref" else self.pred_column_col
+        if col_idx_override is not None:
+            col_idx = col_idx_override - 1
+            if 0 <= col_idx < len(df.columns):
+                return df.columns[col_idx]
+            return None
+
+        col_name = self.rule.ref_column if col_type == "ref" else self.rule.pred_column
+
         if col_name in df.columns:
             return col_name
 
@@ -102,13 +119,23 @@ class BatchEvaluator:
                     ref_map = self.chip_rule.hr_ref_column
                 elif self.rule.type == "spo2":
                     ref_map = self.chip_rule.spo_ref_column
+            elif col_type == "pred":
+                if self.rule.type == "hr":
+                    ref_map = self.chip_rule.hr_ref_column
+                elif self.rule.type == "spo2":
+                    ref_map = self.chip_rule.spo_ref_column
+
+            if ref_map and col_name in ref_map:
+                col_idx = ref_map[col_name] - 1
+                if 0 <= col_idx < len(df.columns):
+                    return df.columns[col_idx]
+
             if ref_map:
-                for name, idx in ref_map.items():
-                    col_idx = idx - 1
-                    if 0 <= col_idx < len(df.columns):
-                        actual_col = df.columns[col_idx]
-                        if pd.to_numeric(df[actual_col], errors="coerce").ne(0).any():
-                            return actual_col
+                for col_idx in ref_map.values():
+                    idx = col_idx - 1
+                    if 0 <= idx < len(df.columns):
+                        return df.columns[idx]
+                return None
 
         return None
 
@@ -130,8 +157,8 @@ class BatchEvaluator:
         if df is None or df.empty:
             return None
 
-        ref_col = self._resolve_column(df, self.rule.ref_column, "ref")
-        pred_col = self._resolve_column(df, self.rule.pred_column, "pred")
+        ref_col = self._resolve_column(df, "ref")
+        pred_col = self._resolve_column(df, "pred")
 
         if ref_col is None or pred_col is None:
             return None

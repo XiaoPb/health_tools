@@ -19,8 +19,10 @@ from health_tools.rules.loader import RuleLoader
     default="hr",
     help="评估类型 (默认: hr)",
 )
-@click.option("--ref-column", help="参考列名（覆盖规则文件）")
-@click.option("--pred-column", help="预测列名（覆盖规则文件）")
+@click.option("--ref-column", help="参考列名（覆盖规则配置）")
+@click.option("--pred-column", help="预测列名（覆盖规则配置）")
+@click.option("--ref-column-col", type=int, help="参考列索引 1-based（优先于列名）")
+@click.option("--pred-column-col", type=int, help="预测列索引 1-based（优先于列名）")
 @click.option("--chip", help="芯片型号")
 @click.option("--rule", "rule_file", help="评估规则文件")
 @click.option("--diff-threshold", type=float, help="差分异常阈值")
@@ -33,6 +35,8 @@ def evaluate_cmd(
     eval_type,
     ref_column,
     pred_column,
+    ref_column_col,
+    pred_column_col,
     chip,
     rule_file,
     diff_threshold,
@@ -61,13 +65,22 @@ def evaluate_cmd(
     if chip:
         chip_rule = RuleLoader.load_chip_rule(chip)
 
-    evaluator = BatchEvaluator(rule, chip_rule)
+    evaluator = BatchEvaluator(
+        rule, chip_rule, ref_column_col=ref_column_col, pred_column_col=pred_column_col
+    )
 
     input_dir = Path(input_path)
     output_dir = Path(output_path)
 
     click.echo(f"评估类型: {eval_type.upper()}")
-    click.echo(f"参考列: {rule.ref_column}, 预测列: {rule.pred_column}")
+    if ref_column_col:
+        click.echo(f"参考列索引: {ref_column_col} (1-based)")
+    elif rule.ref_column:
+        click.echo(f"参考列: {rule.ref_column}")
+    if pred_column_col:
+        click.echo(f"预测列索引: {pred_column_col} (1-based)")
+    elif rule.pred_column:
+        click.echo(f"预测列: {rule.pred_column}")
     click.echo(f"异常检测: diff>{rule.diff_threshold}, stale>{rule.stale_minutes}min")
     click.echo(f"输入: {input_dir}")
     click.echo(f"输出: {output_dir}")
