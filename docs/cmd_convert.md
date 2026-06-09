@@ -51,6 +51,21 @@ expand_repeat:
 
 computed:
   FLAG0: "status * 1"
+
+# extra_source: 从额外文件读取金标/参考列，并按指定列对齐
+extra_source:
+  suffix: ".txt"        # 自动在当前输入文件同目录查找匹配后缀的文件
+  # path: "划船机.txt"    # 也可直接指定相对/绝对路径，优先级高于 suffix/pattern
+  # pattern: "*.ref.csv" # 或使用 glob 模式
+  csv:
+    header_row: 1
+    data_start_row: 2
+    delimiter: ","
+  align:
+    left_on: time        # 原始数据对齐列
+    right_on: time       # 金标文件对齐列
+  column_mapping:
+    polar: REF_RESULT0   # 金标列映射到输出列
 ```
 
 ### 字段说明
@@ -63,6 +78,23 @@ computed:
 | `forward_fill` | 前向填充列（零值用前一个非零值替代） |
 | `expand_repeat` | 列重复扩展（低采样率对齐高采样率） |
 | `computed` | 计算列（支持 +, -, *, / 运算） |
+| `extra_source` | 从额外文件读取参考列并按配置列对齐 |
+
+### extra_source 字段说明
+
+适用于金标数据不在原始 CSV 内，而是在同目录额外文件中的场景。
+
+常用配置：
+
+- `path`：直接指定金标文件路径
+- `suffix`：按后缀自动查找，例如 `.txt`
+- `pattern`：按 glob 模式查找，例如 `*.ref.csv`
+- `csv`：额外文件的 CSV 解析配置
+- `align.left_on`：原始数据中的对齐列名
+- `align.right_on`：额外文件中的对齐列名
+- `column_mapping`：额外文件列名到输出列名的映射
+
+当前“动态心率”这类数据可配置为：原始数据和金标文件都按 `time` 列对齐；如果两边列名不同，也可分别设置 `left_on` 与 `right_on`。
 
 ## 生成规则模板
 
@@ -95,4 +127,11 @@ ghealth_tool convert -i ./input/ -o merged.csv -r rule.yaml --merge -v
 
 # 合并并分割
 ghealth_tool convert -i ./input/ -o output.csv -r rule.yaml --merge --split 1000 -v
+
+# 动态心率目录批量转换（自动读取各子目录下 .txt 金标文件，并按 time 对齐）
+ghealth_tool convert \
+  -i "E:/LierdaWorkFiles/Chelsea_A/客户项目/舟海/Santos/问题处理/心率/0609/动态心率" \
+  -o "E:/LierdaWorkFiles/Chelsea_A/客户项目/舟海/Santos/问题处理/心率/0609/动态心率_gh3036" \
+  -r "E:/LierdaWorkFiles/Chelsea_A/客户项目/舟海/Santos/问题处理/心率/0609/动态心率/convert_gh3036.yaml" \
+  -v
 ```

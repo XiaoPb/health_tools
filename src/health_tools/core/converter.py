@@ -1,6 +1,7 @@
 import logging
 import re
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -15,7 +16,8 @@ class DataConverter:
         self.rule = rule
         self.chip_columns = chip_columns
 
-    def convert(self, df: pd.DataFrame) -> pd.DataFrame:
+    def convert(self, df: pd.DataFrame, source_file: Optional[Path] = None) -> pd.DataFrame:
+        df = self._merge_extra_source(df, source_file)
         result = pd.DataFrame()
 
         if self.rule.column_mapping:
@@ -48,6 +50,118 @@ class DataConverter:
 
         result = self._ensure_int64(result)
         return result
+
+    def _merge_extra_source(
+        self, df: pd.DataFrame, source_file: Optional[Path] = None
+    ) -> pd.DataFrame:
+        config = self.rule.extra_source or {}
+        if not config or source_file is None:
+            return df
+
+        extra_file = self._resolve_extra_source_file(source_file, config)
+        if extra_file is None:
+            return df
+
+        extra_df = self._read_extra_source_csv(extra_file, config)
+        if extra_df.empty:
+            return df
+
+        align = config.get("align", {})
+        left_on = align.get("left_on")
+        right_on = align.get("right_on")
+        if not left_on or not right_on:
+            logger.warning("extra_source 缺少对齐列配置，已跳过: %s", extra_file)
+            return df
+        if left_on not in df.columns or right_on not in extra_df.columns:
+            logger.warning(
+                "extra_source 对齐列不存在，已跳过: left_on=%s right_on=%s file=%s",
+                left_on,
+                right_on,
+                extra_file,
+            )
+            return df
+
+        extra_df = extra_df.copy()
+        extra_df[right_on] = self._normalize_align_key(extra_df[right_on])
+        left_keys = self._normalize_align_key(df[left_on])
+        extra_df = extra_df.drop_duplicates(subset=[right_on], keep="last")
+
+        rename_map = config.get("column_mapping", {}) or {}
+        selected_cols = [right_on]
+        for col in rename_map:
+            if col in extra_df.columns and col not in selected_cols:
+                selected_cols.append(col)
+        if len(selected_cols) == 1:
+            logger.warning("extra_source 未配置可合并列，已跳过: %s", extra_file)
+            return df
+
+        merge_df = extra_df[selected_cols].rename(columns=rename_map)
+        merge_df = merge_df.rename(columns={right_on: "__extra_align_key__"})
+        merged_columns = [col for col in merge_df.columns if col != "__extra_align_key__"]
+
+        merged = df.copy()
+        merged["__extra_align_key__"] = left_keys
+        merged = merged.merge(merge_df, on="__extra_align_key__", how="left")
+        merged = merged.drop(columns=["__extra_align_key__"])
+        for col in merged_columns:
+            if col in merged.columns:
+                merged[col] = merged[col].fillna(0)
+        return merged
+
+    def _resolve_extra_source_file(
+        self, source_file: Path, config: Dict[str, Any]
+    ) -> Optional[Path]:
+        path_value = config.get("path")
+        if path_value:
+            candidate = Path(path_value)
+            if not candidate.is_absolute():
+                candidate = source_file.parent / candidate
+            if candidate.exists():
+                return candidate
+
+        suffix = config.get("suffix")
+        if suffix:
+            matches = sorted(source_file.parent.glob(f"*{suffix}"))
+            if matches:
+                return matches[0]
+
+        pattern = config.get("pattern")
+        if pattern:
+            matches = sorted(source_file.parent.glob(pattern))
+            if matches:
+                return matches[0]
+
+        logger.warning("未找到 extra_source 文件: %s", source_file)
+        return None
+
+    def _read_extra_source_csv(self, file_path: Path, config: Dict[str, Any]) -> pd.DataFrame:
+        csv_config = config.get("csv", {}) or {}
+        delimiter = csv_config.get("delimiter", ",")
+        header_row = csv_config.get("header_row", 1)
+        data_start_row = csv_config.get("data_start_row", header_row + 1)
+        encoding = csv_config.get("encoding", "utf-8")
+
+        if header_row > 0 and data_start_row > header_row:
+            skiprows = [r for r in range(data_start_row - 1) if r != header_row - 1]
+            return pd.read_csv(
+                file_path,
+                header=0,
+                skiprows=skiprows if skiprows else None,
+                delimiter=delimiter,
+                encoding=encoding,
+                on_bad_lines="skip",
+            )
+
+        return pd.read_csv(
+            file_path,
+            header=header_row - 1 if header_row > 0 else None,
+            delimiter=delimiter,
+            encoding=encoding,
+            on_bad_lines="skip",
+        )
+
+    def _normalize_align_key(self, series: pd.Series) -> pd.Series:
+        return series.astype(str).str.strip()
 
     def _ensure_int64(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.select_dtypes(include=["float64"]).columns:

@@ -130,6 +130,22 @@ def _generate_rule_template(
         "column_mapping": column_mapping,
     }
 
+    template["extra_source"] = {
+        "suffix": ".txt",
+        "csv": {
+            "header_row": 1,
+            "data_start_row": 2,
+            "delimiter": ",",
+        },
+        "align": {
+            "left_on": "time",
+            "right_on": "time",
+        },
+        "column_mapping": {
+            "polar": "REF_RESULT0",
+        },
+    }
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         yaml.dump(
@@ -288,7 +304,7 @@ def _convert_file(
 ) -> None:
     try:
         df = _read_input_csv(input_file, input_csv_config)
-        result = converter.convert(df)
+        result = converter.convert(df, source_file=input_file)
         _write_output_csv(result, output_file, output_csv_config)
         if verbose:
             console.print(f"[green]OK[/green] {input_file.name} -> {output_file}")
@@ -313,6 +329,7 @@ def _merge_and_convert(
     for file in files:
         try:
             df = _read_input_csv(file, input_csv_config)
+            df = converter._merge_extra_source(df, file)
             dfs.append(df)
             if verbose:
                 console.print(f"[green]OK[/green] 读取: {file.name}")

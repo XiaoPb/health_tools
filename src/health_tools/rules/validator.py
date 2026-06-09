@@ -146,17 +146,36 @@ class RuleValidator:
         if "version" not in rule:
             errors.append("缺少 'version' 字段")
 
-        if "source_columns" not in rule:
-            errors.append("转换规则缺少 'source_columns' 字段")
+        has_mapping = "column_mapping" in rule and isinstance(rule.get("column_mapping"), dict)
+        has_source_target = "source_columns" in rule and "target_columns" in rule
 
-        if "target_columns" not in rule:
-            errors.append("转换规则缺少 'target_columns' 字段")
+        if not has_mapping and not has_source_target:
+            errors.append("转换规则需要提供 'column_mapping' 或同时提供 'source_columns'/'target_columns'")
 
-        if "source_columns" in rule and "target_columns" in rule:
+        if has_source_target:
             src_cols = RuleValidator._expand_columns(rule["source_columns"])
             tgt_cols = RuleValidator._expand_columns(rule["target_columns"])
             if len(src_cols) != len(tgt_cols):
                 errors.append(f"源列数({len(src_cols)})与目标列数({len(tgt_cols)})不匹配")
+
+        extra_source = rule.get("extra_source")
+        if extra_source is not None:
+            if not isinstance(extra_source, dict):
+                errors.append("'extra_source' 必须是字典")
+            else:
+                if "column_mapping" in extra_source and not isinstance(
+                    extra_source.get("column_mapping"), dict
+                ):
+                    errors.append("'extra_source.column_mapping' 必须是字典")
+                align = extra_source.get("align")
+                if align is not None:
+                    if not isinstance(align, dict):
+                        errors.append("'extra_source.align' 必须是字典")
+                    else:
+                        if not align.get("left_on") or not align.get("right_on"):
+                            errors.append(
+                                "'extra_source.align' 需要同时提供 'left_on' 和 'right_on'"
+                            )
 
         return errors
 

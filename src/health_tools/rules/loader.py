@@ -203,6 +203,7 @@ class RuleLoader:
             forward_fill=data.get("forward_fill", []),
             expand_repeat=data.get("expand_repeat", {}),
             csv=data.get("csv", {}),
+            extra_source=data.get("extra_source", {}),
         )
 
     @classmethod
