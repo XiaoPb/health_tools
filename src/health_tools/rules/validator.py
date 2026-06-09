@@ -146,16 +146,12 @@ class RuleValidator:
         if "version" not in rule:
             errors.append("缺少 'version' 字段")
 
-        has_mapping = (
-            "column_mapping" in rule
-            and isinstance(rule.get("column_mapping"), dict)
-        )
+        has_mapping = "column_mapping" in rule and isinstance(rule.get("column_mapping"), dict)
         has_source_target = "source_columns" in rule and "target_columns" in rule
 
         if not has_mapping and not has_source_target:
             errors.append(
-                "转换规则需要提供 'column_mapping' 或同时提供 "
-                "'source_columns'/'target_columns'"
+                "转换规则需要提供 'column_mapping' 或同时提供 " "'source_columns'/'target_columns'"
             )
 
         if has_source_target:
