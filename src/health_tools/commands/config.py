@@ -93,8 +93,15 @@ def config_cmd(
             versions = config.get("offline_versions", {})
             for chip, info in versions.items():
                 default_ver = info.get("default", "")
-                ver_count = len(info.get("versions", []))
-                console.print(f"  {chip}: {ver_count} 个版本, 默认={default_ver}")
+                categories = info.get("versions", {})
+                if isinstance(categories, dict):
+                    total = sum(len(v) for v in categories.values())
+                    console.print(f"  {chip}: {total} 个版本, 默认={default_ver}")
+                    for cat, ver_list in categories.items():
+                        console.print(f"    {cat}/: {', '.join(ver_list)}")
+                else:
+                    ver_count = len(categories) if isinstance(categories, list) else 0
+                    console.print(f"  {chip}: {ver_count} 个版本, 默认={default_ver}")
 
 
 def _set_offline_path(path_str: str) -> None:
@@ -114,9 +121,13 @@ def _set_offline_path(path_str: str) -> None:
     console.print(f"[green]OK[/green] 离线工具路径已设置: {tools_path}")
     if versions:
         for chip, info in versions.items():
-            ver_list = info.get("versions", [])
+            categories = info.get("versions", {})
             default_ver = info.get("default", "")
-            console.print(f"  {chip}: {len(ver_list)} 个版本, 默认={default_ver}")
+            total = sum(len(v) for v in categories.values()) if isinstance(categories, dict) else 0
+            console.print(f"  {chip}: {total} 个版本, 默认={default_ver}")
+            if isinstance(categories, dict):
+                for cat, ver_list in categories.items():
+                    console.print(f"    {cat}/: {len(ver_list)} 个版本")
     else:
         console.print("  [yellow]未发现任何版本[/yellow]")
 
@@ -136,13 +147,26 @@ def _set_offline_default(default_str: str) -> None:
         console.print("请先运行: ghealth_tool cfg --offline-scan")
         raise SystemExit(1)
 
-    available = versions[chip].get("versions", [])
-    if version not in available:
+    categories = versions[chip].get("versions", {})
+    if isinstance(categories, dict):
+        all_versions = [v for ver_list in categories.values() for v in ver_list]
+        found_category = None
+        for cat, ver_list in categories.items():
+            if version in ver_list:
+                found_category = cat
+                break
+    else:
+        all_versions = categories if isinstance(categories, list) else []
+        found_category = "exclusive"
+
+    if version not in all_versions:
         console.print(f"[red]错误: 版本 {version} 不在可用列表中[/red]")
-        console.print(f"可用版本: {', '.join(available)}")
+        console.print(f"可用版本: {', '.join(all_versions)}")
         raise SystemExit(1)
 
     versions[chip]["default"] = version
+    if found_category:
+        versions[chip]["default_category"] = found_category
     config["offline_versions"] = versions
     save_config(config)
     console.print(f"[green]OK[/green] {chip} 默认版本已设置: {version}")
@@ -164,8 +188,12 @@ def _scan_offline_versions() -> None:
     console.print(f"[green]OK[/green] 扫描完成: {cfg.tools_path}")
     if versions:
         for chip, info in versions.items():
-            ver_list = info.get("versions", [])
+            categories = info.get("versions", {})
             default_ver = info.get("default", "")
-            console.print(f"  {chip}: {len(ver_list)} 个版本, 默认={default_ver}")
+            total = sum(len(v) for v in categories.values()) if isinstance(categories, dict) else 0
+            console.print(f"  {chip}: {total} 个版本, 默认={default_ver}")
+            if isinstance(categories, dict):
+                for cat, ver_list in categories.items():
+                    console.print(f"    {cat}/: {len(ver_list)} 个版本")
     else:
         console.print("  [yellow]未发现任何版本[/yellow]")

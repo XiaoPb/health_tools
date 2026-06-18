@@ -28,6 +28,8 @@ COMMAND_MAP = {
     "evaluate": ("health_tools.commands.evaluate", "evaluate_cmd"),
     "eval": ("health_tools.commands.evaluate", "evaluate_cmd"),
     "offline": ("health_tools.commands.offline", "offline_cmd"),
+    "check": ("health_tools.commands.check", "check_cmd"),
+    "chk": ("health_tools.commands.check", "check_cmd"),
     "ui": ("health_tools.commands.ui", "ui_cmd"),
 }
 
@@ -44,6 +46,7 @@ PRIMARY_COMMANDS = [
     "config",
     "evaluate",
     "offline",
+    "check",
     "ui",
 ]
 

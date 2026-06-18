@@ -59,7 +59,7 @@ def get_offline_config() -> OfflineConfig:
 
 
 def scan_versions(tools_path: Optional[Path] = None) -> Dict[str, dict]:
-    """扫描离线工具目录，发现所有芯片和版本"""
+    """扫描离线工具目录，发现所有芯片和版本（遍历所有子目录类别）"""
     if tools_path is None:
         tools_path = get_offline_config().tools_path
     if not tools_path.exists():
@@ -70,22 +70,30 @@ def scan_versions(tools_path: Optional[Path] = None) -> Dict[str, dict]:
         if not chip_dir.is_dir():
             continue
         chip_name = chip_dir.name
-        exclusive_dir = chip_dir / "exclusive"
-        if not exclusive_dir.exists():
-            continue
+        categories: Dict[str, List[str]] = {}
+        last_version = ""
 
-        versions = []
-        for ver_dir in sorted(exclusive_dir.iterdir()):
-            if not ver_dir.is_dir():
+        for category_dir in sorted(chip_dir.iterdir()):
+            if not category_dir.is_dir():
                 continue
-            exe_path = ver_dir / EXE_NAME
-            if exe_path.exists():
-                versions.append(ver_dir.name)
+            category_name = category_dir.name
+            versions = []
+            for ver_dir in sorted(category_dir.iterdir()):
+                if not ver_dir.is_dir():
+                    continue
+                exe_path = ver_dir / EXE_NAME
+                if exe_path.exists():
+                    versions.append(ver_dir.name)
+            if versions:
+                categories[category_name] = versions
+                last_version = versions[-1]
 
-        if versions:
+        if categories:
+            first_category = next(iter(categories))
             result[chip_name] = {
-                "versions": versions,
-                "default": versions[-1],
+                "versions": categories,
+                "default": last_version,
+                "default_category": first_category,
             }
 
     return result
@@ -100,16 +108,35 @@ def save_offline_config(tools_path: Path, versions: Dict[str, dict]) -> None:
 
 
 def find_exe(chip: str, version: Optional[str] = None) -> Optional[Path]:
-    """查找指定芯片和版本的 exe 路径"""
+    """查找指定芯片和版本的 exe 路径（搜索所有类别目录）"""
     cfg = get_offline_config()
+    chip_cfg = cfg.versions.get(chip, {})
     if version is None:
-        chip_cfg = cfg.versions.get(chip, {})
         version = chip_cfg.get("default")
         if not version:
             return None
 
-    exe_path = cfg.tools_path / chip / "exclusive" / version / EXE_NAME
-    return exe_path if exe_path.exists() else None
+    versions_data = chip_cfg.get("versions", {})
+    if isinstance(versions_data, dict):
+        for category, ver_list in versions_data.items():
+            if version in ver_list:
+                exe_path = cfg.tools_path / chip / category / version / EXE_NAME
+                if exe_path.exists():
+                    return exe_path
+    elif isinstance(versions_data, list):
+        exe_path = cfg.tools_path / chip / "exclusive" / version / EXE_NAME
+        if exe_path.exists():
+            return exe_path
+
+    chip_dir = cfg.tools_path / chip
+    if chip_dir.exists():
+        for category_dir in chip_dir.iterdir():
+            if not category_dir.is_dir():
+                continue
+            exe_path = category_dir / version / EXE_NAME
+            if exe_path.exists():
+                return exe_path
+    return None
 
 
 def list_versions(chip: Optional[str] = None) -> Dict[str, dict]:
