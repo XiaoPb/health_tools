@@ -194,6 +194,10 @@ def _scan_offline_versions() -> None:
             console.print(f"  {chip}: {total} 个版本, 默认={default_ver}")
             if isinstance(categories, dict):
                 for cat, ver_list in categories.items():
-                    console.print(f"    {cat}/: {len(ver_list)} 个版本")
+                    cat_label = "性能版本" if cat == "exclusive" else cat
+                    console.print(f"    {cat_label}/: {len(ver_list)} 个版本")
+                    for v in ver_list:
+                        marker = " [green]*默认[/green]" if v == default_ver else ""
+                        console.print(f"      - {v}{marker}")
     else:
         console.print("  [yellow]未发现任何版本[/yellow]")

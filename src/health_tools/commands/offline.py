@@ -170,13 +170,22 @@ def _show_versions(chip: Optional[str]) -> None:
 
     table = Table(title="离线工具版本", show_header=True)
     table.add_column("芯片", style="bold")
+    table.add_column("类别")
     table.add_column("版本")
     table.add_column("默认", style="green")
 
     for chip_name, info in versions.items():
         default_ver = info.get("default", "")
-        for v in info.get("versions", []):
-            is_default = "*" if v == default_ver else ""
-            table.add_row(chip_name, v, is_default)
+        categories = info.get("versions", {})
+        if isinstance(categories, dict):
+            for cat, ver_list in categories.items():
+                cat_label = "性能版本" if cat == "exclusive" else cat
+                for v in ver_list:
+                    is_default = "*" if v == default_ver else ""
+                    table.add_row(chip_name, cat_label, v, is_default)
+        else:
+            for v in categories:
+                is_default = "*" if v == default_ver else ""
+                table.add_row(chip_name, "", v, is_default)
 
     console.print(table)
