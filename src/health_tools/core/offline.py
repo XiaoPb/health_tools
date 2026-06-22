@@ -28,6 +28,7 @@ CATEGORY_LABELS = {
 def get_category_label(cat: str) -> str:
     return CATEGORY_LABELS.get(cat, cat)
 
+
 DEFAULT_COLUMN_INDICES = {
     "gh3036": {
         "accx": 2,

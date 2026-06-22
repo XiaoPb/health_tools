@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.27] - 2026-06-22
+
+### Fixed
+- `offline --list` 和 `cfg --offline-scan` 类别列现在显示标准英文等级名（exclusive/premium/medium/basic），而非固定中文"性能版本"
+
 ## [0.4.26] - 2026-06-22
 
 ### Changed

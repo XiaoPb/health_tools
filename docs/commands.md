@@ -362,3 +362,64 @@ ghealth_tool chk data/ -c gh3036 --checks acc,frame
 ```
 
 检查项列动态生成，只包含实际运行的检查项。未运行的检查项不会出现在CSV中。
+
+---
+
+## offline - 离线跑库
+
+调用离线算法工具（TEE_Algorithm.exe）进行心率计算，支持准确度统计和PSD时频图。别名：`ol`。
+
+```bash
+ghealth_tool offline -i <输入目录> -c <芯片> [选项]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `-i, --input` | 输入数据目录（必需） |
+| `-o, --output` | 输出结果目录（默认: `<input>_offline_result`） |
+| `-c, --chip` | 芯片型号（如 gh3036, gh3220） |
+| `--version` | 算法版本（覆盖默认版本） |
+| `--hba-fs` | 采样率（默认25） |
+| `--scene-en` | 场景适配 0=关 1=开（默认0） |
+| `--ch-num` | 有效PPG通道数（默认2） |
+| `--ref-col` | 源CSV中金标列索引（1-based，覆盖芯片配置） |
+| `--no-accuracy` | 跳过准确度统计 |
+| `--no-plot` | 跳过PSD时频图绘制 |
+| `--no-run` | 跳过跑库，直接整理/统计/绘图 |
+| `--list` | 列出可用芯片和版本 |
+| `--timeout` | 超时时间（秒，默认300） |
+| `-v, --verbose` | 详细输出 |
+
+### 算法版本管理
+
+离线工具按芯片和等级分类存放，等级包括：exclusive、premium、medium、basic。
+
+```bash
+# 查看可用版本
+ghealth_tool offline --list
+
+# 设置离线工具路径
+ghealth_tool cfg --offline-path /path/to/offline_algorithm_tools
+
+# 扫描版本
+ghealth_tool cfg --offline-scan
+
+# 设置默认版本
+ghealth_tool cfg --offline-default gh3220=V4300_GH_HR_exc_pv_v2.0.3.0
+```
+
+### 示例
+
+```bash
+# 基本跑库
+ghealth_tool offline -i data/ -c gh3220
+
+# 指定版本
+ghealth_tool offline -i data/ -c gh3220 --version V4200_GH_HR_exc_pv_v1.0.1.0
+
+# 仅整理已有结果（跳过跑库）
+ghealth_tool offline -i data/ -c gh3220 --no-run
+
+# 跳过绘图
+ghealth_tool offline -i data/ -c gh3036 --no-plot
+```
