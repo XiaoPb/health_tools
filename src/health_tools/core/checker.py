@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
+import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import ChipRule
@@ -31,6 +32,30 @@ class FileCheckReport:
     @property
     def all_passed(self) -> bool:
         return all(r.passed for r in self.results)
+
+
+@dataclass
+class AccAnomalyReport:
+    """单文件ACC异常检测报告"""
+
+    file_path: Path
+    total_frames: int
+    zero_count: int = 0
+    zero_channels: str = "-"
+    zero_first_frame: int = -1
+    zero_max_duration: int = 0
+    static_count: int = 0
+    static_channels: str = "-"
+    static_first_frame: int = -1
+    static_max_duration: int = 0
+    cyclic_count: int = 0
+    cyclic_channels: str = "-"
+    cyclic_first_frame: int = -1
+    cyclic_max_duration: int = 0
+
+    @property
+    def has_anomaly(self) -> bool:
+        return self.zero_count > 0 or self.static_count > 0 or self.cyclic_count > 0
 
 
 class DataChecker:
@@ -307,3 +332,156 @@ class DataChecker:
                 gain_k = gain_map.get(gain_code, gain_map.get(str(gain_code), 100))
                 return float(gain_k)
         return 100.0
+
+    # ──────────────────────────────────────────────────────────────────────
+    # ACC 异常检测
+    # ──────────────────────────────────────────────────────────────────────
+
+    _ACC_COLS = ["ACCX", "ACCY", "ACCZ"]
+
+    def check_acc_anomaly(self, df: pd.DataFrame) -> AccAnomalyReport:
+        """检测ACC数据异常（全零/静止/循环）"""
+        acc_cols = [c for c in self._ACC_COLS if c in df.columns]
+        report = AccAnomalyReport(file_path=Path(""), total_frames=len(df))
+
+        if not acc_cols:
+            return report
+
+        acc_df = df[acc_cols].apply(pd.to_numeric, errors="coerce")
+
+        self._check_acc_all_zero(acc_df, report)
+        static_mask = self._check_acc_static(acc_df, report)
+        self._check_acc_cyclic(acc_df, static_mask, report)
+
+        return report
+
+    def _check_acc_all_zero(self, acc_df: pd.DataFrame, report: AccAnomalyReport) -> None:
+        """检测XYZ同时为0的连续段"""
+        all_zero = (acc_df == 0).all(axis=1)
+        segments = self._find_consecutive_segments(all_zero)
+        if segments:
+            report.zero_count = len(segments)
+            report.zero_channels = "XYZ"
+            report.zero_first_frame = segments[0][0]
+            report.zero_max_duration = max(end - start + 1 for start, end in segments)
+
+    def _check_acc_static(self, acc_df: pd.DataFrame, report: AccAnomalyReport) -> pd.Series:
+        """检测连续不变超过3个点的段落，返回静止掩码用于排除循环检测"""
+        static_mask = pd.Series(False, index=acc_df.index)
+        channel_has_static: List[str] = []
+        all_segments: List[Tuple[int, int]] = []
+
+        for col in acc_df.columns:
+            series = acc_df[col]
+            unchanged = series.diff().eq(0)
+            unchanged.iloc[0] = False
+            segments = self._find_consecutive_segments(unchanged, min_length=3)
+            if segments:
+                ch_label = col.replace("ACC", "")
+                channel_has_static.append(ch_label)
+                all_segments.extend(segments)
+                for start, end in segments:
+                    static_mask.iloc[start : end + 1] = True
+
+        if all_segments:
+            report.static_count = len(all_segments)
+            if len(channel_has_static) == 3:
+                report.static_channels = "XYZ"
+            else:
+                report.static_channels = ",".join(channel_has_static)
+            first_frames = [s[0] for s in all_segments]
+            report.static_first_frame = min(first_frames)
+            report.static_max_duration = max(end - start + 1 for start, end in all_segments)
+
+        return static_mask
+
+    def _check_acc_cyclic(
+        self, acc_df: pd.DataFrame, static_mask: pd.Series, report: AccAnomalyReport
+    ) -> None:
+        """检测固定序列重复（周期2~50，≥2个完整周期），排除静止段"""
+        channel_has_cyclic: List[str] = []
+        all_segments: List[Tuple[int, int]] = []
+
+        for col in acc_df.columns:
+            values = acc_df[col].values.copy()
+            mask = ~static_mask.values
+            segments = self._find_cyclic_segments(values, mask)
+            if segments:
+                ch_label = col.replace("ACC", "")
+                channel_has_cyclic.append(ch_label)
+                all_segments.extend(segments)
+
+        if all_segments:
+            report.cyclic_count = len(all_segments)
+            if len(channel_has_cyclic) == 3:
+                report.cyclic_channels = "XYZ"
+            else:
+                report.cyclic_channels = ",".join(channel_has_cyclic)
+            first_frames = [s[0] for s in all_segments]
+            report.cyclic_first_frame = min(first_frames)
+            report.cyclic_max_duration = max(end - start + 1 for start, end in all_segments)
+
+    @staticmethod
+    def _find_consecutive_segments(mask: pd.Series, min_length: int = 1) -> List[Tuple[int, int]]:
+        """找到布尔掩码中连续True的段落，返回(start_idx, end_idx)列表"""
+        if mask.sum() == 0:
+            return []
+
+        segments: List[Tuple[int, int]] = []
+        in_segment = False
+        start = 0
+
+        for i, val in enumerate(mask.values):
+            if val and not in_segment:
+                in_segment = True
+                start = i
+            elif not val and in_segment:
+                in_segment = False
+                length = i - start
+                if length >= min_length:
+                    segments.append((start, i - 1))
+        if in_segment:
+            length = len(mask) - start
+            if length >= min_length:
+                segments.append((start, len(mask) - 1))
+
+        return segments
+
+    @staticmethod
+    def _find_cyclic_segments(
+        values: np.ndarray, valid_mask: np.ndarray, min_period: int = 2, max_period: int = 50
+    ) -> List[Tuple[int, int]]:
+        """在一维数组中检测固定序列重复(≥2个完整周期)，只在valid_mask为True的区域检测"""
+        n = len(values)
+        segments: List[Tuple[int, int]] = []
+        i = 0
+
+        while i < n - min_period * 2:
+            if not valid_mask[i]:
+                i += 1
+                continue
+
+            found = False
+            for p in range(min_period, min(max_period + 1, (n - i) // 2 + 1)):
+                if not all(valid_mask[i : i + p]):
+                    continue
+                pattern = values[i : i + p]
+                if np.all(pattern == pattern[0]):
+                    break
+
+                repeats = 1
+                j = i + p
+                while j + p <= n and np.array_equal(values[j : j + p], pattern):
+                    repeats += 1
+                    j += p
+
+                if repeats >= 2:
+                    segments.append((i, j - 1))
+                    i = j
+                    found = True
+                    break
+
+            if not found:
+                i += 1
+
+        return segments
