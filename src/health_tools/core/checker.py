@@ -348,6 +348,11 @@ class DataChecker:
         re.compile(r"(?i)^y$"),
         re.compile(r"(?i)^z$"),
     ]
+    _FRAME_PATTERNS = [
+        re.compile(r"(?i)^frame[_\s]?id$"),
+        re.compile(r"(?i)^frame$"),
+        re.compile(r"(?i)^fid$"),
+    ]
 
     def _resolve_acc_columns(self, df: pd.DataFrame) -> List[str]:
         """解析ACC列名：优先使用规则文件指定，否则自动检测"""
@@ -370,9 +375,29 @@ class DataChecker:
 
         return found
 
+    def _resolve_frame_column(self, df: pd.DataFrame) -> str:
+        """解析帧号列名：优先使用规则文件指定，否则自动检测"""
+        specified = self.chip_rule.frame_column
+        if specified and specified in df.columns:
+            return specified
+
+        for pat in self._FRAME_PATTERNS:
+            for col in df.columns:
+                if pat.match(col):
+                    return col
+        return ""
+
+    def _get_frame_ids(self, df: pd.DataFrame) -> pd.Series:
+        """获取帧号序列，无法识别帧号列时使用行索引"""
+        frame_col = self._resolve_frame_column(df)
+        if frame_col:
+            return pd.to_numeric(df[frame_col], errors="coerce").fillna(0).astype(int)
+        return pd.Series(range(len(df)), index=df.index)
+
     def check_acc_anomaly(self, df: pd.DataFrame) -> AccAnomalyReport:
         """检测ACC数据异常（全零/静止/循环）"""
         acc_cols = self._resolve_acc_columns(df)
+        frame_ids = self._get_frame_ids(df)
         report = AccAnomalyReport(file_path=Path(""), total_frames=len(df))
 
         if not acc_cols:
@@ -380,23 +405,27 @@ class DataChecker:
 
         acc_df = df[acc_cols].apply(pd.to_numeric, errors="coerce")
 
-        self._check_acc_all_zero(acc_df, report)
-        static_mask = self._check_acc_static(acc_df, report)
-        self._check_acc_cyclic(acc_df, static_mask, report)
+        self._check_acc_all_zero(acc_df, frame_ids, report)
+        static_mask = self._check_acc_static(acc_df, frame_ids, report)
+        self._check_acc_cyclic(acc_df, static_mask, frame_ids, report)
 
         return report
 
-    def _check_acc_all_zero(self, acc_df: pd.DataFrame, report: AccAnomalyReport) -> None:
+    def _check_acc_all_zero(
+        self, acc_df: pd.DataFrame, frame_ids: pd.Series, report: AccAnomalyReport
+    ) -> None:
         """检测XYZ同时为0的连续段"""
         all_zero = (acc_df == 0).all(axis=1)
         segments = self._find_consecutive_segments(all_zero)
         if segments:
             report.zero_count = len(segments)
             report.zero_channels = "XYZ"
-            report.zero_first_frame = segments[0][0]
+            report.zero_first_frame = int(frame_ids.iloc[segments[0][0]])
             report.zero_max_duration = max(end - start + 1 for start, end in segments)
 
-    def _check_acc_static(self, acc_df: pd.DataFrame, report: AccAnomalyReport) -> pd.Series:
+    def _check_acc_static(
+        self, acc_df: pd.DataFrame, frame_ids: pd.Series, report: AccAnomalyReport
+    ) -> pd.Series:
         """检测连续不变超过3个点的段落，返回静止掩码用于排除循环检测"""
         static_mask = pd.Series(False, index=acc_df.index)
         channel_has_static: List[str] = []
@@ -421,14 +450,18 @@ class DataChecker:
                 report.static_channels = "XYZ"
             else:
                 report.static_channels = ",".join(channel_has_static)
-            first_frames = [s[0] for s in all_segments]
-            report.static_first_frame = min(first_frames)
+            first_idx = min(s[0] for s in all_segments)
+            report.static_first_frame = int(frame_ids.iloc[first_idx])
             report.static_max_duration = max(end - start + 1 for start, end in all_segments)
 
         return static_mask
 
     def _check_acc_cyclic(
-        self, acc_df: pd.DataFrame, static_mask: pd.Series, report: AccAnomalyReport
+        self,
+        acc_df: pd.DataFrame,
+        static_mask: pd.Series,
+        frame_ids: pd.Series,
+        report: AccAnomalyReport,
     ) -> None:
         """检测固定序列重复（周期2~50，≥2个完整周期），排除静止段"""
         channel_has_cyclic: List[str] = []
@@ -450,8 +483,8 @@ class DataChecker:
                 report.cyclic_channels = "XYZ"
             else:
                 report.cyclic_channels = ",".join(channel_has_cyclic)
-            first_frames = [s[0] for s in all_segments]
-            report.cyclic_first_frame = min(first_frames)
+            first_idx = min(s[0] for s in all_segments)
+            report.cyclic_first_frame = int(frame_ids.iloc[first_idx])
             report.cyclic_max_duration = max(end - start + 1 for start, end in all_segments)
 
     @staticmethod

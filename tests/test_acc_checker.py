@@ -211,3 +211,79 @@ class TestAccColumnResolution:
         df = pd.DataFrame({"ch0": [1, 2, 3], "ch1": [4, 5, 6], "ch2": [7, 8, 9]})
         report = chk.check_acc_anomaly(df)
         assert not report.has_anomaly
+
+
+class TestFrameColumnResolution:
+    """测试帧号列解析：规则指定 vs 自动检测，以及first_frame使用FRAME_ID值"""
+
+    def test_auto_detect_frame_id(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "FRAME_ID", "ACCX", "ACCY", "ACCZ"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {
+                "FRAME_ID": [100, 101, 102, 103, 104],
+                "ACCX": [1, 0, 0, 0, 1],
+                "ACCY": [1, 0, 0, 0, 1],
+                "ACCZ": [1, 0, 0, 0, 1],
+            }
+        )
+        report = chk.check_acc_anomaly(df)
+        assert report.zero_first_frame == 101
+
+    def test_rule_specified_frame_column(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "seq", "ACCX", "ACCY", "ACCZ"],
+            frame_column="seq",
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {
+                "seq": [500, 501, 502, 503, 504],
+                "ACCX": [1, 0, 0, 0, 1],
+                "ACCY": [1, 0, 0, 0, 1],
+                "ACCZ": [1, 0, 0, 0, 1],
+            }
+        )
+        report = chk.check_acc_anomaly(df)
+        assert report.zero_first_frame == 501
+
+    def test_case_insensitive_frame_detect(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "frame_id", "ACCX", "ACCY", "ACCZ"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {
+                "frame_id": [200, 201, 202, 203, 204],
+                "ACCX": [1, 0, 0, 0, 1],
+                "ACCY": [1, 0, 0, 0, 1],
+                "ACCZ": [1, 0, 0, 0, 1],
+            }
+        )
+        report = chk.check_acc_anomaly(df)
+        assert report.zero_first_frame == 201
+
+    def test_fallback_to_row_index(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "ACCX", "ACCY", "ACCZ"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {
+                "ACCX": [1, 0, 0, 0, 1],
+                "ACCY": [1, 0, 0, 0, 1],
+                "ACCZ": [1, 0, 0, 0, 1],
+            }
+        )
+        report = chk.check_acc_anomaly(df)
+        assert report.zero_first_frame == 1
