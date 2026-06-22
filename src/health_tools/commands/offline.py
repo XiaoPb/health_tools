@@ -11,6 +11,7 @@ from health_tools.core.offline import (
     OfflineRunner,
     calculate_offline_accuracy,
     find_exe,
+    get_category_label,
     get_offline_config,
     list_versions,
     reorganize_output,
@@ -179,7 +180,7 @@ def _show_versions(chip: Optional[str]) -> None:
         categories = info.get("versions", {})
         if isinstance(categories, dict):
             for cat, ver_list in categories.items():
-                cat_label = "性能版本" if cat == "exclusive" else cat
+                cat_label = get_category_label(cat)
                 for v in ver_list:
                     is_default = "*" if v == default_ver else ""
                     table.add_row(chip_name, cat_label, v, is_default)

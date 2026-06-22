@@ -15,6 +15,19 @@ from health_tools.utils.accuracy import calculate_accuracy, format_metric_name
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"
 
+# 目录名 → 标准算法等级名
+CATEGORY_LABELS = {
+    "性能版本": "exclusive",
+    "exclusive": "exclusive",
+    "premium": "premium",
+    "medium": "medium",
+    "basic": "basic",
+}
+
+
+def get_category_label(cat: str) -> str:
+    return CATEGORY_LABELS.get(cat, cat)
+
 DEFAULT_COLUMN_INDICES = {
     "gh3036": {
         "accx": 2,

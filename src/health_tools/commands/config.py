@@ -14,6 +14,7 @@ from health_tools.config import (
     load_config,
     save_config,
 )
+from health_tools.core.offline import get_category_label
 
 console = Console()
 
@@ -194,7 +195,7 @@ def _scan_offline_versions() -> None:
             console.print(f"  {chip}: {total} 个版本, 默认={default_ver}")
             if isinstance(categories, dict):
                 for cat, ver_list in categories.items():
-                    cat_label = "性能版本" if cat == "exclusive" else cat
+                    cat_label = get_category_label(cat)
                     console.print(f"    {cat_label}/: {len(ver_list)} 个版本")
                     for v in ver_list:
                         marker = " [green]*默认[/green]" if v == default_ver else ""
