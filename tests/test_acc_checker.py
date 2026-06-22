@@ -145,3 +145,69 @@ class TestAccMixed:
         report = checker.check_acc_anomaly(df)
         assert not report.has_anomaly
         assert report.total_frames == 3
+
+
+class TestAccColumnResolution:
+    """测试ACC列名解析：规则指定 vs 自动检测"""
+
+    def test_rule_specified_columns(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "x", "y", "z"],
+            acc_columns={"x": "x", "y": "y", "z": "z"},
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame({"x": [0, 0, 0, 0], "y": [0, 0, 0, 0], "z": [0, 0, 0, 0]})
+        report = chk.check_acc_anomaly(df)
+        assert report.zero_count == 1
+        assert report.has_anomaly
+
+    def test_auto_detect_acc_prefix(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "AccX", "AccY", "AccZ"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {"AccX": [1, 1, 1, 1, 1], "AccY": [2, 3, 4, 5, 6], "AccZ": [3, 4, 5, 6, 7]}
+        )
+        report = chk.check_acc_anomaly(df)
+        assert report.static_count >= 1
+        assert "X" in report.static_channels
+
+    def test_auto_detect_bare_xyz(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "X", "Y", "Z"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {"X": [1, 2, 1, 2, 1, 2], "Y": [3, 4, 3, 4, 3, 4], "Z": [5, 6, 7, 8, 9, 10]}
+        )
+        report = chk.check_acc_anomaly(df)
+        assert report.cyclic_count >= 1
+
+    def test_auto_detect_case_insensitive(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "accx", "accy", "accz"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame({"accx": [0, 0, 0], "accy": [0, 0, 0], "accz": [0, 0, 0]})
+        report = chk.check_acc_anomaly(df)
+        assert report.zero_count == 1
+
+    def test_no_matching_columns(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["TimeStamp", "ch0", "ch1", "ch2"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame({"ch0": [1, 2, 3], "ch1": [4, 5, 6], "ch2": [7, 8, 9]})
+        report = chk.check_acc_anomaly(df)
+        assert not report.has_anomaly

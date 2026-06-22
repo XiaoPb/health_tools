@@ -1,5 +1,6 @@
 """数据检查核心逻辑"""
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -337,11 +338,41 @@ class DataChecker:
     # ACC 异常检测
     # ──────────────────────────────────────────────────────────────────────
 
-    _ACC_COLS = ["ACCX", "ACCY", "ACCZ"]
+    _ACC_AXIS_PATTERNS = [
+        re.compile(r"(?i).*acc.*x.*"),
+        re.compile(r"(?i).*acc.*y.*"),
+        re.compile(r"(?i).*acc.*z.*"),
+    ]
+    _BARE_XYZ_PATTERNS = [
+        re.compile(r"(?i)^x$"),
+        re.compile(r"(?i)^y$"),
+        re.compile(r"(?i)^z$"),
+    ]
+
+    def _resolve_acc_columns(self, df: pd.DataFrame) -> List[str]:
+        """解析ACC列名：优先使用规则文件指定，否则自动检测"""
+        acc_map = self.chip_rule.acc_columns
+        if acc_map:
+            cols = [acc_map.get("x", ""), acc_map.get("y", ""), acc_map.get("z", "")]
+            return [c for c in cols if c and c in df.columns]
+
+        # 自动检测：先匹配含acc+xyz的列名，再匹配纯xyz
+        found = []
+        for patterns in (self._ACC_AXIS_PATTERNS, self._BARE_XYZ_PATTERNS):
+            for pat in patterns:
+                for col in df.columns:
+                    if pat.match(col):
+                        found.append(col)
+                        break
+            if len(found) == 3:
+                return found
+            found = []
+
+        return found
 
     def check_acc_anomaly(self, df: pd.DataFrame) -> AccAnomalyReport:
         """检测ACC数据异常（全零/静止/循环）"""
-        acc_cols = [c for c in self._ACC_COLS if c in df.columns]
+        acc_cols = self._resolve_acc_columns(df)
         report = AccAnomalyReport(file_path=Path(""), total_frames=len(df))
 
         if not acc_cols:
@@ -370,14 +401,15 @@ class DataChecker:
         static_mask = pd.Series(False, index=acc_df.index)
         channel_has_static: List[str] = []
         all_segments: List[Tuple[int, int]] = []
+        axis_labels = ["X", "Y", "Z"]
 
-        for col in acc_df.columns:
+        for idx, col in enumerate(acc_df.columns):
             series = acc_df[col]
             unchanged = series.diff().eq(0)
             unchanged.iloc[0] = False
             segments = self._find_consecutive_segments(unchanged, min_length=3)
             if segments:
-                ch_label = col.replace("ACC", "")
+                ch_label = axis_labels[idx] if idx < 3 else col
                 channel_has_static.append(ch_label)
                 all_segments.extend(segments)
                 for start, end in segments:
@@ -401,13 +433,14 @@ class DataChecker:
         """检测固定序列重复（周期2~50，≥2个完整周期），排除静止段"""
         channel_has_cyclic: List[str] = []
         all_segments: List[Tuple[int, int]] = []
+        axis_labels = ["X", "Y", "Z"]
 
-        for col in acc_df.columns:
+        for idx, col in enumerate(acc_df.columns):
             values = acc_df[col].values.copy()
             mask = ~static_mask.values
             segments = self._find_cyclic_segments(values, mask)
             if segments:
-                ch_label = col.replace("ACC", "")
+                ch_label = axis_labels[idx] if idx < 3 else col
                 channel_has_cyclic.append(ch_label)
                 all_segments.extend(segments)
 
