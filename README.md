@@ -132,8 +132,8 @@ ghealth_tool check data/ -v
 # 仅检查ACC异常
 ghealth_tool check data/ --checks acc
 
-# 指定ACC报告输出路径
-ghealth_tool check data/ --checks acc -o report/acc_result.csv
+# 指定报告输出路径
+ghealth_tool check data/ -o report/check_result.csv
 
 # 仅检查数据范围和帧完整性
 ghealth_tool check data.csv --checks range,frame
@@ -144,7 +144,7 @@ ghealth_tool chk data/ -c gh3036
 
 支持的检查项：`range`（数据范围）、`frame`（帧完整性）、`center`（数据居中）、`ipd`（Ipd转换）、`acc`（ACC异常检测）。
 
-ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变>3点）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。
+ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变>3点）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。`-o` 输出统一CSV报告，包含全部检查项结果和ACC异常详情。
 
 ### validate - 规则验证
 

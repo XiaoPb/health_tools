@@ -302,7 +302,7 @@ ghealth_tool check <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <p
 | `-c, --chip` | 芯片型号，不指定则自动识别 |
 | `--checks` | 指定检查项（逗号分隔: range,ipd,frame,center,acc），默认全部 |
 | `--tolerance` | Ipd转换误差容忍度（pA，默认50） |
-| `-o, --output` | ACC异常报告CSV输出路径（默认: `<path>/acc_anomaly_report.csv`） |
+| `-o, --output` | 检查报告CSV输出路径（默认: `<path>/check_report.csv`） |
 | `-v, --verbose` | 显示详细信息 |
 
 ### 检查项
@@ -323,7 +323,7 @@ ghealth_tool check <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <p
 2. **静止异常**: 单通道或多通道连续不变超过3个点，区分XYZ全部卡死或部分通道卡死
 3. **循环异常**: 固定序列重复≥2个完整周期（周期长度2~50点），排除静止段避免重复计数
 
-输出汇总表格（每文件一行）和CSV报告文件，字段包括：异常次数、涉及通道、首次出现帧号（FRAME_ID值）、最长持续帧数。
+输出汇总表格（每文件一行）和统一CSV报告文件。CSV包含全部检查项的结果（PASS/FAIL + 说明）以及ACC异常详细字段（次数、通道、首帧FRAME_ID、最长持续帧数）。
 
 ### 列名解析
 
@@ -343,8 +343,8 @@ ghealth_tool check data/ -v
 # 仅检查ACC异常
 ghealth_tool check data/ --checks acc
 
-# 指定ACC报告输出路径
-ghealth_tool check data/ --checks acc -o report/acc_result.csv
+# 指定报告输出路径
+ghealth_tool check data/ -o report/check_result.csv
 
 # 仅检查数据范围和帧完整性
 ghealth_tool check data.csv --checks range,frame
@@ -352,3 +352,13 @@ ghealth_tool check data.csv --checks range,frame
 # 使用别名
 ghealth_tool chk data/ -c gh3036 --checks acc,frame
 ```
+
+### CSV报告格式
+
+统一输出一个CSV文件，每文件一行，列结构：
+
+```
+文件名, 芯片, 数据范围(结果), 数据范围(说明), 帧完整性(结果), 帧完整性(说明), ..., ACC全零次数, ACC全零通道, ACC全零首帧, ACC全零最长帧, ACC静止次数, ACC静止通道, ACC静止首帧, ACC静止最长帧, ACC循环次数, ACC循环通道, ACC循环首帧, ACC循环最长帧
+```
+
+检查项列动态生成，只包含实际运行的检查项。未运行的检查项不会出现在CSV中。

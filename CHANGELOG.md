@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.26] - 2026-06-22
+
+### Changed
+- `check` 命令 `-o` 选项现在输出统一CSV报告（含全部检查项结果+ACC异常详情）
+- 默认输出文件名改为 `check_report.csv`（原 `acc_anomaly_report.csv`）
+- CSV每文件一行，检查项列动态生成（结果+说明），ACC字段12列跟随其后
+
 ## [0.4.25] - 2026-06-22
 
 ### Added
