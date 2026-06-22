@@ -1,7 +1,8 @@
 """数据检查命令"""
 
+import csv
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import click
 from rich.console import Console
@@ -24,7 +25,7 @@ console = Console()
     "output_path",
     type=click.Path(),
     default=None,
-    help="ACC异常报告CSV输出路径 (默认: <path>/acc_anomaly_report.csv)",
+    help="检查报告CSV输出路径 (默认: <path>/check_report.csv)",
 )
 @click.option("-v", "--verbose", is_flag=True, help="显示详细信息")
 def check_cmd(
@@ -50,8 +51,8 @@ def check_cmd(
             return
 
     check_set = set(checks.split(",")) if checks else {"range", "ipd", "frame", "center", "acc"}
-    reports = []
-    acc_reports: List[AccAnomalyReport] = []
+    reports: List[FileCheckReport] = []
+    acc_reports: Dict[Path, AccAnomalyReport] = {}
 
     for csv_file in files:
         chip = chip_name or _detect_chip(csv_file)
@@ -95,21 +96,21 @@ def check_cmd(
         if "acc" in check_set:
             acc_report = checker.check_acc_anomaly(df)
             acc_report.file_path = csv_file
-            acc_reports.append(acc_report)
+            acc_reports[csv_file] = acc_report
 
         reports.append(report)
 
-    if not reports and not acc_reports:
+    if not reports:
         console.print("[yellow]无可检查的文件[/yellow]")
         return
 
-    if reports:
-        _print_reports(reports, verbose)
+    _print_reports(reports, verbose)
 
     if acc_reports:
-        _print_acc_table(acc_reports)
-        csv_out = Path(output_path) if output_path else _default_acc_output(target)
-        _save_acc_csv(acc_reports, csv_out)
+        _print_acc_table(list(acc_reports.values()))
+
+    csv_out = Path(output_path) if output_path else _default_output(target)
+    _save_report_csv(reports, acc_reports, csv_out)
 
 
 def _detect_chip(csv_file: Path) -> Optional[str]:
@@ -128,6 +129,13 @@ def _detect_chip(csv_file: Path) -> Optional[str]:
     elif "gh3300" in first_lower:
         return "gh3300"
     return None
+
+
+def _default_output(target: Path) -> Path:
+    """生成默认的报告输出路径"""
+    if target.is_file():
+        return target.parent / "check_report.csv"
+    return target / "check_report.csv"
 
 
 def _print_reports(reports: list, verbose: bool) -> None:
@@ -158,13 +166,6 @@ def _print_reports(reports: list, verbose: bool) -> None:
                         console.print(f"    {detail}")
 
     console.print(f"\n总计: {len(reports)} 文件, {passed_count} 通过, {failed_count} 异常")
-
-
-def _default_acc_output(target: Path) -> Path:
-    """生成默认的ACC报告输出路径"""
-    if target.is_file():
-        return target.parent / "acc_anomaly_report.csv"
-    return target / "acc_anomaly_report.csv"
 
 
 def _print_acc_table(acc_reports: list) -> None:
@@ -219,50 +220,80 @@ def _print_acc_table(acc_reports: list) -> None:
     )
 
 
-def _save_acc_csv(acc_reports: list, output_path: Path) -> None:
-    """将ACC异常报告保存为CSV"""
-    import csv
+def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> None:
+    """将全部检查结果保存到统一CSV文件"""
+    header = ["文件名", "芯片"]
 
-    header = [
-        "文件名",
-        "总帧数",
-        "全零次数",
-        "全零通道",
-        "全零首帧",
-        "全零最长帧",
-        "静止次数",
-        "静止通道",
-        "静止首帧",
-        "静止最长帧",
-        "循环次数",
-        "循环通道",
-        "循环首帧",
-        "循环最长帧",
-    ]
+    check_names = []
+    for report in reports:
+        for result in report.results:
+            if result.name not in check_names:
+                check_names.append(result.name)
+
+    for name in check_names:
+        header.append(f"{name}(结果)")
+        header.append(f"{name}(说明)")
+
+    has_acc = bool(acc_reports)
+    if has_acc:
+        header.extend(
+            [
+                "ACC全零次数",
+                "ACC全零通道",
+                "ACC全零首帧",
+                "ACC全零最长帧",
+                "ACC静止次数",
+                "ACC静止通道",
+                "ACC静止首帧",
+                "ACC静止最长帧",
+                "ACC循环次数",
+                "ACC循环通道",
+                "ACC循环首帧",
+                "ACC循环最长帧",
+            ]
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for r in acc_reports:
-            writer.writerow(
-                [
-                    r.file_path.name,
-                    r.total_frames,
-                    r.zero_count,
-                    r.zero_channels if r.zero_count > 0 else "-",
-                    r.zero_first_frame if r.zero_first_frame >= 0 else "-",
-                    r.zero_max_duration if r.zero_count > 0 else "-",
-                    r.static_count,
-                    r.static_channels if r.static_count > 0 else "-",
-                    r.static_first_frame if r.static_first_frame >= 0 else "-",
-                    r.static_max_duration if r.static_count > 0 else "-",
-                    r.cyclic_count,
-                    r.cyclic_channels if r.cyclic_count > 0 else "-",
-                    r.cyclic_first_frame if r.cyclic_first_frame >= 0 else "-",
-                    r.cyclic_max_duration if r.cyclic_count > 0 else "-",
-                ]
-            )
 
-    console.print(f"[green]ACC异常报告已保存: {output_path}[/green]")
+        for report in reports:
+            row = [report.file_path.name, report.chip]
+
+            result_map = {r.name: r for r in report.results}
+            for name in check_names:
+                if name in result_map:
+                    r = result_map[name]
+                    row.append("PASS" if r.passed else "FAIL")
+                    row.append(r.summary)
+                else:
+                    row.append("-")
+                    row.append("-")
+
+            if has_acc:
+                acc = acc_reports.get(report.file_path)
+                if acc:
+                    row.extend(
+                        [
+                            acc.zero_count,
+                            acc.zero_channels if acc.zero_count > 0 else "-",
+                            acc.zero_first_frame if acc.zero_first_frame >= 0 else "-",
+                            acc.zero_max_duration if acc.zero_count > 0 else "-",
+                            acc.static_count,
+                            acc.static_channels if acc.static_count > 0 else "-",
+                            acc.static_first_frame if acc.static_first_frame >= 0 else "-",
+                            acc.static_max_duration if acc.static_count > 0 else "-",
+                            acc.cyclic_count,
+                            acc.cyclic_channels if acc.cyclic_count > 0 else "-",
+                            acc.cyclic_first_frame if acc.cyclic_first_frame >= 0 else "-",
+                            acc.cyclic_max_duration if acc.cyclic_count > 0 else "-",
+                        ]
+                    )
+                else:
+                    row.extend(["-"] * 12)
+
+            writer.writerow(row)
+
+    console.print(f"[green]检查报告已保存: {output_path}[/green]")
