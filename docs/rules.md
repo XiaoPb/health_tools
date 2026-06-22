@@ -27,6 +27,15 @@ columns:
   - ACCZ
   - CH{0-15}             # 展开为 CH0, CH1, ..., CH15
 
+# ACC列名指定（可选，不指定则自动检测含acc+xyz或纯xyz的列名）
+acc_columns:
+  x: ACCX
+  y: ACCY
+  z: ACCZ
+
+# 帧号列名指定（可选，不指定则自动检测frame_id/frame/fid）
+frame_column: FRAME_ID
+
 factory_columns:         # 产测计算列（自动过滤全零列）
   - CH{0-15}
 
@@ -92,6 +101,8 @@ chip_info:               # 芯片参数（用于 CTR/Noise 计算）
 | `factory_config` | dict | 产测参数：顶层 sample_rate，子级 snr/ctr/noise 各有独立 skip/duration |
 | `gain_tia_map` | dict | 增益等级到 TIA 电阻（KΩ）的映射 |
 | `chip_info` | dict | 芯片参数（adc_full_scale, adc_offset, adc_vref, tia_ratio, gain, led_current 等） |
+| `acc_columns` | dict | ACC列名指定：`{x: "列名", y: "列名", z: "列名"}`，不指定则自动检测 |
+| `frame_column` | string | 帧号列名指定，不指定则自动检测（匹配frame_id/frame/fid） |
 
 ### chip_info 字段
 

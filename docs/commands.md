@@ -285,3 +285,70 @@ ghealth_tool fac -i data.csv -c gh3036 --gain 10 --current 25.0 -o results.csv
 3. 自动从数据中提取每通道的增益和灯电流（source 列全为 0 时跳过 CTR）
 4. 各指标独立判断数据时长：满足哪个算哪个，全不满足才跳过
 5. 输出 chip_info 面板和计算结果表
+
+---
+
+## check - 数据检查
+
+检查PPG/ACC数据完整性和正确性。别名：`chk`。
+
+```bash
+ghealth_tool check <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <pA>] [-o <输出>] [-v]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `路径` | 输入CSV文件或目录（必需） |
+| `-c, --chip` | 芯片型号，不指定则自动识别 |
+| `--checks` | 指定检查项（逗号分隔: range,ipd,frame,center,acc），默认全部 |
+| `--tolerance` | Ipd转换误差容忍度（pA，默认50） |
+| `-o, --output` | ACC异常报告CSV输出路径（默认: `<path>/acc_anomaly_report.csv`） |
+| `-v, --verbose` | 显示详细信息 |
+
+### 检查项
+
+| 检查项 | 说明 |
+|---|---|
+| `range` | 检查原始数据是否在ADC正常范围内 |
+| `frame` | 检查FRAME_ID完整性（丢包检测） |
+| `center` | 检查数据去除基线后是否居中 |
+| `ipd` | 检查Ipd_pA与Rawdata转换一致性（仅GH3036） |
+| `acc` | ACC加速度计异常检测（全零/静止/循环） |
+
+### ACC异常检测
+
+检测三种加速度计数据异常：
+
+1. **全零异常**: ACCX、ACCY、ACCZ同时为0的连续段
+2. **静止异常**: 单通道或多通道连续不变超过3个点，区分XYZ全部卡死或部分通道卡死
+3. **循环异常**: 固定序列重复≥2个完整周期（周期长度2~50点），排除静止段避免重复计数
+
+输出汇总表格（每文件一行）和CSV报告文件，字段包括：异常次数、涉及通道、首次出现帧号（FRAME_ID值）、最长持续帧数。
+
+### 列名解析
+
+ACC和帧号列名支持规则文件指定或自动检测：
+
+| 字段 | 规则文件配置 | 自动检测规则 |
+|---|---|---|
+| ACC XYZ | `acc_columns: {x: "列名", y: "列名", z: "列名"}` | 匹配含acc+x/y/z的列名（大小写不敏感）；其次匹配纯x/y/z |
+| 帧号 | `frame_column: "列名"` | 匹配frame_id/frame/fid（大小写不敏感）；无匹配时回退行索引 |
+
+### 示例
+
+```bash
+# 检查目录下所有CSV
+ghealth_tool check data/ -v
+
+# 仅检查ACC异常
+ghealth_tool check data/ --checks acc
+
+# 指定ACC报告输出路径
+ghealth_tool check data/ --checks acc -o report/acc_result.csv
+
+# 仅检查数据范围和帧完整性
+ghealth_tool check data.csv --checks range,frame
+
+# 使用别名
+ghealth_tool chk data/ -c gh3036 --checks acc,frame
+```

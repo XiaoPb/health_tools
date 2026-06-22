@@ -46,7 +46,7 @@ Always include the Co-Authored-By line. Never skip committing changes.
 
 ## Architecture
 
-CLI tool for PPG (photoplethysmography) sensor data: parsing logs, plotting, classifying, converting, and splitting CSV files. Entry point: `ghealth_tool` -> `src/health_tools/cli.py` (Click group).
+CLI tool for PPG (photoplethysmography) sensor data: parsing logs, plotting, classifying, converting, splitting CSV files, and checking data quality. Entry point: `ghealth_tool` -> `src/health_tools/cli.py` (Click group).
 
 ### Layers
 
@@ -55,7 +55,7 @@ Dependency direction: `models/ <- utils/ <- rules/ <- core/ <- commands/`
 - `src/health_tools/models/` — Rule dataclasses (ChipRule, ParseRule, ConvertRule, ClassifyRule). No external dependencies except utils/columns.py.
 - `src/health_tools/utils/` — CSV handling, column expansion, file utilities, parallel processing, logging, accuracy helpers.
 - `src/health_tools/rules/` — `RuleLoader` resolves YAML rule files (checks built-in paths under `rules/` first, then absolute/relative). `RuleValidator` validates rule schemas.
-- `src/health_tools/core/` — Business logic. `LogParser`, `DataPlotter`, `DataClassifier`, `DataConverter`, `DataSplitter`, `BatchProcessor`, `STFTPlotter`. These are the classes that do the actual work.
+- `src/health_tools/core/` — Business logic. `LogParser`, `DataPlotter`, `DataClassifier`, `DataConverter`, `DataSplitter`, `BatchProcessor`, `STFTPlotter`, `DataChecker`. These are the classes that do the actual work.
 - `src/health_tools/commands/` — Click command definitions. Each file exposes a `*_cmd` function registered in `cli.py`. Commands have short aliases (e.g., `p` for `parse`, `cv` for `convert`).
 
 ### Rule System
