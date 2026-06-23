@@ -42,6 +42,7 @@ class AccChannelAnomaly:
     count: int = 0
     first_frame: int = -1
     max_duration: int = 0
+    frames: List[int] = field(default_factory=list)
 
 
 @dataclass
@@ -469,6 +470,7 @@ class DataChecker:
                 count=len(segments),
                 first_frame=int(frame_ids.iloc[segments[0][0]]),
                 max_duration=max(end - start + 1 for start, end in segments),
+                frames=[int(frame_ids.iloc[s[0]]) for s in segments],
             )
 
     def _check_acc_static(
@@ -496,10 +498,12 @@ class DataChecker:
 
         if has_x and has_y and has_z:
             all_segs = per_ch_segments[0] + per_ch_segments[1] + per_ch_segments[2]
+            sorted_segs = sorted(all_segs, key=lambda s: s[0])
             report.static_xyz = AccChannelAnomaly(
-                count=len(all_segs),
-                first_frame=int(frame_ids.iloc[min(s[0] for s in all_segs)]),
-                max_duration=max(end - start + 1 for start, end in all_segs),
+                count=len(sorted_segs),
+                first_frame=int(frame_ids.iloc[sorted_segs[0][0]]),
+                max_duration=max(end - start + 1 for start, end in sorted_segs),
+                frames=[int(frame_ids.iloc[s[0]]) for s in sorted_segs],
             )
         else:
             targets = [report.static_x, report.static_y, report.static_z]
@@ -508,6 +512,7 @@ class DataChecker:
                     targets[idx].count = len(segs)
                     targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
                     targets[idx].max_duration = max(end - start + 1 for start, end in segs)
+                    targets[idx].frames = [int(frame_ids.iloc[s[0]]) for s in segs]
 
         return per_ch_static
 
@@ -534,10 +539,12 @@ class DataChecker:
 
         if has_x and has_y and has_z:
             all_segs = per_ch_segments[0] + per_ch_segments[1] + per_ch_segments[2]
+            sorted_segs = sorted(all_segs, key=lambda s: s[0])
             report.cyclic_xyz = AccChannelAnomaly(
-                count=len(all_segs),
-                first_frame=int(frame_ids.iloc[min(s[0] for s in all_segs)]),
-                max_duration=max(end - start + 1 for start, end in all_segs),
+                count=len(sorted_segs),
+                first_frame=int(frame_ids.iloc[sorted_segs[0][0]]),
+                max_duration=max(end - start + 1 for start, end in sorted_segs),
+                frames=[int(frame_ids.iloc[s[0]]) for s in sorted_segs],
             )
         else:
             targets = [report.cyclic_x, report.cyclic_y, report.cyclic_z]
@@ -546,6 +553,7 @@ class DataChecker:
                     targets[idx].count = len(segs)
                     targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
                     targets[idx].max_duration = max(end - start + 1 for start, end in segs)
+                    targets[idx].frames = [int(frame_ids.iloc[s[0]]) for s in segs]
 
     @staticmethod
     def _find_consecutive_segments(mask: pd.Series, min_length: int = 1) -> List[Tuple[int, int]]:

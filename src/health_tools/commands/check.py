@@ -217,13 +217,14 @@ def _print_acc_table(acc_reports: list) -> None:
         if show_total_frames:
             table.add_column("总帧数", justify="right")
         table.add_column("次数", justify="right")
-        table.add_column("首帧", justify="right")
         table.add_column("最长帧", justify="right")
+        table.add_column("前10次帧号")
         for r, a in items:
             row = [r.file_path.name]
             if show_total_frames:
                 row.append(str(r.total_frames))
-            row.extend([str(a.count), _fmt(a.first_frame), str(a.max_duration)])
+            frames_str = ",".join(str(f) for f in a.frames[:10])
+            row.extend([str(a.count), str(a.max_duration), frames_str])
             table.add_row(*row)
         console.print(table)
 
@@ -277,32 +278,32 @@ def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> Non
         header.extend(
             [
                 "ACC全零次数",
-                "ACC全零首帧",
                 "ACC全零最长帧",
+                "ACC全零前10帧",
                 "ACC静止XYZ次数",
-                "ACC静止XYZ首帧",
                 "ACC静止XYZ最长帧",
+                "ACC静止XYZ前10帧",
                 "ACC循环XYZ次数",
-                "ACC循环XYZ首帧",
                 "ACC循环XYZ最长帧",
+                "ACC循环XYZ前10帧",
                 "ACC静止X次数",
-                "ACC静止X首帧",
                 "ACC静止X最长帧",
+                "ACC静止X前10帧",
                 "ACC静止Y次数",
-                "ACC静止Y首帧",
                 "ACC静止Y最长帧",
+                "ACC静止Y前10帧",
                 "ACC静止Z次数",
-                "ACC静止Z首帧",
                 "ACC静止Z最长帧",
+                "ACC静止Z前10帧",
                 "ACC循环X次数",
-                "ACC循环X首帧",
                 "ACC循环X最长帧",
+                "ACC循环X前10帧",
                 "ACC循环Y次数",
-                "ACC循环Y首帧",
                 "ACC循环Y最长帧",
+                "ACC循环Y前10帧",
                 "ACC循环Z次数",
-                "ACC循环Z首帧",
                 "ACC循环Z最长帧",
+                "ACC循环Z前10帧",
             ]
         )
 
@@ -330,13 +331,10 @@ def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> Non
                 if acc:
 
                     def _a(a):
-                        """输出单个AccChannelAnomaly的三列"""
+                        """输出单个AccChannelAnomaly的三列: 次数,最长帧,前10帧"""
                         if a.count > 0:
-                            return [
-                                a.count,
-                                a.first_frame if a.first_frame >= 0 else "-",
-                                a.max_duration,
-                            ]
+                            frames_str = ",".join(str(f) for f in a.frames[:10])
+                            return [a.count, a.max_duration, frames_str]
                         return [0, "-", "-"]
 
                     row.extend(_a(acc.zero))
