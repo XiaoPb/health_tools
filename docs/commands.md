@@ -293,7 +293,7 @@ ghealth_tool fac -i data.csv -c gh3036 --gain 10 --current 25.0 -o results.csv
 检查PPG/ACC数据完整性和正确性。别名：`chk`。
 
 ```bash
-ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <pA>] [-o <输出>] [-v]
+ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <pA>] [-w <线程数>] [-o <输出>] [-v]
 ```
 
 | 参数 | 说明 |
@@ -302,6 +302,7 @@ ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance
 | `-c, --chip` | 芯片型号，不指定则自动识别 |
 | `--checks` | 指定检查项（逗号分隔: range,ipd,frame,center,acc），默认全部 |
 | `--tolerance` | Ipd转换误差容忍度（pA，默认50） |
+| `-w, --workers` | 并行线程数（默认4） |
 | `-o, --output` | 检查报告CSV输出路径（默认: `<path>/check_report.csv`） |
 | `-v, --verbose` | 显示详细信息 |
 
@@ -364,6 +365,9 @@ ghealth_tool check -i data/ --checks acc
 
 # 指定芯片型号和报告输出路径
 ghealth_tool check -i data/ -c gh3036_moto_hr -o report/check_result.csv
+
+# 8线程并行处理
+ghealth_tool check -i data/ -c gh3036_moto_hr -w 8
 
 # 仅检查数据范围和帧完整性
 ghealth_tool check -i data.csv --checks range,frame
