@@ -363,6 +363,22 @@ check_columns:
 
 逐行从 `agc_info` 提取 gain code 映射 kΩ，按实际增益计算期望 Ipd_pA，与实际值比较误差。中途 AGC 切换时每行独立计算，不会因增益变化导致误报。
 
+检查失败时自动生成超差详情文件 `ipd_detail_<文件名>.csv`（与 `check_report.csv` 同目录），仅包含超差行：
+
+```
+frame, rawdata0, ipd_pa0, agc_info0, expected_ipd0, diff0, exceed0, rawdata1, ...
+```
+
+| 列 | 说明 |
+|---|---|
+| `frame` | 帧号 |
+| `rawdata*` | 原始数据值 |
+| `ipd_pa*` | 实际Ipd值 |
+| `agc_info*` | AGC信息（含gain code） |
+| `expected_ipd*` | 根据rawdata和agc计算的期望Ipd |
+| `diff*` | \|实际 - 期望\| 差值 |
+| `exceed*` | 1=超差, 0=正常 |
+
 ### 示例
 
 ```bash
