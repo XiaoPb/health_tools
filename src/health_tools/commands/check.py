@@ -65,25 +65,25 @@ def check_cmd(
 
     def _process_file(
         csv_file: Path,
-    ) -> Tuple[Optional["FileCheckReport"], Optional["AccAnomalyReport"], str]:
-        """处理单个文件，返回 (report, acc_report, skip_reason)"""
+    ) -> Tuple[Optional["FileCheckReport"], Optional["AccAnomalyReport"], Optional[object], str]:
+        """处理单个文件，返回 (report, acc_report, ipd_detail, skip_reason)"""
         chip = chip_name or _detect_chip(csv_file)
         if not chip:
-            return None, None, "无法识别芯片"
+            return None, None, None, "无法识别芯片"
 
         try:
             chip_rule = RuleLoader.load_chip_rule(chip)
         except Exception:
-            return None, None, f"无法加载规则 {chip}"
+            return None, None, None, f"无法加载规则 {chip}"
 
         handler = CSVHandler(chip_rule)
         try:
             _, df = handler.read(csv_file)
         except Exception as e:
-            return None, None, f"读取失败: {e}"
+            return None, None, None, f"读取失败: {e}"
 
         if df.empty:
-            return None, None, "空文件"
+            return None, None, None, "空文件"
 
         checker = DataChecker(chip_rule, tolerance=tolerance, static_min=static_min)
         report = FileCheckReport(file_path=csv_file, chip=chip)
@@ -94,18 +94,24 @@ def check_cmd(
             report.results.append(checker.check_frame_completeness(df))
         if "center" in check_set:
             report.results.append(checker.check_data_centering(df))
+
+        ipd_detail = None
         if "ipd" in check_set and chip.startswith("gh3036"):
-            report.results.append(checker.check_ipd_conversion(df))
+            ipd_result = checker.check_ipd_conversion(df)
+            report.results.append(ipd_result)
+            if not ipd_result.passed:
+                ipd_detail = checker.build_ipd_detail(df)
 
         acc_report = None
         if "acc" in check_set:
             acc_report = checker.check_acc_anomaly(df)
             acc_report.file_path = csv_file
 
-        return report, acc_report, ""
+        return report, acc_report, ipd_detail, ""
 
     reports: List[FileCheckReport] = []
     acc_reports: Dict[Path, AccAnomalyReport] = {}
+    ipd_details: Dict[Path, object] = {}
 
     with Progress(console=console) as progress:
         task = progress.add_task("检查中", total=len(files))
@@ -114,11 +120,13 @@ def check_cmd(
             futures = {executor.submit(_process_file, f): f for f in files}
             for future in as_completed(futures):
                 csv_file = futures[future]
-                report, acc_report, skip_reason = future.result()
+                report, acc_report, ipd_detail, skip_reason = future.result()
                 if report:
                     reports.append(report)
                     if acc_report:
                         acc_reports[csv_file] = acc_report
+                    if ipd_detail is not None and not ipd_detail.empty:
+                        ipd_details[csv_file] = ipd_detail
                 elif verbose and skip_reason:
                     progress.console.print(
                         f"[yellow]跳过（{skip_reason}）: {csv_file.name}[/yellow]"
@@ -138,6 +146,13 @@ def check_cmd(
 
     csv_out = Path(output_path) if output_path else _default_output(target)
     _save_report_csv(reports, acc_reports, csv_out)
+
+    if ipd_details:
+        out_dir = csv_out.parent
+        for csv_file, detail_df in ipd_details.items():
+            detail_path = out_dir / f"ipd_detail_{csv_file.stem}.csv"
+            detail_df.to_csv(detail_path, index=False, encoding="utf-8-sig")
+        console.print(f"[green]Ipd超差详情已保存: {len(ipd_details)} 个文件[/green]")
 
 
 def _detect_chip(csv_file: Path) -> Optional[str]:

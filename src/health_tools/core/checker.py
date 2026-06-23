@@ -361,6 +361,58 @@ class DataChecker:
             details,
         )
 
+    def build_ipd_detail(self, df: pd.DataFrame) -> pd.DataFrame:
+        """构建Ipd超差详情DataFrame，仅包含任一通道超差的行"""
+        ipd_cols = [c for c in self._get_ipd_columns() if c in df.columns]
+        data_cols = [c for c in self._get_data_columns() if c in df.columns]
+        agc_cols = [c for c in self._get_agc_columns() if c in df.columns]
+
+        if not ipd_cols or not data_cols:
+            return pd.DataFrame()
+
+        chip_info = self.chip_rule.chip_info or {}
+        full_scale = float(chip_info.get("adc_full_scale", self.ADC_FULL_SCALE))
+        offset = float(chip_info.get("adc_offset", 0))
+        vref = float(chip_info.get("adc_vref", 1.8))
+        tia_ratio = float(chip_info.get("tia_ratio", 2))
+        gain_map = self._gain_tia_map.get("map", {}) if self._gain_tia_map else {}
+
+        frame_col = self._resolve_frame_column(df)
+        check_count = min(len(ipd_cols), len(data_cols))
+
+        result = pd.DataFrame(index=df.index)
+        if frame_col:
+            result["frame"] = df[frame_col]
+        else:
+            result["frame"] = range(len(df))
+
+        exceed_any = pd.Series(False, index=df.index)
+
+        for i in range(check_count):
+            raw_col = data_cols[i]
+            ipd_col = ipd_cols[i]
+            agc_col = agc_cols[i] if i < len(agc_cols) else None
+
+            raw_data = pd.to_numeric(df[raw_col], errors="coerce")
+            ipd_data = pd.to_numeric(df[ipd_col], errors="coerce")
+            gain_k = self._extract_gain_k_series(df, agc_cols, i, gain_map)
+
+            expected = (raw_data - offset) / full_scale * vref * 1e6 / (tia_ratio * gain_k) * 1000
+            diff = (ipd_data - expected).abs()
+            exceed = diff > self.tolerance
+
+            result[raw_col] = raw_data
+            result[ipd_col] = ipd_data
+            if agc_col and agc_col in df.columns:
+                result[agc_col] = df[agc_col]
+            result[f"expected_ipd{i}"] = expected.round(1)
+            result[f"diff{i}"] = diff.round(1)
+            result[f"exceed{i}"] = exceed.astype(int)
+
+            exceed_any |= exceed.fillna(False)
+
+        return result[exceed_any].reset_index(drop=True)
+
     def _extract_gain_k_series(
         self,
         df: pd.DataFrame,
