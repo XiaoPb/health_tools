@@ -1,11 +1,13 @@
 """数据检查命令"""
 
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import click
 from rich.console import Console
+from rich.progress import Progress
 from rich.table import Table
 
 console = Console()
@@ -27,6 +29,7 @@ console = Console()
     default=None,
     help="检查报告CSV输出路径 (默认: <path>/check_report.csv)",
 )
+@click.option("-w", "--workers", type=int, default=4, help="并行线程数 (默认4)")
 @click.option("-v", "--verbose", is_flag=True, help="显示详细信息")
 def check_cmd(
     input_path: str,
@@ -34,6 +37,7 @@ def check_cmd(
     checks: Optional[str],
     tolerance: int,
     output_path: Optional[str],
+    workers: int,
     verbose: bool,
 ) -> None:
     """检查PPG数据完整性和正确性"""
@@ -52,39 +56,32 @@ def check_cmd(
         if not files:
             console.print(f"[yellow]未找到CSV文件: {target}[/yellow]")
             return
-        if verbose:
-            console.print(f"找到 {len(files)} 个CSV文件")
+
+    console.print(f"找到 {len(files)} 个CSV文件, {workers} 线程处理中...")
 
     check_set = set(checks.split(",")) if checks else {"range", "ipd", "frame", "center", "acc"}
-    reports: List[FileCheckReport] = []
-    acc_reports: Dict[Path, AccAnomalyReport] = {}
 
-    for csv_file in files:
+    def _process_file(
+        csv_file: Path,
+    ) -> Tuple[Optional["FileCheckReport"], Optional["AccAnomalyReport"], str]:
+        """处理单个文件，返回 (report, acc_report, skip_reason)"""
         chip = chip_name or _detect_chip(csv_file)
         if not chip:
-            if verbose:
-                console.print(f"[yellow]跳过（无法识别芯片）: {csv_file.name}[/yellow]")
-            continue
+            return None, None, "无法识别芯片"
 
         try:
             chip_rule = RuleLoader.load_chip_rule(chip)
         except Exception:
-            if verbose:
-                console.print(f"[yellow]跳过（无法加载规则 {chip}）: {csv_file.name}[/yellow]")
-            continue
+            return None, None, f"无法加载规则 {chip}"
 
         handler = CSVHandler(chip_rule)
         try:
             _, df = handler.read(csv_file)
         except Exception as e:
-            if verbose:
-                console.print(f"[red]读取失败: {csv_file.name} ({e})[/red]")
-            continue
+            return None, None, f"读取失败: {e}"
 
         if df.empty:
-            if verbose:
-                console.print(f"[yellow]跳过（空文件）: {csv_file.name}[/yellow]")
-            continue
+            return None, None, "空文件"
 
         checker = DataChecker(chip_rule, tolerance=tolerance)
         report = FileCheckReport(file_path=csv_file, chip=chip)
@@ -98,12 +95,33 @@ def check_cmd(
         if "ipd" in check_set and chip.startswith("gh3036"):
             report.results.append(checker.check_ipd_conversion(df))
 
+        acc_report = None
         if "acc" in check_set:
             acc_report = checker.check_acc_anomaly(df)
             acc_report.file_path = csv_file
-            acc_reports[csv_file] = acc_report
 
-        reports.append(report)
+        return report, acc_report, ""
+
+    reports: List[FileCheckReport] = []
+    acc_reports: Dict[Path, AccAnomalyReport] = {}
+
+    with Progress(console=console) as progress:
+        task = progress.add_task("检查中", total=len(files))
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_process_file, f): f for f in files}
+            for future in as_completed(futures):
+                csv_file = futures[future]
+                report, acc_report, skip_reason = future.result()
+                if report:
+                    reports.append(report)
+                    if acc_report:
+                        acc_reports[csv_file] = acc_report
+                elif verbose and skip_reason:
+                    progress.console.print(
+                        f"[yellow]跳过（{skip_reason}）: {csv_file.name}[/yellow]"
+                    )
+                progress.advance(task)
 
     if not reports:
         console.print("[yellow]无可检查的文件[/yellow]")
