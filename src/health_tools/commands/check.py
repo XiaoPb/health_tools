@@ -198,7 +198,7 @@ def _print_reports(reports: list, verbose: bool) -> None:
 
 
 def _print_acc_table(acc_reports: list) -> None:
-    """打印ACC异常汇总表（仅展示有异常的子表）"""
+    """打印ACC异常汇总表（按通道拆表，仅展示有异常的）"""
     console.print("\n[bold cyan]ACC异常检测报告[/bold cyan]")
 
     anomaly_count = sum(1 for r in acc_reports if r.has_anomaly)
@@ -206,64 +206,36 @@ def _print_acc_table(acc_reports: list) -> None:
     def _fmt(val: int) -> str:
         return str(val) if val >= 0 else "-"
 
-    # 全零检测表（仅有全零异常时展示）
-    if any(r.zero_count > 0 for r in acc_reports):
-        table = Table(title="全零检测", show_header=True, header_style="bold", padding=(0, 1))
+    def _print_sub_table(
+        title: str, reports: list, get_anomaly, show_total_frames: bool = False
+    ) -> None:
+        items = [(r, get_anomaly(r)) for r in reports if get_anomaly(r).count > 0]
+        if not items:
+            return
+        table = Table(title=title, show_header=True, header_style="bold", padding=(0, 1))
         table.add_column("文件名", no_wrap=True)
-        table.add_column("总帧数", justify="right")
+        if show_total_frames:
+            table.add_column("总帧数", justify="right")
         table.add_column("次数", justify="right")
-        table.add_column("通道")
         table.add_column("首帧", justify="right")
         table.add_column("最长帧", justify="right")
-        for r in acc_reports:
-            if r.zero_count > 0:
-                table.add_row(
-                    r.file_path.name,
-                    str(r.total_frames),
-                    str(r.zero_count),
-                    r.zero_channels,
-                    _fmt(r.zero_first_frame),
-                    str(r.zero_max_duration),
-                )
+        for r, a in items:
+            row = [r.file_path.name]
+            if show_total_frames:
+                row.append(str(r.total_frames))
+            row.extend([str(a.count), _fmt(a.first_frame), str(a.max_duration)])
+            table.add_row(*row)
         console.print(table)
 
-    # 静止检测表（仅有静止异常时展示）
-    if any(r.static_count > 0 for r in acc_reports):
-        table = Table(title="静止检测", show_header=True, header_style="bold", padding=(0, 1))
-        table.add_column("文件名", no_wrap=True)
-        table.add_column("次数", justify="right")
-        table.add_column("通道")
-        table.add_column("首帧", justify="right")
-        table.add_column("最长帧", justify="right")
-        for r in acc_reports:
-            if r.static_count > 0:
-                table.add_row(
-                    r.file_path.name,
-                    str(r.static_count),
-                    r.static_channels,
-                    _fmt(r.static_first_frame),
-                    str(r.static_max_duration),
-                )
-        console.print(table)
-
-    # 循环检测表（仅有循环异常时展示）
-    if any(r.cyclic_count > 0 for r in acc_reports):
-        table = Table(title="循环检测", show_header=True, header_style="bold", padding=(0, 1))
-        table.add_column("文件名", no_wrap=True)
-        table.add_column("次数", justify="right")
-        table.add_column("通道")
-        table.add_column("首帧", justify="right")
-        table.add_column("最长帧", justify="right")
-        for r in acc_reports:
-            if r.cyclic_count > 0:
-                table.add_row(
-                    r.file_path.name,
-                    str(r.cyclic_count),
-                    r.cyclic_channels,
-                    _fmt(r.cyclic_first_frame),
-                    str(r.cyclic_max_duration),
-                )
-        console.print(table)
+    _print_sub_table("全零检测", acc_reports, lambda r: r.zero, show_total_frames=True)
+    _print_sub_table("静止检测-XYZ", acc_reports, lambda r: r.static_xyz)
+    _print_sub_table("静止检测-X", acc_reports, lambda r: r.static_x)
+    _print_sub_table("静止检测-Y", acc_reports, lambda r: r.static_y)
+    _print_sub_table("静止检测-Z", acc_reports, lambda r: r.static_z)
+    _print_sub_table("循环检测-XYZ", acc_reports, lambda r: r.cyclic_xyz)
+    _print_sub_table("循环检测-X", acc_reports, lambda r: r.cyclic_x)
+    _print_sub_table("循环检测-Y", acc_reports, lambda r: r.cyclic_y)
+    _print_sub_table("循环检测-Z", acc_reports, lambda r: r.cyclic_z)
 
     console.print(
         f"ACC总计: {len(acc_reports)} 文件, "
@@ -305,17 +277,32 @@ def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> Non
         header.extend(
             [
                 "ACC全零次数",
-                "ACC全零通道",
                 "ACC全零首帧",
                 "ACC全零最长帧",
-                "ACC静止次数",
-                "ACC静止通道",
-                "ACC静止首帧",
-                "ACC静止最长帧",
-                "ACC循环次数",
-                "ACC循环通道",
-                "ACC循环首帧",
-                "ACC循环最长帧",
+                "ACC静止XYZ次数",
+                "ACC静止XYZ首帧",
+                "ACC静止XYZ最长帧",
+                "ACC循环XYZ次数",
+                "ACC循环XYZ首帧",
+                "ACC循环XYZ最长帧",
+                "ACC静止X次数",
+                "ACC静止X首帧",
+                "ACC静止X最长帧",
+                "ACC静止Y次数",
+                "ACC静止Y首帧",
+                "ACC静止Y最长帧",
+                "ACC静止Z次数",
+                "ACC静止Z首帧",
+                "ACC静止Z最长帧",
+                "ACC循环X次数",
+                "ACC循环X首帧",
+                "ACC循环X最长帧",
+                "ACC循环Y次数",
+                "ACC循环Y首帧",
+                "ACC循环Y最长帧",
+                "ACC循环Z次数",
+                "ACC循环Z首帧",
+                "ACC循环Z最长帧",
             ]
         )
 
@@ -341,24 +328,28 @@ def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> Non
             if has_acc:
                 acc = acc_reports.get(report.file_path)
                 if acc:
-                    row.extend(
-                        [
-                            acc.zero_count,
-                            acc.zero_channels if acc.zero_count > 0 else "-",
-                            acc.zero_first_frame if acc.zero_first_frame >= 0 else "-",
-                            acc.zero_max_duration if acc.zero_count > 0 else "-",
-                            acc.static_count,
-                            acc.static_channels if acc.static_count > 0 else "-",
-                            acc.static_first_frame if acc.static_first_frame >= 0 else "-",
-                            acc.static_max_duration if acc.static_count > 0 else "-",
-                            acc.cyclic_count,
-                            acc.cyclic_channels if acc.cyclic_count > 0 else "-",
-                            acc.cyclic_first_frame if acc.cyclic_first_frame >= 0 else "-",
-                            acc.cyclic_max_duration if acc.cyclic_count > 0 else "-",
-                        ]
-                    )
+
+                    def _a(a):
+                        """输出单个AccChannelAnomaly的三列"""
+                        if a.count > 0:
+                            return [
+                                a.count,
+                                a.first_frame if a.first_frame >= 0 else "-",
+                                a.max_duration,
+                            ]
+                        return [0, "-", "-"]
+
+                    row.extend(_a(acc.zero))
+                    row.extend(_a(acc.static_xyz))
+                    row.extend(_a(acc.cyclic_xyz))
+                    row.extend(_a(acc.static_x))
+                    row.extend(_a(acc.static_y))
+                    row.extend(_a(acc.static_z))
+                    row.extend(_a(acc.cyclic_x))
+                    row.extend(_a(acc.cyclic_y))
+                    row.extend(_a(acc.cyclic_z))
                 else:
-                    row.extend(["-"] * 12)
+                    row.extend(["-"] * 27)
 
             writer.writerow(row)
 

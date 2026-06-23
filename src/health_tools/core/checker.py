@@ -36,27 +36,46 @@ class FileCheckReport:
 
 
 @dataclass
+class AccChannelAnomaly:
+    """单通道/组合的异常统计"""
+
+    count: int = 0
+    first_frame: int = -1
+    max_duration: int = 0
+
+
+@dataclass
 class AccAnomalyReport:
     """单文件ACC异常检测报告"""
 
     file_path: Path
     total_frames: int
-    zero_count: int = 0
-    zero_channels: str = "-"
-    zero_first_frame: int = -1
-    zero_max_duration: int = 0
-    static_count: int = 0
-    static_channels: str = "-"
-    static_first_frame: int = -1
-    static_max_duration: int = 0
-    cyclic_count: int = 0
-    cyclic_channels: str = "-"
-    cyclic_first_frame: int = -1
-    cyclic_max_duration: int = 0
+    zero: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    static_x: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    static_y: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    static_z: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    static_xyz: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    cyclic_x: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    cyclic_y: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    cyclic_z: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    cyclic_xyz: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
 
     @property
     def has_anomaly(self) -> bool:
-        return self.zero_count > 0 or self.static_count > 0 or self.cyclic_count > 0
+        return any(
+            a.count > 0
+            for a in [
+                self.zero,
+                self.static_x,
+                self.static_y,
+                self.static_z,
+                self.static_xyz,
+                self.cyclic_x,
+                self.cyclic_y,
+                self.cyclic_z,
+                self.cyclic_xyz,
+            ]
+        )
 
 
 class DataChecker:
@@ -446,19 +465,18 @@ class DataChecker:
         all_zero = (acc_df == 0).all(axis=1)
         segments = self._find_consecutive_segments(all_zero)
         if segments:
-            report.zero_count = len(segments)
-            report.zero_channels = "XYZ"
-            report.zero_first_frame = int(frame_ids.iloc[segments[0][0]])
-            report.zero_max_duration = max(end - start + 1 for start, end in segments)
+            report.zero = AccChannelAnomaly(
+                count=len(segments),
+                first_frame=int(frame_ids.iloc[segments[0][0]]),
+                max_duration=max(end - start + 1 for start, end in segments),
+            )
 
     def _check_acc_static(
         self, acc_df: pd.DataFrame, frame_ids: pd.Series, report: AccAnomalyReport
     ) -> Dict[str, pd.Series]:
-        """检测连续不变超过3个点的段落，返回每通道静止掩码"""
+        """检测连续不变段落，三通道都有→归XYZ，否则归单通道"""
         per_ch_static: Dict[str, pd.Series] = {}
-        channel_has_static: List[str] = []
-        all_segments: List[Tuple[int, int]] = []
-        axis_labels = ["X", "Y", "Z"]
+        per_ch_segments: Dict[int, List[Tuple[int, int]]] = {}
 
         for idx, col in enumerate(acc_df.columns):
             ch_mask = pd.Series(False, index=acc_df.index)
@@ -467,22 +485,29 @@ class DataChecker:
             unchanged.iloc[0] = False
             segments = self._find_consecutive_segments(unchanged, min_length=self.static_min)
             if segments:
-                ch_label = axis_labels[idx] if idx < 3 else col
-                channel_has_static.append(ch_label)
-                all_segments.extend(segments)
                 for start, end in segments:
                     ch_mask.iloc[start : end + 1] = True
             per_ch_static[col] = ch_mask
+            per_ch_segments[idx] = segments
 
-        if all_segments:
-            report.static_count = len(all_segments)
-            if len(channel_has_static) == 3:
-                report.static_channels = "XYZ"
-            else:
-                report.static_channels = ",".join(channel_has_static)
-            first_idx = min(s[0] for s in all_segments)
-            report.static_first_frame = int(frame_ids.iloc[first_idx])
-            report.static_max_duration = max(end - start + 1 for start, end in all_segments)
+        has_x = len(per_ch_segments.get(0, [])) > 0
+        has_y = len(per_ch_segments.get(1, [])) > 0
+        has_z = len(per_ch_segments.get(2, [])) > 0
+
+        if has_x and has_y and has_z:
+            all_segs = per_ch_segments[0] + per_ch_segments[1] + per_ch_segments[2]
+            report.static_xyz = AccChannelAnomaly(
+                count=len(all_segs),
+                first_frame=int(frame_ids.iloc[min(s[0] for s in all_segs)]),
+                max_duration=max(end - start + 1 for start, end in all_segs),
+            )
+        else:
+            targets = [report.static_x, report.static_y, report.static_z]
+            for idx, segs in per_ch_segments.items():
+                if idx < 3 and segs:
+                    targets[idx].count = len(segs)
+                    targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
+                    targets[idx].max_duration = max(end - start + 1 for start, end in segs)
 
         return per_ch_static
 
@@ -493,30 +518,34 @@ class DataChecker:
         frame_ids: pd.Series,
         report: AccAnomalyReport,
     ) -> None:
-        """检测固定序列重复（周期2~50，≥2个完整周期），用本通道静止掩码排除"""
-        channel_has_cyclic: List[str] = []
-        all_segments: List[Tuple[int, int]] = []
-        axis_labels = ["X", "Y", "Z"]
+        """检测固定序列重复，三通道都有→归XYZ，否则归单通道"""
+        per_ch_segments: Dict[int, List[Tuple[int, int]]] = {}
 
         for idx, col in enumerate(acc_df.columns):
             values = acc_df[col].values.copy()
             ch_static = per_ch_static.get(col, pd.Series(False, index=acc_df.index))
             mask = ~ch_static.values
             segments = self._find_cyclic_segments(values, mask)
-            if segments:
-                ch_label = axis_labels[idx] if idx < 3 else col
-                channel_has_cyclic.append(ch_label)
-                all_segments.extend(segments)
+            per_ch_segments[idx] = segments
 
-        if all_segments:
-            report.cyclic_count = len(all_segments)
-            if len(channel_has_cyclic) == 3:
-                report.cyclic_channels = "XYZ"
-            else:
-                report.cyclic_channels = ",".join(channel_has_cyclic)
-            first_idx = min(s[0] for s in all_segments)
-            report.cyclic_first_frame = int(frame_ids.iloc[first_idx])
-            report.cyclic_max_duration = max(end - start + 1 for start, end in all_segments)
+        has_x = len(per_ch_segments.get(0, [])) > 0
+        has_y = len(per_ch_segments.get(1, [])) > 0
+        has_z = len(per_ch_segments.get(2, [])) > 0
+
+        if has_x and has_y and has_z:
+            all_segs = per_ch_segments[0] + per_ch_segments[1] + per_ch_segments[2]
+            report.cyclic_xyz = AccChannelAnomaly(
+                count=len(all_segs),
+                first_frame=int(frame_ids.iloc[min(s[0] for s in all_segs)]),
+                max_duration=max(end - start + 1 for start, end in all_segs),
+            )
+        else:
+            targets = [report.cyclic_x, report.cyclic_y, report.cyclic_z]
+            for idx, segs in per_ch_segments.items():
+                if idx < 3 and segs:
+                    targets[idx].count = len(segs)
+                    targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
+                    targets[idx].max_duration = max(end - start + 1 for start, end in segs)
 
     @staticmethod
     def _find_consecutive_segments(mask: pd.Series, min_length: int = 1) -> List[Tuple[int, int]]:
