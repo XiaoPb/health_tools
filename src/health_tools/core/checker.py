@@ -302,7 +302,7 @@ class DataChecker:
             ipd_data = pd.to_numeric(df[ipd_col], errors="coerce")
             raw_data = pd.to_numeric(df[raw_col], errors="coerce")
 
-            gain_k = self._extract_gain_k(df, agc_cols, i, gain_map)
+            gain_k = self._extract_gain_k_series(df, agc_cols, i, gain_map)
 
             expected_ipd_pa = (
                 (raw_data - offset) / full_scale * vref * 1e6 / (tia_ratio * gain_k) * 1000
@@ -340,23 +340,25 @@ class DataChecker:
             details,
         )
 
-    def _extract_gain_k(
+    def _extract_gain_k_series(
         self,
         df: pd.DataFrame,
         agc_cols: List[str],
         ch_index: int,
         gain_map: Dict,
-    ) -> float:
-        """从AGC_INFO提取gain值并映射为kΩ"""
-        if ch_index < len(agc_cols) and agc_cols[ch_index] in df.columns:
-            agc_data = pd.to_numeric(df[agc_cols[ch_index]], errors="coerce")
-            valid_agc = agc_data.dropna()
-            if not valid_agc.empty:
-                agc_val = int(valid_agc.iloc[0])
-                gain_code = agc_val & 0x0F
-                gain_k = gain_map.get(gain_code, gain_map.get(str(gain_code), 100))
-                return float(gain_k)
-        return 100.0
+    ) -> pd.Series:
+        """从AGC_INFO逐行提取gain值并映射为kΩ，返回与df等长的Series"""
+        default_gain = 100.0
+        if ch_index >= len(agc_cols) or agc_cols[ch_index] not in df.columns:
+            return pd.Series(default_gain, index=df.index)
+
+        agc_data = pd.to_numeric(df[agc_cols[ch_index]], errors="coerce")
+        gain_codes = (agc_data.fillna(0).astype(int)) & 0x0F
+
+        def _map_gain(code: int) -> float:
+            return float(gain_map.get(code, gain_map.get(str(code), default_gain)))
+
+        return gain_codes.map(_map_gain)
 
     # ──────────────────────────────────────────────────────────────────────
     # ACC 异常检测
