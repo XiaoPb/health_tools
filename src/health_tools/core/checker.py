@@ -164,10 +164,11 @@ class DataChecker:
             )
 
         pct = total_abnormal / total_cells * 100 if total_cells > 0 else 0
+        col_names = ", ".join(abnormal_cols)
         return CheckResult(
             "数据范围",
             False,
-            f"{len(abnormal_cols)}/{len(data_cols)} 列存在超范围数据, "
+            f"{len(abnormal_cols)}/{len(data_cols)} 列超范围 [{col_names}], "
             f"共 {total_abnormal} 个异常值 ({pct:.1f}%)",
             details,
         )
@@ -263,10 +264,11 @@ class DataChecker:
                 f"[{self.CENTER_LOW:.0f}, {self.CENTER_HIGH:.0f}]",
             )
 
+        col_names = ", ".join(off_center_cols)
         return CheckResult(
             "数据居中",
             False,
-            f"{len(off_center_cols)}/{len(data_cols)} 列数据偏离居中范围",
+            f"{len(off_center_cols)}/{len(data_cols)} 列偏离居中 [{col_names}]",
             details,
         )
 
@@ -330,10 +332,11 @@ class DataChecker:
                 f"全部 {check_count} 通道 Ipd_pA 与 Rawdata 转换误差在 ±{self.tolerance} pA 内",
             )
 
+        col_names = ", ".join(mismatch_cols)
         return CheckResult(
             "Ipd转换",
             False,
-            f"{len(mismatch_cols)}/{check_count} 通道转换误差超过 ±{self.tolerance} pA",
+            f"{len(mismatch_cols)}/{check_count} 通道超差 [{col_names}]",
             details,
         )
 
