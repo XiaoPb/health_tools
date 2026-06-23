@@ -90,23 +90,35 @@ class DataChecker:
         return results
 
     def _get_data_columns(self) -> List[str]:
-        """获取原始数据列名"""
+        """获取原始数据列名（从chip_info.ipd_pA.source或columns中匹配rawdata/CH模式）"""
+        columns = self.chip_rule.columns or []
+        expanded = expand_columns(columns)
+        rawdata_cols = [c for c in expanded if re.match(r"(?i)^(rawdata|ch)\d+$", c)]
+        if rawdata_cols:
+            return rawdata_cols
+        # fallback: 硬编码模式
         if self.chip_name.startswith("gh3036"):
             return expand_columns(["Rawdata{0-31}"])
-        elif self.chip_name.startswith("gh3220"):
-            cols = expand_columns(["CH{0-15}"])
-            cols += expand_columns(["CH{16-31}"])
-            return cols
-        elif self.chip_name.startswith("gh3300"):
+        elif self.chip_name.startswith("gh3220") or self.chip_name.startswith("gh3300"):
             return expand_columns(["CH{0-15}"]) + expand_columns(["CH{16-31}"])
         return []
 
     def _get_ipd_columns(self) -> List[str]:
-        """获取Ipd列名（GH3036）"""
+        """获取Ipd列名（从columns中匹配ipd模式）"""
+        columns = self.chip_rule.columns or []
+        expanded = expand_columns(columns)
+        ipd_cols = [c for c in expanded if re.match(r"(?i)^ipd[_\s]?pa?\d*$", c)]
+        if ipd_cols:
+            return ipd_cols
         return expand_columns(["Ipd{0-31}"])
 
     def _get_agc_columns(self) -> List[str]:
-        """获取AGC_INFO列名"""
+        """获取AGC_INFO列名（从columns中匹配agc模式）"""
+        columns = self.chip_rule.columns or []
+        expanded = expand_columns(columns)
+        agc_cols = [c for c in expanded if re.match(r"(?i)^agc[_\s]?info\d*$", c)]
+        if agc_cols:
+            return agc_cols
         return expand_columns(["AGC_INFO_CH{0-31}"])
 
     def check_data_range(self, df: pd.DataFrame) -> CheckResult:
@@ -153,11 +165,12 @@ class DataChecker:
         )
 
     def check_frame_completeness(self, df: pd.DataFrame) -> CheckResult:
-        """检查FRAME_ID是否完整（丢包检测）"""
-        if "FRAME_ID" not in df.columns:
-            return CheckResult("帧完整性", False, "未找到 FRAME_ID 列")
+        """检查帧号是否完整（丢包检测）"""
+        frame_col = self._resolve_frame_column(df)
+        if not frame_col:
+            return CheckResult("帧完整性", False, "未找到帧号列")
 
-        frame_ids = pd.to_numeric(df["FRAME_ID"], errors="coerce").dropna().astype(int)
+        frame_ids = pd.to_numeric(df[frame_col], errors="coerce").dropna().astype(int)
         if frame_ids.empty:
             return CheckResult("帧完整性", False, "FRAME_ID 列无有效数据")
 
@@ -350,6 +363,7 @@ class DataChecker:
     ]
     _FRAME_PATTERNS = [
         re.compile(r"(?i)^frame[_\s]?id$"),
+        re.compile(r"(?i)^frame[_\s]?cnt$"),
         re.compile(r"(?i)^frame$"),
         re.compile(r"(?i)^fid$"),
     ]
