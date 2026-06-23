@@ -90,13 +90,15 @@ class DataChecker:
         return results
 
     def _get_data_columns(self) -> List[str]:
-        """获取原始数据列名（从chip_info.ipd_pA.source或columns中匹配rawdata/CH模式）"""
+        """获取原始数据列名：优先check_columns.data，其次从columns匹配"""
+        explicit = self.chip_rule.check_columns.get("data")
+        if explicit:
+            return explicit
         columns = self.chip_rule.columns or []
         expanded = expand_columns(columns)
         rawdata_cols = [c for c in expanded if re.match(r"(?i)^(rawdata|ch)\d+$", c)]
         if rawdata_cols:
             return rawdata_cols
-        # fallback: 硬编码模式
         if self.chip_name.startswith("gh3036"):
             return expand_columns(["Rawdata{0-31}"])
         elif self.chip_name.startswith("gh3220") or self.chip_name.startswith("gh3300"):
@@ -104,7 +106,10 @@ class DataChecker:
         return []
 
     def _get_ipd_columns(self) -> List[str]:
-        """获取Ipd列名（从columns中匹配ipd模式）"""
+        """获取Ipd列名：优先check_columns.ipd，其次从columns匹配"""
+        explicit = self.chip_rule.check_columns.get("ipd")
+        if explicit:
+            return explicit
         columns = self.chip_rule.columns or []
         expanded = expand_columns(columns)
         ipd_cols = [c for c in expanded if re.match(r"(?i)^ipd[_\s]?pa?\d*$", c)]
@@ -113,7 +118,10 @@ class DataChecker:
         return expand_columns(["Ipd{0-31}"])
 
     def _get_agc_columns(self) -> List[str]:
-        """获取AGC_INFO列名（从columns中匹配agc模式）"""
+        """获取AGC_INFO列名：优先check_columns.agc，其次从columns匹配"""
+        explicit = self.chip_rule.check_columns.get("agc")
+        if explicit:
+            return explicit
         columns = self.chip_rule.columns or []
         expanded = expand_columns(columns)
         agc_cols = [c for c in expanded if re.match(r"(?i)^agc[_\s]?info\d*$", c)]
