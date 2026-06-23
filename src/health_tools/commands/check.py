@@ -12,7 +12,7 @@ console = Console()
 
 
 @click.command("check")
-@click.argument("path", type=click.Path(exists=True))
+@click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)，不指定则自动识别")
 @click.option(
     "--checks",
@@ -29,7 +29,7 @@ console = Console()
 )
 @click.option("-v", "--verbose", is_flag=True, help="显示详细信息")
 def check_cmd(
-    path: str,
+    input_path: str,
     chip_name: Optional[str],
     checks: Optional[str],
     tolerance: int,
@@ -41,7 +41,10 @@ def check_cmd(
     from health_tools.rules.loader import RuleLoader
     from health_tools.utils.csv_handler import CSVHandler
 
-    target = Path(path)
+    target = Path(input_path)
+    if not target.exists():
+        console.print(f"[red]路径不存在: {target}[/red]")
+        return
     if target.is_file():
         files = [target]
     else:
@@ -49,6 +52,8 @@ def check_cmd(
         if not files:
             console.print(f"[yellow]未找到CSV文件: {target}[/yellow]")
             return
+        if verbose:
+            console.print(f"找到 {len(files)} 个CSV文件")
 
     check_set = set(checks.split(",")) if checks else {"range", "ipd", "frame", "center", "acc"}
     reports: List[FileCheckReport] = []
