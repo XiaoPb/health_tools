@@ -542,7 +542,11 @@ class DataChecker:
 
     @staticmethod
     def _find_cyclic_segments(
-        values: np.ndarray, valid_mask: np.ndarray, min_period: int = 2, max_period: int = 50
+        values: np.ndarray,
+        valid_mask: np.ndarray,
+        min_period: int = 2,
+        max_period: int = 50,
+        min_amplitude: int = 20,
     ) -> List[Tuple[int, int]]:
         """在一维数组中检测固定序列重复(≥2个完整周期)，只在valid_mask为True的区域检测"""
         n = len(values)
@@ -561,6 +565,8 @@ class DataChecker:
                 pattern = values[i : i + p]
                 if np.all(pattern == pattern[0]):
                     break
+                if pattern.max() - pattern.min() < min_amplitude:
+                    continue
 
                 repeats = 1
                 j = i + p

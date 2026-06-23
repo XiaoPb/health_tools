@@ -100,7 +100,7 @@ class TestAccCyclic:
         assert report.cyclic_count == 0
 
     def test_simple_cyclic_pattern(self, checker):
-        pattern = [1, 2, 3]
+        pattern = [10, 30, 50]
         accx = pattern * 4
         accy = list(range(len(accx)))
         accz = list(range(len(accx)))
@@ -110,10 +110,10 @@ class TestAccCyclic:
         assert "X" in report.cyclic_channels
 
     def test_cyclic_all_channels(self, checker):
-        pattern = [10, 20, 30, 40]
+        pattern = [10, 30, 50, 70]
         n = len(pattern) * 3
         accx = (pattern * 3)[:n]
-        accy = ([5, 6, 7, 8] * 3)[:n]
+        accy = ([5, 25, 45, 65] * 3)[:n]
         accz = ([100, 200] * 6)[:n]
         df = _make_df(accx, accy, accz)
         report = checker.check_acc_anomaly(df)
@@ -130,9 +130,9 @@ class TestAccCyclic:
 
 class TestAccMixed:
     def test_combined_anomalies(self, checker):
-        accx = [0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 3, 2, 3, 2, 3, 7, 8, 9]
-        accy = [0, 0, 0, 0, 2, 2, 2, 2, 2, 4, 5, 4, 5, 4, 5, 7, 8, 9]
-        accz = [0, 0, 0, 0, 3, 3, 3, 3, 3, 6, 7, 6, 7, 6, 7, 7, 8, 9]
+        accx = [0, 0, 0, 0, 1, 1, 1, 1, 1, 10, 50, 10, 50, 10, 50, 7, 8, 9]
+        accy = [0, 0, 0, 0, 2, 2, 2, 2, 2, 20, 60, 20, 60, 20, 60, 7, 8, 9]
+        accz = [0, 0, 0, 0, 3, 3, 3, 3, 3, 30, 70, 30, 70, 30, 70, 7, 8, 9]
         df = _make_df(accx, accy, accz)
         report = checker.check_acc_anomaly(df)
         assert report.zero_count >= 1
@@ -185,7 +185,7 @@ class TestAccColumnResolution:
         )
         chk = DataChecker(rule)
         df = pd.DataFrame(
-            {"X": [1, 2, 1, 2, 1, 2], "Y": [3, 4, 3, 4, 3, 4], "Z": [5, 6, 7, 8, 9, 10]}
+            {"X": [10, 50, 10, 50, 10, 50], "Y": [30, 70, 30, 70, 30, 70], "Z": [5, 6, 7, 8, 9, 10]}
         )
         report = chk.check_acc_anomaly(df)
         assert report.cyclic_count >= 1
