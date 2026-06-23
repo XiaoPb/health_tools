@@ -497,14 +497,19 @@ class DataChecker:
         has_z = len(per_ch_segments.get(2, [])) > 0
 
         if has_x and has_y and has_z:
-            all_segs = per_ch_segments[0] + per_ch_segments[1] + per_ch_segments[2]
-            sorted_segs = sorted(all_segs, key=lambda s: s[0])
-            report.static_xyz = AccChannelAnomaly(
-                count=len(sorted_segs),
-                first_frame=int(frame_ids.iloc[sorted_segs[0][0]]),
-                max_duration=max(end - start + 1 for start, end in sorted_segs),
-                frames=[int(frame_ids.iloc[s[0]]) for s in sorted_segs],
+            # 三通道都有静止→找同时静止的帧段（三通道mask交集）
+            cols = list(acc_df.columns)
+            combined_mask = (
+                per_ch_static[cols[0]] & per_ch_static[cols[1]] & per_ch_static[cols[2]]
             )
+            xyz_segs = self._find_consecutive_segments(combined_mask, min_length=1)
+            if xyz_segs:
+                report.static_xyz = AccChannelAnomaly(
+                    count=len(xyz_segs),
+                    first_frame=int(frame_ids.iloc[xyz_segs[0][0]]),
+                    max_duration=max(end - start + 1 for start, end in xyz_segs),
+                    frames=[int(frame_ids.iloc[s[0]]) for s in xyz_segs],
+                )
         else:
             targets = [report.static_x, report.static_y, report.static_z]
             for idx, segs in per_ch_segments.items():
@@ -538,13 +543,19 @@ class DataChecker:
         has_z = len(per_ch_segments.get(2, [])) > 0
 
         if has_x and has_y and has_z:
+            # 三通道都有循环→合并去重（按起始帧去重）
             all_segs = per_ch_segments[0] + per_ch_segments[1] + per_ch_segments[2]
-            sorted_segs = sorted(all_segs, key=lambda s: s[0])
+            seen_starts = set()
+            unique_segs = []
+            for s in sorted(all_segs, key=lambda s: s[0]):
+                if s[0] not in seen_starts:
+                    seen_starts.add(s[0])
+                    unique_segs.append(s)
             report.cyclic_xyz = AccChannelAnomaly(
-                count=len(sorted_segs),
-                first_frame=int(frame_ids.iloc[sorted_segs[0][0]]),
-                max_duration=max(end - start + 1 for start, end in sorted_segs),
-                frames=[int(frame_ids.iloc[s[0]]) for s in sorted_segs],
+                count=len(unique_segs),
+                first_frame=int(frame_ids.iloc[unique_segs[0][0]]),
+                max_duration=max(end - start + 1 for start, end in unique_segs),
+                frames=[int(frame_ids.iloc[s[0]]) for s in unique_segs],
             )
         else:
             targets = [report.cyclic_x, report.cyclic_y, report.cyclic_z]
