@@ -433,8 +433,8 @@ class DataChecker:
         acc_df = df[acc_cols].apply(pd.to_numeric, errors="coerce")
 
         self._check_acc_all_zero(acc_df, frame_ids, report)
-        static_mask = self._check_acc_static(acc_df, frame_ids, report)
-        self._check_acc_cyclic(acc_df, static_mask, frame_ids, report)
+        per_ch_static = self._check_acc_static(acc_df, frame_ids, report)
+        self._check_acc_cyclic(acc_df, per_ch_static, frame_ids, report)
 
         return report
 
@@ -452,14 +452,15 @@ class DataChecker:
 
     def _check_acc_static(
         self, acc_df: pd.DataFrame, frame_ids: pd.Series, report: AccAnomalyReport
-    ) -> pd.Series:
-        """检测连续不变超过3个点的段落，返回静止掩码用于排除循环检测"""
-        static_mask = pd.Series(False, index=acc_df.index)
+    ) -> Dict[str, pd.Series]:
+        """检测连续不变超过3个点的段落，返回每通道静止掩码"""
+        per_ch_static: Dict[str, pd.Series] = {}
         channel_has_static: List[str] = []
         all_segments: List[Tuple[int, int]] = []
         axis_labels = ["X", "Y", "Z"]
 
         for idx, col in enumerate(acc_df.columns):
+            ch_mask = pd.Series(False, index=acc_df.index)
             series = acc_df[col]
             unchanged = series.diff().eq(0)
             unchanged.iloc[0] = False
@@ -469,7 +470,8 @@ class DataChecker:
                 channel_has_static.append(ch_label)
                 all_segments.extend(segments)
                 for start, end in segments:
-                    static_mask.iloc[start : end + 1] = True
+                    ch_mask.iloc[start : end + 1] = True
+            per_ch_static[col] = ch_mask
 
         if all_segments:
             report.static_count = len(all_segments)
@@ -481,23 +483,24 @@ class DataChecker:
             report.static_first_frame = int(frame_ids.iloc[first_idx])
             report.static_max_duration = max(end - start + 1 for start, end in all_segments)
 
-        return static_mask
+        return per_ch_static
 
     def _check_acc_cyclic(
         self,
         acc_df: pd.DataFrame,
-        static_mask: pd.Series,
+        per_ch_static: Dict[str, pd.Series],
         frame_ids: pd.Series,
         report: AccAnomalyReport,
     ) -> None:
-        """检测固定序列重复（周期2~50，≥2个完整周期），排除静止段"""
+        """检测固定序列重复（周期2~50，≥2个完整周期），用本通道静止掩码排除"""
         channel_has_cyclic: List[str] = []
         all_segments: List[Tuple[int, int]] = []
         axis_labels = ["X", "Y", "Z"]
 
         for idx, col in enumerate(acc_df.columns):
             values = acc_df[col].values.copy()
-            mask = ~static_mask.values
+            ch_static = per_ch_static.get(col, pd.Series(False, index=acc_df.index))
+            mask = ~ch_static.values
             segments = self._find_cyclic_segments(values, mask)
             if segments:
                 ch_label = axis_labels[idx] if idx < 3 else col
