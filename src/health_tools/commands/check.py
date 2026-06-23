@@ -21,6 +21,7 @@ console = Console()
     help="指定检查项 (逗号分隔: range,ipd,frame,center,acc)，默认全部",
 )
 @click.option("--tolerance", type=int, default=50, help="Ipd转换误差容忍度 (pA, 默认50)")
+@click.option("--static-min", type=int, default=5, help="ACC静止检测最小连续帧数 (默认5)")
 @click.option(
     "-o",
     "--output",
@@ -36,6 +37,7 @@ def check_cmd(
     chip_name: Optional[str],
     checks: Optional[str],
     tolerance: int,
+    static_min: int,
     output_path: Optional[str],
     workers: int,
     verbose: bool,
@@ -83,7 +85,7 @@ def check_cmd(
         if df.empty:
             return None, None, "空文件"
 
-        checker = DataChecker(chip_rule, tolerance=tolerance)
+        checker = DataChecker(chip_rule, tolerance=tolerance, static_min=static_min)
         report = FileCheckReport(file_path=csv_file, chip=chip)
 
         if "range" in check_set:
@@ -132,7 +134,7 @@ def check_cmd(
     if acc_reports:
         _print_acc_table(list(acc_reports.values()))
 
-    _print_criteria(check_set, tolerance)
+    _print_criteria(check_set, tolerance, static_min)
 
     csv_out = Path(output_path) if output_path else _default_output(target)
     _save_report_csv(reports, acc_reports, csv_out)
@@ -269,7 +271,7 @@ def _print_acc_table(acc_reports: list) -> None:
     )
 
 
-def _print_criteria(check_set: set, tolerance: int) -> None:
+def _print_criteria(check_set: set, tolerance: int, static_min: int) -> None:
     """打印当前检查项及判断标准"""
     console.print("\n[dim]─── 检查标准 ───[/dim]")
     criteria = {
@@ -277,7 +279,7 @@ def _print_criteria(check_set: set, tolerance: int) -> None:
         "frame": "帧完整性: 帧号连续递增无跳帧 (GH3220按0-255循环检测)",
         "center": "数据居中: Rawdata 在 0.3*2^23 ~ 0.85*2^23 范围内",
         "ipd": f"Ipd转换: Ipd_pA 与 Rawdata 按AGC逐行计算, 误差 ≤ ±{tolerance} pA",
-        "acc": "ACC异常: 全零(XYZ同时为0) / 静止(连续不变≥3帧) / 循环(周期2~50重复≥2次, 振幅≥20)",
+        "acc": f"ACC异常: 全零(XYZ同时为0) / 静止(连续不变≥{static_min}帧) / 循环(周期2~50重复≥2次, 振幅≥20)",
     }
     for key in sorted(check_set):
         if key in criteria:

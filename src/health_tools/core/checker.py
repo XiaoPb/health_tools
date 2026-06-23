@@ -73,9 +73,10 @@ class DataChecker:
     CENTER_LOW = 0.3 * (2**23)  # 2516582
     CENTER_HIGH = 0.85 * (2**23)  # 7130317
 
-    def __init__(self, chip_rule: ChipRule, tolerance: int = 50):
+    def __init__(self, chip_rule: ChipRule, tolerance: int = 50, static_min: int = 5):
         self.chip_rule = chip_rule
         self.tolerance = tolerance
+        self.static_min = static_min
         self.chip_name = chip_rule.chip
         self._gain_tia_map = chip_rule.gain_tia_map or {}
 
@@ -464,7 +465,7 @@ class DataChecker:
             series = acc_df[col]
             unchanged = series.diff().eq(0)
             unchanged.iloc[0] = False
-            segments = self._find_consecutive_segments(unchanged, min_length=3)
+            segments = self._find_consecutive_segments(unchanged, min_length=self.static_min)
             if segments:
                 ch_label = axis_labels[idx] if idx < 3 else col
                 channel_has_static.append(ch_label)

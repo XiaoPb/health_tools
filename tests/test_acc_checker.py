@@ -65,18 +65,18 @@ class TestAccStatic:
         assert report.static_count == 0
 
     def test_single_channel_static(self, checker):
-        accx = [1, 1, 1, 1, 5, 6, 7]
-        accy = [1, 2, 3, 4, 5, 6, 7]
-        accz = [1, 2, 3, 4, 5, 6, 7]
+        accx = [1, 1, 1, 1, 1, 1, 5, 6, 7]
+        accy = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        accz = [1, 2, 3, 4, 5, 6, 7, 8, 9]
         df = _make_df(accx, accy, accz)
         report = checker.check_acc_anomaly(df)
         assert report.static_count >= 1
         assert "X" in report.static_channels
 
     def test_all_channels_static(self, checker):
-        accx = [1, 1, 1, 1, 5, 6, 7]
-        accy = [2, 2, 2, 2, 5, 6, 7]
-        accz = [3, 3, 3, 3, 5, 6, 7]
+        accx = [1, 1, 1, 1, 1, 1, 5, 6, 7]
+        accy = [2, 2, 2, 2, 2, 2, 5, 6, 7]
+        accz = [3, 3, 3, 3, 3, 3, 5, 6, 7]
         df = _make_df(accx, accy, accz)
         report = checker.check_acc_anomaly(df)
         assert report.static_count >= 1
@@ -130,9 +130,9 @@ class TestAccCyclic:
 
 class TestAccMixed:
     def test_combined_anomalies(self, checker):
-        accx = [0, 0, 0, 0, 1, 1, 1, 1, 1, 10, 50, 10, 50, 10, 50, 7, 8, 9]
-        accy = [0, 0, 0, 0, 2, 2, 2, 2, 2, 20, 60, 20, 60, 20, 60, 7, 8, 9]
-        accz = [0, 0, 0, 0, 3, 3, 3, 3, 3, 30, 70, 30, 70, 30, 70, 7, 8, 9]
+        accx = [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 10, 50, 10, 50, 10, 50, 7, 8, 9]
+        accy = [0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 20, 60, 20, 60, 20, 60, 7, 8, 9]
+        accz = [0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 30, 70, 30, 70, 30, 70, 7, 8, 9]
         df = _make_df(accx, accy, accz)
         report = checker.check_acc_anomaly(df)
         assert report.zero_count >= 1
@@ -171,7 +171,7 @@ class TestAccColumnResolution:
         )
         chk = DataChecker(rule)
         df = pd.DataFrame(
-            {"AccX": [1, 1, 1, 1, 1], "AccY": [2, 3, 4, 5, 6], "AccZ": [3, 4, 5, 6, 7]}
+            {"AccX": [1, 1, 1, 1, 1, 1, 1], "AccY": [2, 3, 4, 5, 6, 7, 8], "AccZ": [3, 4, 5, 6, 7, 8, 9]}
         )
         report = chk.check_acc_anomaly(df)
         assert report.static_count >= 1
