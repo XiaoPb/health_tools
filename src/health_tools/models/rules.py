@@ -52,9 +52,7 @@ class ChipRule:
     def __post_init__(self):
         self.columns = expand_columns(self.columns)
         self.factory_columns = expand_columns(self.factory_columns)
-        self.check_columns = {
-            k: expand_columns(v) for k, v in self.check_columns.items()
-        }
+        self.check_columns = {k: expand_columns(v) for k, v in self.check_columns.items()}
 
     @property
     def info_row(self) -> int:
