@@ -132,6 +132,8 @@ def check_cmd(
     if acc_reports:
         _print_acc_table(list(acc_reports.values()))
 
+    _print_criteria(check_set, tolerance)
+
     csv_out = Path(output_path) if output_path else _default_output(target)
     _save_report_csv(reports, acc_reports, csv_out)
 
@@ -265,6 +267,21 @@ def _print_acc_table(acc_reports: list) -> None:
         f"ACC总计: {len(acc_reports)} 文件, "
         f"{anomaly_count} 异常, {len(acc_reports) - anomaly_count} 正常"
     )
+
+
+def _print_criteria(check_set: set, tolerance: int) -> None:
+    """打印当前检查项及判断标准"""
+    console.print("\n[dim]─── 检查标准 ───[/dim]")
+    criteria = {
+        "range": "数据范围: Rawdata 在芯片ADC范围内 (GH3036: 0~2^23, GH3220/GH3300: 2^23~2^24)",
+        "frame": "帧完整性: 帧号连续递增无跳帧 (GH3220按0-255循环检测)",
+        "center": "数据居中: Rawdata 在 0.3*2^23 ~ 0.85*2^23 范围内",
+        "ipd": f"Ipd转换: Ipd_pA 与 Rawdata 按AGC逐行计算, 误差 ≤ ±{tolerance} pA",
+        "acc": "ACC异常: 全零(XYZ同时为0) / 静止(连续不变≥3帧) / 循环(周期2~50重复≥2次, 振幅≥20)",
+    }
+    for key in sorted(check_set):
+        if key in criteria:
+            console.print(f"  [dim]{criteria[key]}[/dim]")
 
 
 def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> None:
