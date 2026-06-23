@@ -499,9 +499,7 @@ class DataChecker:
         if has_x and has_y and has_z:
             # 三通道都有静止→找同时静止的帧段（三通道mask交集）
             cols = list(acc_df.columns)
-            combined_mask = (
-                per_ch_static[cols[0]] & per_ch_static[cols[1]] & per_ch_static[cols[2]]
-            )
+            combined_mask = per_ch_static[cols[0]] & per_ch_static[cols[1]] & per_ch_static[cols[2]]
             xyz_segs = self._find_consecutive_segments(combined_mask, min_length=1)
             if xyz_segs:
                 report.static_xyz = AccChannelAnomaly(

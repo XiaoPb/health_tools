@@ -391,18 +391,18 @@ ghealth_tool chk -i data/ -c gh3036 --checks acc,frame
 
 ```
 文件名, 芯片, 数据范围(结果), 数据范围(说明), 帧完整性(结果), 帧完整性(说明), ...,
-ACC全零次数, ACC全零首帧, ACC全零最长帧,
-ACC静止XYZ次数, ACC静止XYZ首帧, ACC静止XYZ最长帧,
-ACC循环XYZ次数, ACC循环XYZ首帧, ACC循环XYZ最长帧,
-ACC静止X次数, ACC静止X首帧, ACC静止X最长帧,
-ACC静止Y次数, ACC静止Y首帧, ACC静止Y最长帧,
-ACC静止Z次数, ACC静止Z首帧, ACC静止Z最长帧,
-ACC循环X次数, ACC循环X首帧, ACC循环X最长帧,
-ACC循环Y次数, ACC循环Y首帧, ACC循环Y最长帧,
-ACC循环Z次数, ACC循环Z首帧, ACC循环Z最长帧
+ACC全零次数, ACC全零最长帧, ACC全零前10帧,
+ACC静止XYZ次数, ACC静止XYZ最长帧, ACC静止XYZ前10帧,
+ACC循环XYZ次数, ACC循环XYZ最长帧, ACC循环XYZ前10帧,
+ACC静止X次数, ACC静止X最长帧, ACC静止X前10帧,
+ACC静止Y次数, ACC静止Y最长帧, ACC静止Y前10帧,
+ACC静止Z次数, ACC静止Z最长帧, ACC静止Z前10帧,
+ACC循环X次数, ACC循环X最长帧, ACC循环X前10帧,
+ACC循环Y次数, ACC循环Y最长帧, ACC循环Y前10帧,
+ACC循环Z次数, ACC循环Z最长帧, ACC循环Z前10帧
 ```
 
-检查项列动态生成，只包含实际运行的检查项。失败项的说明列会标注具体异常列名。
+每种异常每通道三列：次数、最长持续帧数、前10次异常起始帧号（逗号分隔）。XYZ同时的判定取三通道交集（静止）或去重合并（循环）。
 
 ---
 
