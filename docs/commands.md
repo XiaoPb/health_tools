@@ -293,7 +293,7 @@ ghealth_tool fac -i data.csv -c gh3036 --gain 10 --current 25.0 -o results.csv
 检查PPG/ACC数据完整性和正确性。别名：`chk`。
 
 ```bash
-ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <pA>] [-w <线程数>] [-o <输出>] [-v]
+ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <pA>] [--static-min <帧>] [-w <线程数>] [-o <输出>] [-v]
 ```
 
 | 参数 | 说明 |
@@ -302,6 +302,7 @@ ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance
 | `-c, --chip` | 芯片型号，不指定则自动识别 |
 | `--checks` | 指定检查项（逗号分隔: range,ipd,frame,center,acc），默认全部 |
 | `--tolerance` | Ipd转换误差容忍度（pA，默认50） |
+| `--static-min` | ACC静止检测最小连续帧数（默认5） |
 | `-w, --workers` | 并行线程数（默认4） |
 | `-o, --output` | 检查报告CSV输出路径（默认: `<path>/check_report.csv`） |
 | `-v, --verbose` | 显示详细信息 |
@@ -351,8 +352,10 @@ check_columns:
 检测三种加速度计数据异常，仅有异常的类型会展示子表：
 
 1. **全零异常**: ACCX、ACCY、ACCZ同时为0的连续段
-2. **静止异常**: 单通道或多通道连续不变超过3个点
+2. **静止异常**: 单通道连续不变超过N帧（默认5，`--static-min`可配置）
 3. **循环异常**: 固定序列重复≥2个完整周期（周期长度2~50点，振幅≥20）
+
+循环检测使用本通道静止掩码排除，不会被其他通道静止误遮蔽。
 
 ### Ipd转换检查
 
