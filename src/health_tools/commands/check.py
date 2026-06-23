@@ -167,6 +167,8 @@ def _print_reports(reports: list, verbose: bool) -> None:
     failed_count = len(reports) - passed_count
 
     for report in reports:
+        if not report.results:
+            continue
         status = "[green]PASS[/green]" if report.all_passed else "[red]FAIL[/red]"
         console.print(f"\n{status} {report.file_path.name} ({report.chip})")
 
@@ -192,7 +194,7 @@ def _print_reports(reports: list, verbose: bool) -> None:
 
 
 def _print_acc_table(acc_reports: list) -> None:
-    """打印ACC异常汇总表（拆分为三个子表避免截断）"""
+    """打印ACC异常汇总表（仅展示有异常的子表）"""
     console.print("\n[bold cyan]ACC异常检测报告[/bold cyan]")
 
     anomaly_count = sum(1 for r in acc_reports if r.has_anomaly)
@@ -200,58 +202,64 @@ def _print_acc_table(acc_reports: list) -> None:
     def _fmt(val: int) -> str:
         return str(val) if val >= 0 else "-"
 
-    # 全零检测表
-    table = Table(title="全零检测", show_header=True, header_style="bold", padding=(0, 1))
-    table.add_column("文件名", no_wrap=True)
-    table.add_column("总帧数", justify="right")
-    table.add_column("次数", justify="right")
-    table.add_column("通道")
-    table.add_column("首帧", justify="right")
-    table.add_column("最长帧", justify="right")
-    for r in acc_reports:
-        table.add_row(
-            r.file_path.name,
-            str(r.total_frames),
-            str(r.zero_count),
-            r.zero_channels if r.zero_count > 0 else "-",
-            _fmt(r.zero_first_frame),
-            str(r.zero_max_duration) if r.zero_count > 0 else "-",
-        )
-    console.print(table)
+    # 全零检测表（仅有全零异常时展示）
+    if any(r.zero_count > 0 for r in acc_reports):
+        table = Table(title="全零检测", show_header=True, header_style="bold", padding=(0, 1))
+        table.add_column("文件名", no_wrap=True)
+        table.add_column("总帧数", justify="right")
+        table.add_column("次数", justify="right")
+        table.add_column("通道")
+        table.add_column("首帧", justify="right")
+        table.add_column("最长帧", justify="right")
+        for r in acc_reports:
+            if r.zero_count > 0:
+                table.add_row(
+                    r.file_path.name,
+                    str(r.total_frames),
+                    str(r.zero_count),
+                    r.zero_channels,
+                    _fmt(r.zero_first_frame),
+                    str(r.zero_max_duration),
+                )
+        console.print(table)
 
-    # 静止检测表
-    table = Table(title="静止检测", show_header=True, header_style="bold", padding=(0, 1))
-    table.add_column("文件名", no_wrap=True)
-    table.add_column("次数", justify="right")
-    table.add_column("通道")
-    table.add_column("首帧", justify="right")
-    table.add_column("最长帧", justify="right")
-    for r in acc_reports:
-        table.add_row(
-            r.file_path.name,
-            str(r.static_count),
-            r.static_channels if r.static_count > 0 else "-",
-            _fmt(r.static_first_frame),
-            str(r.static_max_duration) if r.static_count > 0 else "-",
-        )
-    console.print(table)
+    # 静止检测表（仅有静止异常时展示）
+    if any(r.static_count > 0 for r in acc_reports):
+        table = Table(title="静止检测", show_header=True, header_style="bold", padding=(0, 1))
+        table.add_column("文件名", no_wrap=True)
+        table.add_column("次数", justify="right")
+        table.add_column("通道")
+        table.add_column("首帧", justify="right")
+        table.add_column("最长帧", justify="right")
+        for r in acc_reports:
+            if r.static_count > 0:
+                table.add_row(
+                    r.file_path.name,
+                    str(r.static_count),
+                    r.static_channels,
+                    _fmt(r.static_first_frame),
+                    str(r.static_max_duration),
+                )
+        console.print(table)
 
-    # 循环检测表
-    table = Table(title="循环检测", show_header=True, header_style="bold", padding=(0, 1))
-    table.add_column("文件名", no_wrap=True)
-    table.add_column("次数", justify="right")
-    table.add_column("通道")
-    table.add_column("首帧", justify="right")
-    table.add_column("最长帧", justify="right")
-    for r in acc_reports:
-        table.add_row(
-            r.file_path.name,
-            str(r.cyclic_count),
-            r.cyclic_channels if r.cyclic_count > 0 else "-",
-            _fmt(r.cyclic_first_frame),
-            str(r.cyclic_max_duration) if r.cyclic_count > 0 else "-",
-        )
-    console.print(table)
+    # 循环检测表（仅有循环异常时展示）
+    if any(r.cyclic_count > 0 for r in acc_reports):
+        table = Table(title="循环检测", show_header=True, header_style="bold", padding=(0, 1))
+        table.add_column("文件名", no_wrap=True)
+        table.add_column("次数", justify="right")
+        table.add_column("通道")
+        table.add_column("首帧", justify="right")
+        table.add_column("最长帧", justify="right")
+        for r in acc_reports:
+            if r.cyclic_count > 0:
+                table.add_row(
+                    r.file_path.name,
+                    str(r.cyclic_count),
+                    r.cyclic_channels,
+                    _fmt(r.cyclic_first_frame),
+                    str(r.cyclic_max_duration),
+                )
+        console.print(table)
 
     console.print(
         f"ACC总计: {len(acc_reports)} 文件, "
