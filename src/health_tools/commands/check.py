@@ -48,7 +48,7 @@ def check_cmd(
     if target.is_file():
         files = [target]
     else:
-        files = sorted(target.rglob("*.csv"))
+        files = sorted(f for f in target.rglob("*.csv") if f.name != "check_report.csv")
         if not files:
             console.print(f"[yellow]未找到CSV文件: {target}[/yellow]")
             return
@@ -155,7 +155,7 @@ def _print_reports(reports: list, verbose: bool) -> None:
         table = Table(show_header=True, header_style="bold", padding=(0, 1))
         table.add_column("检查项", min_width=10)
         table.add_column("结果", min_width=4)
-        table.add_column("说明")
+        table.add_column("说明", no_wrap=True)
 
         for result in report.results:
             mark = "[green]✓[/green]" if result.passed else "[red]✗[/red]"
@@ -174,33 +174,23 @@ def _print_reports(reports: list, verbose: bool) -> None:
 
 
 def _print_acc_table(acc_reports: list) -> None:
-    """打印ACC异常汇总表"""
+    """打印ACC异常汇总表（拆分为三个子表避免截断）"""
     console.print("\n[bold cyan]ACC异常检测报告[/bold cyan]")
 
-    table = Table(show_header=True, header_style="bold", padding=(0, 1))
-    table.add_column("文件名", min_width=12)
+    anomaly_count = sum(1 for r in acc_reports if r.has_anomaly)
+
+    def _fmt(val: int) -> str:
+        return str(val) if val >= 0 else "-"
+
+    # 全零检测表
+    table = Table(title="全零检测", show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("文件名", no_wrap=True)
     table.add_column("总帧数", justify="right")
-    table.add_column("全零次", justify="right")
-    table.add_column("全零道")
-    table.add_column("全零首帧", justify="right")
-    table.add_column("全零最长帧", justify="right")
-    table.add_column("静止次", justify="right")
-    table.add_column("静止道")
-    table.add_column("静止首帧", justify="right")
-    table.add_column("静止最长帧", justify="right")
-    table.add_column("循环次", justify="right")
-    table.add_column("循环道")
-    table.add_column("循环首帧", justify="right")
-    table.add_column("循环最长帧", justify="right")
-
-    anomaly_count = 0
+    table.add_column("次数", justify="right")
+    table.add_column("通道")
+    table.add_column("首帧", justify="right")
+    table.add_column("最长帧", justify="right")
     for r in acc_reports:
-        if r.has_anomaly:
-            anomaly_count += 1
-
-        def _fmt(val: int) -> str:
-            return str(val) if val >= 0 else "-"
-
         table.add_row(
             r.file_path.name,
             str(r.total_frames),
@@ -208,17 +198,43 @@ def _print_acc_table(acc_reports: list) -> None:
             r.zero_channels if r.zero_count > 0 else "-",
             _fmt(r.zero_first_frame),
             str(r.zero_max_duration) if r.zero_count > 0 else "-",
+        )
+    console.print(table)
+
+    # 静止检测表
+    table = Table(title="静止检测", show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("文件名", no_wrap=True)
+    table.add_column("次数", justify="right")
+    table.add_column("通道")
+    table.add_column("首帧", justify="right")
+    table.add_column("最长帧", justify="right")
+    for r in acc_reports:
+        table.add_row(
+            r.file_path.name,
             str(r.static_count),
             r.static_channels if r.static_count > 0 else "-",
             _fmt(r.static_first_frame),
             str(r.static_max_duration) if r.static_count > 0 else "-",
+        )
+    console.print(table)
+
+    # 循环检测表
+    table = Table(title="循环检测", show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("文件名", no_wrap=True)
+    table.add_column("次数", justify="right")
+    table.add_column("通道")
+    table.add_column("首帧", justify="right")
+    table.add_column("最长帧", justify="right")
+    for r in acc_reports:
+        table.add_row(
+            r.file_path.name,
             str(r.cyclic_count),
             r.cyclic_channels if r.cyclic_count > 0 else "-",
             _fmt(r.cyclic_first_frame),
             str(r.cyclic_max_duration) if r.cyclic_count > 0 else "-",
         )
-
     console.print(table)
+
     console.print(
         f"ACC总计: {len(acc_reports)} 文件, "
         f"{anomaly_count} 异常, {len(acc_reports) - anomaly_count} 正常"
