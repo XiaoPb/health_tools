@@ -75,6 +75,35 @@ def test_build_command_uses_configured_cmd_arg_order(monkeypatch, tmp_path):
     assert cmd.endswith('"in dir" "out dir" csv 25 1 0 2 2 3 4 5 6 7 8 45 61 46')
 
 
+def test_build_command_supports_cmd_arg_under_offline_versions(monkeypatch, tmp_path):
+    exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip_name, version=None: exe_path)
+    monkeypatch.setattr(
+        offline,
+        "get_offline_config",
+        lambda: offline.OfflineConfig(
+            tools_path=tmp_path,
+            versions={
+                "gh3036": {
+                    "versions": {"exclusive": ["v1"]},
+                    "default": "v1",
+                    "cmd_arg": ["start_idx", "input_dir", "polor"],
+                    "cmd_default": {"start_idx": 9},
+                }
+            },
+            commands={},
+        ),
+    )
+
+    runner = offline.OfflineRunner("gh3036")
+    cmd = runner._build_command("input", "output")
+
+    assert cmd.endswith("9 input 45")
+
+
 def test_build_command_omits_args_not_listed_in_cmd_arg(monkeypatch, tmp_path):
     runner = _make_runner(
         monkeypatch,
@@ -174,6 +203,29 @@ def test_merge_scanned_versions_preserves_existing_default():
 
     assert merged["gh3220"]["default"] == "v1"
     assert merged["gh3220"]["default_category"] == "exclusive"
+
+
+def test_merge_scanned_versions_preserves_chip_command_config():
+    scanned = {
+        "gh3036": {
+            "versions": {"exclusive": ["v1"]},
+            "default": "v1",
+            "default_category": "exclusive",
+        }
+    }
+    existing = {
+        "gh3036": {
+            "default": "v1",
+            "default_category": "exclusive",
+            "cmd_arg": ["input_dir", "polor"],
+            "cmd_default": {"scene_en": 0},
+        }
+    }
+
+    merged = offline.merge_scanned_versions(scanned, existing)
+
+    assert merged["gh3036"]["cmd_arg"] == ["input_dir", "polor"]
+    assert merged["gh3036"]["cmd_default"] == {"scene_en": 0}
 
 
 def test_merge_scanned_versions_replaces_missing_default():

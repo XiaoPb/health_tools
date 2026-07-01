@@ -154,6 +154,11 @@ def merge_scanned_versions(scanned: Dict[str, dict], existing: Dict[str, dict]) 
         old_info = existing.get(chip, {}) if isinstance(existing, dict) else {}
         old_default = old_info.get("default") if isinstance(old_info, dict) else None
 
+        if isinstance(old_info, dict):
+            for key, value in old_info.items():
+                if key not in {"versions", "default", "default_category"}:
+                    info[key] = value
+
         if old_default and old_default in _iter_versions(info):
             info["default"] = old_default
             old_category = old_info.get("default_category")
@@ -336,9 +341,27 @@ class OfflineRunner:
         cfg = get_offline_config()
         chip_cmd = cfg.commands.get(self.chip, {})
         if not isinstance(chip_cmd, dict):
-            return {}
+            chip_cmd = {}
         cmd_cfg = chip_cmd.get(self.resolved_version, {})
-        return cmd_cfg if isinstance(cmd_cfg, dict) else {}
+        if isinstance(cmd_cfg, dict) and cmd_cfg:
+            return cmd_cfg
+
+        chip_version_cfg = cfg.versions.get(self.chip, {})
+        if not isinstance(chip_version_cfg, dict):
+            return {}
+
+        version_cmds = chip_version_cfg.get("offline_cmd", {})
+        if isinstance(version_cmds, dict):
+            cmd_cfg = version_cmds.get(self.resolved_version, {})
+            if isinstance(cmd_cfg, dict) and cmd_cfg:
+                return cmd_cfg
+
+        if "cmd_arg" in chip_version_cfg or "cmd_default" in chip_version_cfg:
+            return {
+                "cmd_arg": chip_version_cfg.get("cmd_arg", []),
+                "cmd_default": chip_version_cfg.get("cmd_default", {}),
+            }
+        return {}
 
     def _build_command(self, input_dir: str, output_dir: str) -> str:
         """构建 exe 命令行"""
