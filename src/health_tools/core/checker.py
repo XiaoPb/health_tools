@@ -397,8 +397,7 @@ class DataChecker:
         ratio = abnormal_count / total_count * 100 if total_count > 0 else 0
         max_diff_idx = diff_ms.idxmax()
         max_interval_ms = float(intervals_ms.loc[max_diff_idx])
-        max_diff_ms = float(diff_ms.loc[max_diff_idx])
-        max_diff_ratio = max_diff_ms / baseline_ms * 100 if baseline_ms > 0 else 0.0
+        first_frame = self._timestamp_interval_frame(df, max_diff_idx)
         max_cluster_low = max_interval_ms * 0.98
         max_cluster_high = max_interval_ms * 1.02
         max_cluster_count = int(
@@ -406,7 +405,7 @@ class DataChecker:
         )
         max_info = (
             f"最大偏差间隔 {max_interval_ms:.3f}ms，"
-            f"偏差 {max_diff_ms:.3f}ms，偏差比例 {max_diff_ratio:.1f}%，"
+            f"首次帧 {first_frame}，"
             f"最大偏差±2%数量 {max_cluster_count}/{total_count}"
         )
 
@@ -434,6 +433,25 @@ class DataChecker:
             ),
             details=details,
         )
+
+    def _timestamp_interval_frame(self, df: pd.DataFrame, interval_index) -> int:
+        """获取异常间隔首次出现的帧号，优先使用帧号列。"""
+        frame_col = self._resolve_frame_column(df)
+        try:
+            position = df.index.get_loc(interval_index)
+            if isinstance(position, slice):
+                position = position.start
+            elif not isinstance(position, int):
+                position = int(np.asarray(position).nonzero()[0][0])
+        except Exception:
+            position = int(interval_index) if isinstance(interval_index, (int, np.integer)) else 0
+
+        if frame_col:
+            frame_values = pd.to_numeric(df[frame_col], errors="coerce")
+            if 0 <= position < len(frame_values) and pd.notna(frame_values.iloc[position]):
+                return int(frame_values.iloc[position])
+
+        return int(interval_index) if isinstance(interval_index, (int, np.integer)) else position
 
     @staticmethod
     def _parse_timestamp_intervals_ms(series: pd.Series) -> Tuple[Optional[pd.Series], str]:
