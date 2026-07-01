@@ -511,7 +511,7 @@ offline_cmd:
         - ppg_ch1
         - ppg_ch2
         - ppg_ch3
-        - polor
+        - polar
         - mcu_out
         - comp_out
       cmd_default:
@@ -521,8 +521,9 @@ offline_cmd:
         scene_en: 0
 ```
 
-`cmd_arg` 决定最终传参顺序和数量，删除某个变量后该参数不会传入。列号变量
-`accx`、`ppg_ch0`、`polor` 等由 `rules/chip/<chip>.yaml` 自动推导，不需要写具体索引值。
+`cmd_arg` 决定最终传参顺序和数量，删除某个变量后该参数不会传入。`cmd_default`
+未配置且内置变量表不存在的名称会按字面量传给 exe。列号变量
+`accx`、`ppg_ch0`、`polar` 等由 `rules/chip/<chip>.yaml` 自动推导，不需要写具体索引值。
 未配置 `offline_cmd` 的版本继续使用内置默认命令格式。执行 `cfg --offline-scan` 会保留
 仍然有效的默认版本和手写的 `offline_cmd` 配置。
 

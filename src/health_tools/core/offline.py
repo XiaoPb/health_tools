@@ -214,12 +214,10 @@ def list_versions(chip: Optional[str] = None) -> Dict[str, dict]:
 
 
 def _normalize_cmd_arg(value: object) -> str:
-    """规范化 cmd_arg 变量名，支持 {polar} 和 polor 写法。"""
+    """规范化 cmd_arg 变量名，支持 {polar} 写法。"""
     key = str(value)
     if key.startswith("{") and key.endswith("}"):
         key = key[1:-1]
-    if key == "polor":
-        return "polar"
     return key
 
 
@@ -300,8 +298,6 @@ def build_column_indices(chip: str) -> Dict[str, int]:
         if matched_ref is not None:
             indices["polar"] = matched_ref
 
-    if "polar" in indices:
-        indices["polor"] = indices["polar"]
     return indices
 
 
@@ -417,15 +413,7 @@ class OfflineRunner:
             self.scene_en if self.scene_en is not None else defaults.get("scene_en", 0)
         )
         values["ch_num"] = self.ch_num if self.ch_num is not None else defaults.get("ch_num", 2)
-        values.setdefault("csv", "csv")
-        values.setdefault("start_idx", 0)
-        values.setdefault("end_idx", -1)
-        values.setdefault("datatype", 0)
         values.update(self.column_indices)
-        if "polar" in values:
-            values["polor"] = values["polar"]
-        elif "polor" in values:
-            values["polar"] = values["polor"]
         return values
 
     def run(self, input_dir: Path, output_dir: Path, timeout: int = 300) -> bool:

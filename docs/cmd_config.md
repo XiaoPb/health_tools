@@ -27,8 +27,9 @@ ghealth_tool cfg [options]
 `芯片 + 算法版本` 指定传给 `TEE_Algorithm.exe` 的参数顺序和数量。
 
 `cmd_arg` 写什么参数，最终命令就传什么参数；未写入 `cmd_arg` 的变量不会加入命令。
-`cmd_default` 给 `start_idx`、`end_idx`、`datatype` 等非列索引变量提供默认值。
-`accx`、`ppg_ch0`、`polor` 等列号不写在 `config.yaml` 中，会从 `rules/chip/<chip>.yaml`
+`cmd_default` 给 `start_idx`、`end_idx`、`datatype` 等非列索引变量提供默认值；未在
+`cmd_default` 或内置变量表中出现的名称会按字面量传给 exe。
+`accx`、`ppg_ch0`、`polar` 等列号不写在 `config.yaml` 中，会从 `rules/chip/<chip>.yaml`
 自动推导，规则缺失时使用内置默认值。
 
 按当前 GH3036 默认顺序，可配置为：
@@ -54,7 +55,7 @@ offline_cmd:
         - ppg_ch1
         - ppg_ch2
         - ppg_ch3
-        - polor
+        - polar
         - mcu_out
         - comp_out
       cmd_default:
@@ -64,8 +65,8 @@ offline_cmd:
         scene_en: 0
 ```
 
-如果某个版本不需要 `comp_out`，只从 `cmd_arg` 删除 `comp_out` 即可。`polor` 与
-`polar` 都会解析为心率参考列。
+如果某个版本不需要 `comp_out`，只从 `cmd_arg` 删除 `comp_out` 即可。心率参考列使用
+规范变量名 `polar`。
 
 ## 配置目录结构
 

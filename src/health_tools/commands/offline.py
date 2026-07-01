@@ -82,7 +82,7 @@ def offline_cmd(
 
         column_indices = None
         if ref_col is not None:
-            column_indices = {"polar": ref_col, "polor": ref_col}
+            column_indices = {"polar": ref_col}
 
         runner = OfflineRunner(
             chip=chip_name,

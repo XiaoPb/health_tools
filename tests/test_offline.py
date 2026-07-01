@@ -57,7 +57,7 @@ def test_build_command_uses_configured_cmd_arg_order(monkeypatch, tmp_path):
                         "ppg_ch1",
                         "ppg_ch2",
                         "ppg_ch3",
-                        "polor",
+                        "polar",
                         "mcu_out",
                         "comp_out",
                     ],
@@ -90,7 +90,7 @@ def test_build_command_supports_cmd_arg_under_offline_versions(monkeypatch, tmp_
                 "gh3036": {
                     "versions": {"exclusive": ["v1"]},
                     "default": "v1",
-                    "cmd_arg": ["start_idx", "input_dir", "polor"],
+                    "cmd_arg": ["start_idx", "input_dir", "polar"],
                     "cmd_default": {"start_idx": 9},
                 }
             },
@@ -145,6 +145,25 @@ def test_cmd_default_applies_when_cli_option_is_not_set(monkeypatch, tmp_path):
     assert cmd.endswith("100 3 4 9")
 
 
+def test_missing_template_value_is_kept_as_literal(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["input_dir", "datatype"],
+                    "cmd_default": {},
+                }
+            }
+        },
+    )
+
+    cmd = runner._build_command("input", "output")
+
+    assert cmd.endswith("input datatype")
+
+
 def test_cli_option_overrides_cmd_default(monkeypatch, tmp_path):
     runner = _make_runner(
         monkeypatch,
@@ -184,7 +203,6 @@ def test_build_column_indices_from_chip_rule():
     assert indices["ppg_ch0"] == 5
     assert indices["ppg_ch3"] == 8
     assert indices["polar"] == 45
-    assert indices["polor"] == 45
     assert indices["mcu_out"] == 61
     assert indices["comp_out"] == 46
 
@@ -217,14 +235,14 @@ def test_merge_scanned_versions_preserves_chip_command_config():
         "gh3036": {
             "default": "v1",
             "default_category": "exclusive",
-            "cmd_arg": ["input_dir", "polor"],
+            "cmd_arg": ["input_dir", "polar"],
             "cmd_default": {"scene_en": 0},
         }
     }
 
     merged = offline.merge_scanned_versions(scanned, existing)
 
-    assert merged["gh3036"]["cmd_arg"] == ["input_dir", "polor"]
+    assert merged["gh3036"]["cmd_arg"] == ["input_dir", "polar"]
     assert merged["gh3036"]["cmd_default"] == {"scene_en": 0}
 
 
