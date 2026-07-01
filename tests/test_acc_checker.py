@@ -399,6 +399,21 @@ class TestTimestampInterval:
         assert result.status == "FAIL"
         assert "异常间隔 1/4" in result.summary
 
+    def test_timestamp_summary_includes_max_deviation_cluster(self, checker):
+        df = pd.DataFrame({"timestamp": [0, 40, 80, 120, 6875, 13630, 20386, 20426, 20466]})
+        result = checker.check_timestamp_interval(
+            df,
+            "timestamp",
+            ratio_tolerance=20,
+            threshold_ratio=1,
+        )
+
+        assert result.status == "FAIL"
+        assert "最大偏差间隔 6756.000ms" in result.summary
+        assert "偏差 6716.000ms" in result.summary
+        assert "偏差比例 16790.0%" in result.summary
+        assert "最大偏差±2%数量 3/8" in result.summary
+
     def test_string_timestamp_interval_pass(self, checker):
         df = pd.DataFrame(
             {"timestamp": ["11:17:20.000", "11:17:20.040", "11:17:20.080", "11:17:20.120"]}

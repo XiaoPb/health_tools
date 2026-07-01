@@ -395,9 +395,24 @@ class DataChecker:
         abnormal_count = int(abnormal_mask.sum())
         total_count = len(intervals_ms)
         ratio = abnormal_count / total_count * 100 if total_count > 0 else 0
+        max_diff_idx = diff_ms.idxmax()
+        max_interval_ms = float(intervals_ms.loc[max_diff_idx])
+        max_diff_ms = float(diff_ms.loc[max_diff_idx])
+        max_diff_ratio = max_diff_ms / baseline_ms * 100 if baseline_ms > 0 else 0.0
+        max_cluster_low = max_interval_ms * 0.98
+        max_cluster_high = max_interval_ms * 1.02
+        max_cluster_count = int(
+            ((intervals_ms >= max_cluster_low) & (intervals_ms <= max_cluster_high)).sum()
+        )
+        max_info = (
+            f"最大偏差间隔 {max_interval_ms:.3f}ms，"
+            f"偏差 {max_diff_ms:.3f}ms，偏差比例 {max_diff_ratio:.1f}%，"
+            f"最大偏差±2%数量 {max_cluster_count}/{total_count}"
+        )
 
         details = []
         if abnormal_count:
+            details.append(f"{max_info}，范围 [{max_cluster_low:.3f}, {max_cluster_high:.3f}]ms")
             abnormal_items = intervals_ms[abnormal_mask].head(10)
             for idx, interval in abnormal_items.items():
                 details.append(
@@ -411,11 +426,11 @@ class DataChecker:
             threshold_ratio=threshold_ratio,
             pass_summary=(
                 f"时间戳间隔稳定，基准间隔 {baseline_ms:.3f}ms，"
-                f"检查 {total_count} 个间隔，容差 {' / '.join(limits)}"
+                f"检查 {total_count} 个间隔，容差 {' / '.join(limits)}，{max_info}"
             ),
             abnormal_summary=(
                 f"异常间隔 {abnormal_count}/{total_count} ({ratio:.1f}%)，"
-                f"基准间隔 {baseline_ms:.3f}ms，容差 {' / '.join(limits)}"
+                f"基准间隔 {baseline_ms:.3f}ms，容差 {' / '.join(limits)}，{max_info}"
             ),
             details=details,
         )
