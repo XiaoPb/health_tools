@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,17 @@ class CheckResult:
     passed: bool
     summary: str
     details: List[str] = field(default_factory=list)
+    status: str = ""
+    abnormal_ratio: float = 0.0
+    threshold_ratio: float = 0.0
+
+    def __post_init__(self):
+        if not self.status:
+            self.status = "PASS" if self.passed else "FAIL"
+
+    @property
+    def failed(self) -> bool:
+        return self.status == "FAIL"
 
 
 @dataclass
@@ -33,6 +44,10 @@ class FileCheckReport:
     @property
     def all_passed(self) -> bool:
         return all(r.passed for r in self.results)
+
+    @property
+    def total_status(self) -> str:
+        return "PASS" if self.all_passed else "FAIL"
 
 
 @dataclass
@@ -60,6 +75,7 @@ class AccAnomalyReport:
     cyclic_y: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
     cyclic_z: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
     cyclic_xyz: AccChannelAnomaly = field(default_factory=AccChannelAnomaly)
+    anomaly_indices: Set[int] = field(default_factory=set)
 
     @property
     def has_anomaly(self) -> bool:
@@ -77,6 +93,16 @@ class AccAnomalyReport:
                 self.cyclic_xyz,
             ]
         )
+
+    @property
+    def anomaly_frame_count(self) -> int:
+        return len(self.anomaly_indices)
+
+    @property
+    def anomaly_ratio(self) -> float:
+        if self.total_frames <= 0:
+            return 0.0
+        return self.anomaly_frame_count / self.total_frames * 100
 
 
 class DataChecker:
@@ -99,6 +125,39 @@ class DataChecker:
         self.static_min = static_min
         self.chip_name = chip_rule.chip
         self._gain_tia_map = chip_rule.gain_tia_map or {}
+
+    @staticmethod
+    def _status_from_ratio(
+        abnormal_count: int, total_count: int, threshold_ratio: float
+    ) -> Tuple[str, float]:
+        if abnormal_count <= 0:
+            return "PASS", 0.0
+        ratio = abnormal_count / total_count * 100 if total_count > 0 else 100.0
+        if ratio <= threshold_ratio:
+            return "WARNING", ratio
+        return "FAIL", ratio
+
+    @classmethod
+    def _build_result(
+        cls,
+        name: str,
+        abnormal_count: int,
+        total_count: int,
+        threshold_ratio: float,
+        pass_summary: str,
+        abnormal_summary: str,
+        details: Optional[List[str]] = None,
+    ) -> CheckResult:
+        status, ratio = cls._status_from_ratio(abnormal_count, total_count, threshold_ratio)
+        return CheckResult(
+            name=name,
+            passed=status != "FAIL",
+            summary=pass_summary if status == "PASS" else abnormal_summary,
+            details=details or [],
+            status=status,
+            abnormal_ratio=ratio,
+            threshold_ratio=threshold_ratio,
+        )
 
     def run_all(self, df: pd.DataFrame) -> List[CheckResult]:
         """运行所有适用的检查"""
@@ -150,7 +209,7 @@ class DataChecker:
             return agc_cols
         return expand_columns(["AGC_INFO_CH{0-31}"])
 
-    def check_data_range(self, df: pd.DataFrame) -> CheckResult:
+    def check_data_range(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查原始数据是否在正常范围内"""
         data_cols = [c for c in self._get_data_columns() if c in df.columns]
         if not data_cols:
@@ -177,24 +236,24 @@ class DataChecker:
                 abnormal_cols.append(col)
                 details.append(f"{col}: {out_of_range}/{len(col_data)} 异常 ({pct:.1f}%)")
 
-        if not abnormal_cols:
-            return CheckResult(
-                "数据范围",
-                True,
-                f"全部 {len(data_cols)} 列数据在正常范围 [{range_min}, {range_max}]",
-            )
-
         pct = total_abnormal / total_cells * 100 if total_cells > 0 else 0
         col_names = ", ".join(abnormal_cols)
-        return CheckResult(
-            "数据范围",
-            False,
-            f"{len(abnormal_cols)}/{len(data_cols)} 列超范围 [{col_names}], "
-            f"共 {total_abnormal} 个异常值 ({pct:.1f}%)",
-            details,
+        return self._build_result(
+            name="数据范围",
+            abnormal_count=total_abnormal,
+            total_count=total_cells,
+            threshold_ratio=threshold_ratio,
+            pass_summary=f"全部 {len(data_cols)} 列数据在正常范围 [{range_min}, {range_max}]",
+            abnormal_summary=(
+                f"{len(abnormal_cols)}/{len(data_cols)} 列超范围 [{col_names}], "
+                f"共 {total_abnormal} 个异常值 ({pct:.1f}%)"
+            ),
+            details=details,
         )
 
-    def check_frame_completeness(self, df: pd.DataFrame) -> CheckResult:
+    def check_frame_completeness(
+        self, df: pd.DataFrame, threshold_ratio: float = 1.0
+    ) -> CheckResult:
         """检查帧号是否完整（丢包检测）"""
         frame_col = self._resolve_frame_column(df)
         if not frame_col:
@@ -211,19 +270,17 @@ class DataChecker:
         else:
             lost = self._check_incremental_frames(frame_ids)
 
-        if lost == 0:
-            return CheckResult(
-                "帧完整性",
-                True,
-                f"数据完整, 共 {actual_count} 帧, 无丢包",
-            )
-
         expected = actual_count + lost
         pct = lost / expected * 100
-        return CheckResult(
-            "帧完整性",
-            False,
-            f"丢包 {lost} 帧, 实际 {actual_count} 帧, " f"预期 {expected} 帧, 丢包率 {pct:.2f}%",
+        return self._build_result(
+            name="帧完整性",
+            abnormal_count=lost,
+            total_count=expected,
+            threshold_ratio=threshold_ratio,
+            pass_summary=f"数据完整, 共 {actual_count} 帧, 无丢包",
+            abnormal_summary=(
+                f"丢包 {lost} 帧, 实际 {actual_count} 帧, 预期 {expected} 帧, " f"丢包率 {pct:.2f}%"
+            ),
         )
 
     def _check_cyclic_frames(self, frame_ids: pd.Series, cycle: int = 256) -> int:
@@ -249,7 +306,7 @@ class DataChecker:
         lost = int(gaps.sum() - len(gaps)) if len(gaps) > 0 else 0
         return lost
 
-    def check_data_centering(self, df: pd.DataFrame) -> CheckResult:
+    def check_data_centering(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查数据去除基线后是否居中（0.3*2^23 ~ 0.85*2^23）"""
         data_cols = [c for c in self._get_data_columns() if c in df.columns]
         if not data_cols:
@@ -260,16 +317,20 @@ class DataChecker:
 
         off_center_cols: List[str] = []
         details: List[str] = []
+        total_cells = 0
+        total_abnormal = 0
 
         for col in data_cols:
             col_data = pd.to_numeric(df[col], errors="coerce").dropna()
             if col_data.empty:
                 continue
+            total_cells += len(col_data)
             centered = col_data - offset
             out_low = (centered < self.CENTER_LOW).sum()
             out_high = (centered > self.CENTER_HIGH).sum()
             out_total = out_low + out_high
             if out_total > 0:
+                total_abnormal += out_total
                 pct = out_total / len(col_data) * 100
                 off_center_cols.append(col)
                 details.append(
@@ -277,23 +338,25 @@ class DataChecker:
                     f"偏低={out_low}, 偏高={out_high}"
                 )
 
-        if not off_center_cols:
-            return CheckResult(
-                "数据居中",
-                True,
-                f"全部 {len(data_cols)} 列数据居中正常 "
-                f"[{self.CENTER_LOW:.0f}, {self.CENTER_HIGH:.0f}]",
-            )
-
         col_names = ", ".join(off_center_cols)
-        return CheckResult(
-            "数据居中",
-            False,
-            f"{len(off_center_cols)}/{len(data_cols)} 列偏离居中 [{col_names}]",
-            details,
+        pct = total_abnormal / total_cells * 100 if total_cells > 0 else 0
+        return self._build_result(
+            name="数据居中",
+            abnormal_count=total_abnormal,
+            total_count=total_cells,
+            threshold_ratio=threshold_ratio,
+            pass_summary=(
+                f"全部 {len(data_cols)} 列数据居中正常 "
+                f"[{self.CENTER_LOW:.0f}, {self.CENTER_HIGH:.0f}]"
+            ),
+            abnormal_summary=(
+                f"{len(off_center_cols)}/{len(data_cols)} 列偏离居中 [{col_names}], "
+                f"共 {total_abnormal} 个异常值 ({pct:.1f}%)"
+            ),
+            details=details,
         )
 
-    def check_ipd_conversion(self, df: pd.DataFrame) -> CheckResult:
+    def check_ipd_conversion(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查GH3036的Ipd_pA与Rawdata转换是否在误差范围内（±tolerance pA）"""
         ipd_cols = [c for c in self._get_ipd_columns() if c in df.columns]
         data_cols = [c for c in self._get_data_columns() if c in df.columns]
@@ -313,6 +376,8 @@ class DataChecker:
         mismatch_cols: List[str] = []
         details: List[str] = []
         check_count = min(len(ipd_cols), len(data_cols))
+        total_points = 0
+        total_exceed = 0
 
         for i in range(check_count):
             ipd_col = ipd_cols[i]
@@ -336,8 +401,10 @@ class DataChecker:
             if valid_diff.empty:
                 continue
 
+            total_points += len(valid_diff)
             exceed = (valid_diff > self.tolerance).sum()
             if exceed > 0:
+                total_exceed += exceed
                 pct = exceed / len(valid_diff) * 100
                 max_diff = valid_diff.max()
                 mismatch_cols.append(f"{ipd_col}<->{raw_col}")
@@ -346,19 +413,21 @@ class DataChecker:
                     f"最大差值={max_diff:.1f} pA"
                 )
 
-        if not mismatch_cols:
-            return CheckResult(
-                "Ipd转换",
-                True,
-                f"全部 {check_count} 通道 Ipd_pA 与 Rawdata 转换误差在 ±{self.tolerance} pA 内",
-            )
-
         col_names = ", ".join(mismatch_cols)
-        return CheckResult(
-            "Ipd转换",
-            False,
-            f"{len(mismatch_cols)}/{check_count} 通道超差 [{col_names}]",
-            details,
+        pct = total_exceed / total_points * 100 if total_points > 0 else 0
+        return self._build_result(
+            name="Ipd转换",
+            abnormal_count=total_exceed,
+            total_count=total_points,
+            threshold_ratio=threshold_ratio,
+            pass_summary=(
+                f"全部 {check_count} 通道 Ipd_pA 与 Rawdata 转换误差在 ±{self.tolerance} pA 内"
+            ),
+            abnormal_summary=(
+                f"{len(mismatch_cols)}/{check_count} 通道超差 [{col_names}], "
+                f"共 {total_exceed} 个超差点 ({pct:.1f}%)"
+            ),
+            details=details,
         )
 
     def build_ipd_detail(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -511,6 +580,34 @@ class DataChecker:
 
         return report
 
+    def build_acc_result(
+        self, report: AccAnomalyReport, threshold_ratio: float = 1.0
+    ) -> CheckResult:
+        """根据ACC异常帧占比构建三态检查结果"""
+        details = []
+        if report.has_anomaly:
+            details.append(
+                f"异常帧 {report.anomaly_frame_count}/{report.total_frames} "
+                f"({report.anomaly_ratio:.1f}%)"
+            )
+        return self._build_result(
+            name="ACC异常",
+            abnormal_count=report.anomaly_frame_count,
+            total_count=report.total_frames,
+            threshold_ratio=threshold_ratio,
+            pass_summary=f"共 {report.total_frames} 帧, 未检测到ACC异常",
+            abnormal_summary=(
+                f"检测到ACC异常帧 {report.anomaly_frame_count}/{report.total_frames} "
+                f"({report.anomaly_ratio:.1f}%)"
+            ),
+            details=details,
+        )
+
+    @staticmethod
+    def _record_anomaly_indices(report: AccAnomalyReport, segments: List[Tuple[int, int]]) -> None:
+        for start, end in segments:
+            report.anomaly_indices.update(range(start, end + 1))
+
     def _check_acc_all_zero(
         self, acc_df: pd.DataFrame, frame_ids: pd.Series, report: AccAnomalyReport
     ) -> None:
@@ -518,6 +615,7 @@ class DataChecker:
         all_zero = (acc_df == 0).all(axis=1)
         segments = self._find_consecutive_segments(all_zero)
         if segments:
+            self._record_anomaly_indices(report, segments)
             report.zero = AccChannelAnomaly(
                 count=len(segments),
                 first_frame=int(frame_ids.iloc[segments[0][0]]),
@@ -554,6 +652,7 @@ class DataChecker:
             combined_mask = per_ch_static[cols[0]] & per_ch_static[cols[1]] & per_ch_static[cols[2]]
             xyz_segs = self._find_consecutive_segments(combined_mask, min_length=1)
             if xyz_segs:
+                self._record_anomaly_indices(report, xyz_segs)
                 report.static_xyz = AccChannelAnomaly(
                     count=len(xyz_segs),
                     first_frame=int(frame_ids.iloc[xyz_segs[0][0]]),
@@ -564,6 +663,7 @@ class DataChecker:
             targets = [report.static_x, report.static_y, report.static_z]
             for idx, segs in per_ch_segments.items():
                 if idx < 3 and segs:
+                    self._record_anomaly_indices(report, segs)
                     targets[idx].count = len(segs)
                     targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
                     targets[idx].max_duration = max(end - start + 1 for start, end in segs)
@@ -607,10 +707,12 @@ class DataChecker:
                 max_duration=max(end - start + 1 for start, end in unique_segs),
                 frames=[int(frame_ids.iloc[s[0]]) for s in unique_segs],
             )
+            self._record_anomaly_indices(report, unique_segs)
         else:
             targets = [report.cyclic_x, report.cyclic_y, report.cyclic_z]
             for idx, segs in per_ch_segments.items():
                 if idx < 3 and segs:
+                    self._record_anomaly_indices(report, segs)
                     targets[idx].count = len(segs)
                     targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
                     targets[idx].max_duration = max(end - start + 1 for start, end in segs)

@@ -22,6 +22,11 @@ console = Console()
 )
 @click.option("--tolerance", type=int, default=50, help="Ipd转换误差容忍度 (pA, 默认50)")
 @click.option("--static-min", type=int, default=5, help="ACC静止检测最小连续帧数 (默认5)")
+@click.option("--range-ratio", type=float, default=1.0, help="数据范围异常允许比例 (%, 默认1)")
+@click.option("--frame-ratio", type=float, default=1.0, help="帧丢失允许比例 (%, 默认1)")
+@click.option("--center-ratio", type=float, default=1.0, help="数据居中异常允许比例 (%, 默认1)")
+@click.option("--ipd-ratio", type=float, default=1.0, help="Ipd超差允许比例 (%, 默认1)")
+@click.option("--acc-ratio", type=float, default=1.0, help="ACC异常帧允许比例 (%, 默认1)")
 @click.option(
     "-o",
     "--output",
@@ -38,6 +43,11 @@ def check_cmd(
     checks: Optional[str],
     tolerance: int,
     static_min: int,
+    range_ratio: float,
+    frame_ratio: float,
+    center_ratio: float,
+    ipd_ratio: float,
+    acc_ratio: float,
     output_path: Optional[str],
     workers: int,
     verbose: bool,
@@ -89,23 +99,24 @@ def check_cmd(
         report = FileCheckReport(file_path=csv_file, chip=chip)
 
         if "range" in check_set:
-            report.results.append(checker.check_data_range(df))
+            report.results.append(checker.check_data_range(df, threshold_ratio=range_ratio))
         if "frame" in check_set:
-            report.results.append(checker.check_frame_completeness(df))
+            report.results.append(checker.check_frame_completeness(df, threshold_ratio=frame_ratio))
         if "center" in check_set:
-            report.results.append(checker.check_data_centering(df))
+            report.results.append(checker.check_data_centering(df, threshold_ratio=center_ratio))
 
         ipd_detail = None
         if "ipd" in check_set and chip.startswith("gh3036"):
-            ipd_result = checker.check_ipd_conversion(df)
+            ipd_result = checker.check_ipd_conversion(df, threshold_ratio=ipd_ratio)
             report.results.append(ipd_result)
-            if not ipd_result.passed:
+            if ipd_result.failed:
                 ipd_detail = checker.build_ipd_detail(df)
 
         acc_report = None
         if "acc" in check_set:
             acc_report = checker.check_acc_anomaly(df)
             acc_report.file_path = csv_file
+            report.results.append(checker.build_acc_result(acc_report, threshold_ratio=acc_ratio))
 
         return report, acc_report, ipd_detail, ""
 
@@ -142,7 +153,14 @@ def check_cmd(
     if acc_reports:
         _print_acc_table(list(acc_reports.values()))
 
-    _print_criteria(check_set, tolerance, static_min)
+    ratios = {
+        "range": range_ratio,
+        "frame": frame_ratio,
+        "center": center_ratio,
+        "ipd": ipd_ratio,
+        "acc": acc_ratio,
+    }
+    _print_criteria(check_set, tolerance, static_min, ratios)
 
     csv_out = Path(output_path) if output_path else _default_output(target)
     _save_report_csv(reports, acc_reports, csv_out)
@@ -197,7 +215,7 @@ def _print_reports(reports: list, verbose: bool) -> None:
         table.add_column("说明", no_wrap=True)
 
         for result in report.results:
-            mark = "[green]✓[/green]" if result.passed else "[red]✗[/red]"
+            mark = _format_result_status(result.status)
             table.add_row(result.name, mark, result.summary)
 
         console.print(table)
@@ -210,6 +228,15 @@ def _print_reports(reports: list, verbose: bool) -> None:
                         console.print(f"    {detail}")
 
     console.print(f"\n总计: {len(reports)} 文件, {passed_count} 通过, {failed_count} 异常")
+
+
+def _format_result_status(status: str) -> str:
+    """格式化单项检查状态"""
+    if status == "PASS":
+        return "[green]Pass[/green]"
+    if status == "WARNING":
+        return "[yellow]Warning[/yellow]"
+    return "[red]Fail[/red]"
 
 
 def _print_acc_table(acc_reports: list) -> None:
@@ -259,15 +286,29 @@ def _print_acc_table(acc_reports: list) -> None:
     )
 
 
-def _print_criteria(check_set: set, tolerance: int, static_min: int) -> None:
+def _print_criteria(check_set: set, tolerance: int, static_min: int, ratios: dict) -> None:
     """打印当前检查项及判断标准"""
     console.print("\n[dim]─── 检查标准 ───[/dim]")
     criteria = {
-        "range": "数据范围: Rawdata 在芯片ADC范围内 (GH3036: 0~2^23, GH3220/GH3300: 2^23~2^24)",
-        "frame": "帧完整性: 帧号连续递增无跳帧 (GH3220按0-255循环检测)",
-        "center": "数据居中: Rawdata 在 0.3*2^23 ~ 0.85*2^23 范围内",
-        "ipd": f"Ipd转换: Ipd_pA 与 Rawdata 按AGC逐行计算, 误差 ≤ ±{tolerance} pA",
-        "acc": f"ACC异常: 全零(XYZ同时为0) / 静止(连续不变≥{static_min}帧) / 循环(周期2~50重复≥2次, 振幅≥20)",
+        "range": (
+            "数据范围: Rawdata 在芯片ADC范围内 "
+            f"(异常比例≤{ratios.get('range', 1.0):g}% 为Warning)"
+        ),
+        "frame": (
+            "帧完整性: 帧号连续递增无跳帧 " f"(丢包率≤{ratios.get('frame', 1.0):g}% 为Warning)"
+        ),
+        "center": (
+            "数据居中: Rawdata 在 0.3*2^23 ~ 0.85*2^23 范围内 "
+            f"(异常比例≤{ratios.get('center', 1.0):g}% 为Warning)"
+        ),
+        "ipd": (
+            f"Ipd转换: Ipd_pA 与 Rawdata 按AGC逐行计算, 误差 ≤ ±{tolerance} pA "
+            f"(超差比例≤{ratios.get('ipd', 1.0):g}% 为Warning)"
+        ),
+        "acc": (
+            f"ACC异常: 全零 / 静止(连续不变≥{static_min}帧) / 循环 "
+            f"(异常帧比例≤{ratios.get('acc', 1.0):g}% 为Warning)"
+        ),
     }
     for key in sorted(check_set):
         if key in criteria:
@@ -276,7 +317,7 @@ def _print_criteria(check_set: set, tolerance: int, static_min: int) -> None:
 
 def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> None:
     """将全部检查结果保存到统一CSV文件"""
-    header = ["文件名", "芯片"]
+    header = ["文件名", "芯片", "总异常(结果)"]
 
     check_names = []
     for report in reports:
@@ -329,13 +370,13 @@ def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> Non
         writer.writerow(header)
 
         for report in reports:
-            row = [report.file_path.name, report.chip]
+            row = [report.file_path.name, report.chip, report.total_status]
 
             result_map = {r.name: r for r in report.results}
             for name in check_names:
                 if name in result_map:
                     r = result_map[name]
-                    row.append("PASS" if r.passed else "FAIL")
+                    row.append(r.status)
                     row.append(r.summary)
                 else:
                     row.append("-")

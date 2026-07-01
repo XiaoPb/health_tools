@@ -127,24 +127,29 @@ ghealth_tool info rules/chip/gh3220.yaml --schema
 
 ```bash
 # 检查目录下所有CSV（默认运行全部检查项）
-ghealth_tool check data/ -v
+ghealth_tool check -i data/ -v
 
 # 仅检查ACC异常
-ghealth_tool check data/ --checks acc
+ghealth_tool check -i data/ --checks acc
 
 # 指定报告输出路径
-ghealth_tool check data/ -o report/check_result.csv
+ghealth_tool check -i data/ -o report/check_result.csv
 
 # 仅检查数据范围和帧完整性
-ghealth_tool check data.csv --checks range,frame
+ghealth_tool check -i data.csv --checks range,frame
+
+# 允许帧丢失不超过0.5%、ACC异常帧不超过2%
+ghealth_tool check -i data/ --frame-ratio 0.5 --acc-ratio 2
 
 # 使用别名
-ghealth_tool chk data/ -c gh3036
+ghealth_tool chk -i data/ -c gh3036
 ```
 
 支持的检查项：`range`（数据范围）、`frame`（帧完整性）、`center`（数据居中）、`ipd`（Ipd转换）、`acc`（ACC异常检测）。
 
-ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变>3点）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。`-o` 输出统一CSV报告，包含全部检查项结果和ACC异常详情。
+各单项检查输出 `PASS` / `WARNING` / `FAIL` 三态：无异常为 `PASS`，异常比例不超过对应 `--*-ratio` 参数为 `WARNING`，超过则为 `FAIL`。比例参数使用百分数数字，默认均为 `1`。`WARNING` 在总异常判断中归为通过，CSV报告的 `总异常(结果)` 只输出 `PASS` 或 `FAIL`。
+
+ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变>3点）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。ACC按异常覆盖帧去重后计算异常比例。`-o` 输出统一CSV报告，包含全部检查项结果和ACC异常详情。
 
 ### validate - 规则验证
 

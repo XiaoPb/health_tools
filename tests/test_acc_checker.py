@@ -1,9 +1,14 @@
 """ACC异常检测单元测试。"""
 
+import csv
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
+from health_tools.commands.check import _save_report_csv
 from health_tools.core.checker import DataChecker
+from health_tools.core.checker import FileCheckReport
 from health_tools.models.rules import ChipRule
 
 
@@ -174,7 +179,11 @@ class TestAccColumnResolution:
         )
         chk = DataChecker(rule)
         df = pd.DataFrame(
-            {"AccX": [1, 1, 1, 1, 1, 1, 1], "AccY": [2, 3, 4, 5, 6, 7, 8], "AccZ": [3, 4, 5, 6, 7, 8, 9]}
+            {
+                "AccX": [1, 1, 1, 1, 1, 1, 1],
+                "AccY": [2, 3, 4, 5, 6, 7, 8],
+                "AccZ": [3, 4, 5, 6, 7, 8, 9],
+            }
         )
         report = chk.check_acc_anomaly(df)
         assert report.static_x.count >= 1
@@ -227,7 +236,12 @@ class TestFrameColumnResolution:
         )
         chk = DataChecker(rule)
         df = pd.DataFrame(
-            {"FRAME_ID": [100, 101, 102, 103, 104], "ACCX": [1, 0, 0, 0, 1], "ACCY": [1, 0, 0, 0, 1], "ACCZ": [1, 0, 0, 0, 1]}
+            {
+                "FRAME_ID": [100, 101, 102, 103, 104],
+                "ACCX": [1, 0, 0, 0, 1],
+                "ACCY": [1, 0, 0, 0, 1],
+                "ACCZ": [1, 0, 0, 0, 1],
+            }
         )
         report = chk.check_acc_anomaly(df)
         assert report.zero.first_frame == 101
@@ -241,7 +255,12 @@ class TestFrameColumnResolution:
         )
         chk = DataChecker(rule)
         df = pd.DataFrame(
-            {"seq": [500, 501, 502, 503, 504], "ACCX": [1, 0, 0, 0, 1], "ACCY": [1, 0, 0, 0, 1], "ACCZ": [1, 0, 0, 0, 1]}
+            {
+                "seq": [500, 501, 502, 503, 504],
+                "ACCX": [1, 0, 0, 0, 1],
+                "ACCY": [1, 0, 0, 0, 1],
+                "ACCZ": [1, 0, 0, 0, 1],
+            }
         )
         report = chk.check_acc_anomaly(df)
         assert report.zero.first_frame == 501
@@ -258,3 +277,84 @@ class TestFrameColumnResolution:
         )
         report = chk.check_acc_anomaly(df)
         assert report.zero.first_frame == 1
+
+
+class TestCheckResultStatus:
+    """测试检查项三态结果。"""
+
+    def test_range_pass_warning_fail(self):
+        rule = ChipRule(
+            chip="gh3036",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["Rawdata0"],
+        )
+        chk = DataChecker(rule)
+
+        pass_df = pd.DataFrame({"Rawdata0": [1, 2, 3, 4]})
+        pass_result = chk.check_data_range(pass_df, threshold_ratio=1)
+        assert pass_result.status == "PASS"
+        assert pass_result.passed
+
+        warning_df = pd.DataFrame({"Rawdata0": [1] * 99 + [2**23 + 1]})
+        warning_result = chk.check_data_range(warning_df, threshold_ratio=1)
+        assert warning_result.status == "WARNING"
+        assert warning_result.passed
+        assert warning_result.abnormal_ratio == pytest.approx(1.0)
+
+        fail_df = pd.DataFrame({"Rawdata0": [1] * 98 + [2**23 + 1, 2**23 + 2]})
+        fail_result = chk.check_data_range(fail_df, threshold_ratio=1)
+        assert fail_result.status == "FAIL"
+        assert not fail_result.passed
+
+    def test_frame_ratio_boundary_is_warning(self, checker):
+        df = pd.DataFrame({"FRAME_ID": list(range(50)) + list(range(51, 100))})
+        result = checker.check_frame_completeness(df, threshold_ratio=1)
+        assert result.status == "WARNING"
+        assert result.passed
+        assert result.abnormal_ratio == pytest.approx(1.0)
+
+    def test_file_total_status_treats_warning_as_pass(self, checker):
+        df = pd.DataFrame({"FRAME_ID": list(range(50)) + list(range(51, 100))})
+        warning = checker.check_frame_completeness(df, threshold_ratio=1)
+        fail = checker.check_frame_completeness(df, threshold_ratio=0.5)
+
+        warning_report = FileCheckReport(file_path=Path("warning.csv"), chip="gh3220")
+        warning_report.results.append(warning)
+        assert warning_report.total_status == "PASS"
+
+        fail_report = FileCheckReport(file_path=Path("fail.csv"), chip="gh3220")
+        fail_report.results.append(fail)
+        assert fail_report.total_status == "FAIL"
+
+    def test_acc_result_uses_deduplicated_anomaly_frames(self, checker):
+        df = _make_df(
+            [0, 0, 0, 0, 1, 2, 3, 4, 10, 50, 10, 50, 10, 50],
+            [0, 0, 0, 0, 2, 3, 4, 5, 20, 60, 20, 60, 20, 60],
+            [0, 0, 0, 0, 3, 4, 5, 6, 30, 70, 30, 70, 30, 70],
+        )
+        report = checker.check_acc_anomaly(df)
+        result = checker.build_acc_result(report, threshold_ratio=100)
+        assert report.anomaly_frame_count == 10
+        assert result.status == "WARNING"
+        assert result.abnormal_ratio == pytest.approx(10 / 14 * 100)
+
+    def test_csv_report_writes_total_and_three_state_status(self, tmp_path):
+        report = FileCheckReport(file_path=tmp_path / "data.csv", chip="gh3220")
+        result = DataChecker._build_result(
+            name="帧完整性",
+            abnormal_count=1,
+            total_count=100,
+            threshold_ratio=1,
+            pass_summary="无异常",
+            abnormal_summary="丢包 1 帧",
+        )
+        report.results.append(result)
+        output = tmp_path / "check_report.csv"
+
+        _save_report_csv([report], {}, output)
+
+        with open(output, newline="", encoding="utf-8-sig") as f:
+            rows = list(csv.reader(f))
+
+        assert rows[0][:5] == ["文件名", "芯片", "总异常(结果)", "帧完整性(结果)", "帧完整性(说明)"]
+        assert rows[1][:5] == ["data.csv", "gh3220", "PASS", "WARNING", "丢包 1 帧"]

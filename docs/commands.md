@@ -293,7 +293,7 @@ ghealth_tool fac -i data.csv -c gh3036 --gain 10 --current 25.0 -o results.csv
 检查PPG/ACC数据完整性和正确性。别名：`chk`。
 
 ```bash
-ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <pA>] [--static-min <帧>] [-w <线程数>] [-o <输出>] [-v]
+ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance <pA>] [--static-min <帧>] [--*-ratio <百分比>] [-w <线程数>] [-o <输出>] [-v]
 ```
 
 | 参数 | 说明 |
@@ -303,6 +303,11 @@ ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance
 | `--checks` | 指定检查项（逗号分隔: range,ipd,frame,center,acc），默认全部 |
 | `--tolerance` | Ipd转换误差容忍度（pA，默认50） |
 | `--static-min` | ACC静止检测最小连续帧数（默认5） |
+| `--range-ratio` | 数据范围异常允许比例（%，默认1） |
+| `--frame-ratio` | 帧丢失允许比例（%，默认1） |
+| `--center-ratio` | 数据居中异常允许比例（%，默认1） |
+| `--ipd-ratio` | Ipd超差允许比例（%，默认1） |
+| `--acc-ratio` | ACC异常帧允许比例（%，默认1） |
 | `-w, --workers` | 并行线程数（默认4） |
 | `-o, --output` | 检查报告CSV输出路径（默认: `<path>/check_report.csv`） |
 | `-v, --verbose` | 显示详细信息 |
@@ -316,6 +321,16 @@ ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance
 | `center` | 检查数据去除基线后是否居中 |
 | `ipd` | 检查Ipd_pA与Rawdata转换一致性（仅GH3036） |
 | `acc` | ACC加速度计异常检测（全零/静止/循环） |
+
+### 结果状态
+
+每个检查项输出三态结果：
+
+- `PASS`: 无异常。
+- `WARNING`: 有异常，但异常比例不超过该检查项的 `--*-ratio` 阈值。
+- `FAIL`: 异常比例超过阈值，或缺少必要列导致无法检查。
+
+比例参数使用百分数数字，例如 `--frame-ratio 0.5` 表示允许丢包率不超过0.5%。默认各检查项均允许1%。CSV报告额外提供 `总异常(结果)`，只输出 `PASS` 或 `FAIL`；`WARNING` 在总异常判断中归为 `PASS`。
 
 ### 列名解析
 
@@ -359,11 +374,13 @@ check_columns:
 
 终端按通道拆表显示（如 静止检测-XYZ、循环检测-Z），仅展示有异常的子表。循环检测使用本通道静止掩码排除，不会被其他通道静止误遮蔽。
 
+ACC状态按异常覆盖帧去重后计算异常比例：任一异常覆盖到的帧只计一次，异常帧数 / 总帧数不超过 `--acc-ratio` 时为 `WARNING`，超过时为 `FAIL`。
+
 ### Ipd转换检查
 
 逐行从 `agc_info` 提取 gain code 映射 kΩ，按实际增益计算期望 Ipd_pA，与实际值比较误差。中途 AGC 切换时每行独立计算，不会因增益变化导致误报。
 
-检查失败时自动生成超差详情文件 `ipd_detail_<文件名>.csv`（与 `check_report.csv` 同目录），仅包含超差行：
+检查结果为 `FAIL` 时自动生成超差详情文件 `ipd_detail_<文件名>.csv`（与 `check_report.csv` 同目录），仅包含超差行；`WARNING` 不生成详情文件。
 
 ```
 frame, rawdata0, ipd_pa0, agc_info0, expected_ipd0, diff0, exceed0, rawdata1, ...
@@ -397,6 +414,9 @@ ghealth_tool check -i data/ -c gh3036_moto_hr -w 8
 # 仅检查数据范围和帧完整性
 ghealth_tool check -i data.csv --checks range,frame
 
+# 按检查项配置异常允许比例
+ghealth_tool check -i data/ --range-ratio 0.5 --frame-ratio 0.2 --acc-ratio 2
+
 # 使用别名
 ghealth_tool chk -i data/ -c gh3036 --checks acc,frame
 ```
@@ -406,7 +426,7 @@ ghealth_tool chk -i data/ -c gh3036 --checks acc,frame
 统一输出一个CSV文件，每文件一行，列结构：
 
 ```
-文件名, 芯片, 数据范围(结果), 数据范围(说明), 帧完整性(结果), 帧完整性(说明), ...,
+文件名, 芯片, 总异常(结果), 数据范围(结果), 数据范围(说明), 帧完整性(结果), 帧完整性(说明), ...,
 ACC全零次数, ACC全零最长帧, ACC全零前10帧,
 ACC静止XYZ次数, ACC静止XYZ最长帧, ACC静止XYZ前10帧,
 ACC循环XYZ次数, ACC循环XYZ最长帧, ACC循环XYZ前10帧,
@@ -418,7 +438,7 @@ ACC循环Y次数, ACC循环Y最长帧, ACC循环Y前10帧,
 ACC循环Z次数, ACC循环Z最长帧, ACC循环Z前10帧
 ```
 
-每种异常每通道三列：次数、最长持续帧数、前10次异常起始帧号（逗号分隔）。XYZ同时的判定取三通道交集（静止）或去重合并（循环）。
+每个检查项结果列为 `PASS` / `WARNING` / `FAIL`。`总异常(结果)` 只输出 `PASS` / `FAIL`，其中 `WARNING` 归为 `PASS`。每种ACC异常每通道三列：次数、最长持续帧数、前10次异常起始帧号（逗号分隔）。XYZ同时的判定取三通道交集（静止）或去重合并（循环）。
 
 ---
 
