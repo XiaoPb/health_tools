@@ -404,9 +404,8 @@ class DataChecker:
             ((intervals_ms >= max_cluster_low) & (intervals_ms <= max_cluster_high)).sum()
         )
         max_info = (
-            f"最大偏差间隔 {max_interval_ms:.3f}ms，"
-            f"首次帧 {first_frame}，"
-            f"最大偏差±2%数量 {max_cluster_count}/{total_count}"
+            f"最大 {self._format_ms(max_interval_ms)}@帧{first_frame}; "
+            f"近最大±2% {max_cluster_count}个"
         )
 
         details = []
@@ -424,15 +423,29 @@ class DataChecker:
             total_count=total_count,
             threshold_ratio=threshold_ratio,
             pass_summary=(
-                f"时间戳间隔稳定，基准间隔 {baseline_ms:.3f}ms，"
-                f"检查 {total_count} 个间隔，容差 {' / '.join(limits)}，{max_info}"
+                f"稳定 {total_count}个间隔; "
+                f"基准 {self._format_ms(baseline_ms)}{self._format_limits(limits)}; {max_info}"
             ),
             abnormal_summary=(
-                f"异常间隔 {abnormal_count}/{total_count} ({ratio:.1f}%)，"
-                f"基准间隔 {baseline_ms:.3f}ms，容差 {' / '.join(limits)}，{max_info}"
+                f"异常 {abnormal_count}/{total_count}({ratio:.1f}%); "
+                f"基准 {self._format_ms(baseline_ms)}{self._format_limits(limits)}; {max_info}"
             ),
             details=details,
         )
+
+    @staticmethod
+    def _format_ms(value: float) -> str:
+        """格式化毫秒数，整数省略小数。"""
+        if abs(value - round(value)) < 0.001:
+            return f"{round(value):.0f}ms"
+        return f"{value:.3f}ms"
+
+    @staticmethod
+    def _format_limits(limits: List[str]) -> str:
+        """格式化容差短描述。"""
+        if not limits:
+            return ""
+        return "".join(limits) if len(limits) == 1 else "(" + "/".join(limits) + ")"
 
     def _timestamp_interval_frame(self, df: pd.DataFrame, interval_index) -> int:
         """获取异常间隔首次出现的帧号，优先使用帧号列。"""

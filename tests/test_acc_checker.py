@@ -371,7 +371,7 @@ class TestTimestampInterval:
 
         assert result.status == "PASS"
         assert result.passed
-        assert "基准间隔 40" in result.summary
+        assert "基准 40ms±0.2%" in result.summary
 
     def test_timestamp_ratio_uses_percent_number(self, checker):
         df = pd.DataFrame({"timestamp": [0, 40, 80, 120.2, 160.2]})
@@ -397,7 +397,7 @@ class TestTimestampInterval:
         )
 
         assert result.status == "FAIL"
-        assert "异常间隔 1/4" in result.summary
+        assert "异常 1/4" in result.summary
 
     def test_timestamp_summary_includes_max_deviation_cluster(self, checker):
         df = pd.DataFrame(
@@ -414,10 +414,7 @@ class TestTimestampInterval:
         )
 
         assert result.status == "FAIL"
-        assert "最大偏差间隔 6756.000ms" in result.summary
-        assert "首次帧 16" in result.summary
-        assert "最大偏差±2%数量 3/8" in result.summary
-        assert "偏差比例" not in result.summary
+        assert result.summary == "异常 3/8(37.5%); 基准 40ms±20%; 最大 6756ms@帧16; 近最大±2% 3个"
 
     def test_string_timestamp_interval_pass(self, checker):
         df = pd.DataFrame(
