@@ -141,6 +141,18 @@ ghealth_tool check -i data.csv --checks range,frame
 # 允许帧丢失不超过0.5%、ACC异常帧不超过2%
 ghealth_tool check -i data/ --frame-ratio 0.5 --acc-ratio 2
 
+# 检查指定时间戳列的相邻间隔稳定性
+ghealth_tool check -i data/ --check-timestamp=timestamp
+
+# 时间戳间隔允许0.2%波动，同时允许5ms固定偏差
+ghealth_tool check -i data/ --check-timestamp=timestamp --timestamp-ratio 0.2 --timestamp-ms 5
+
+# 按检查报告分拣正常/异常文件（默认读取当前目录 check_report.csv）
+ghealth_tool check --sort --sort-output sorted/
+
+# 指定检查报告分拣
+ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/
+
 # 使用别名
 ghealth_tool chk -i data/ -c gh3036
 ```
@@ -149,7 +161,7 @@ ghealth_tool chk -i data/ -c gh3036
 
 各单项检查输出 `PASS` / `WARNING` / `FAIL` 三态：无异常为 `PASS`，异常比例不超过对应 `--*-ratio` 参数为 `WARNING`，超过则为 `FAIL`。比例参数使用百分数数字，默认均为 `1`。`WARNING` 在总异常判断中归为通过，CSV报告的 `总异常(结果)` 只输出 `PASS` 或 `FAIL`。
 
-ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变>3点）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。ACC按异常覆盖帧去重后计算异常比例。`-o` 输出统一CSV报告，包含全部检查项结果和ACC异常详情。
+ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变>3点）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。ACC按异常覆盖帧去重后计算异常比例。`--check-timestamp=列名` 可额外检查时间戳间隔稳定性，`--timestamp-ratio` 使用百分数数字（如 `0.2` 表示0.2%）。`-o` 输出统一CSV报告，包含全部检查项结果、ACC异常详情和文件相对路径。`--sort` 读取报告后移动文件到 `normal/` / `abnormal/` 并生成对应列表CSV，不覆盖目标同名文件。
 
 ### validate - 规则验证
 

@@ -1,6 +1,7 @@
 """数据检查核心逻辑"""
 
 import re
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -355,6 +356,101 @@ class DataChecker:
             ),
             details=details,
         )
+
+    def check_timestamp_interval(
+        self,
+        df: pd.DataFrame,
+        timestamp_column: str,
+        ratio_tolerance: float = 20.0,
+        ms_tolerance: Optional[float] = None,
+        threshold_ratio: float = 1.0,
+    ) -> CheckResult:
+        """检查相邻时间戳间隔是否稳定。"""
+        if timestamp_column not in df.columns:
+            return CheckResult("时间戳间隔", False, f"未找到时间戳列: {timestamp_column}")
+
+        intervals_ms, error = self._parse_timestamp_intervals_ms(df[timestamp_column])
+        if error:
+            return CheckResult("时间戳间隔", False, error)
+
+        if intervals_ms is None or len(intervals_ms) < 2:
+            return CheckResult("时间戳间隔", False, "有效时间戳不足，至少需要3个点")
+
+        if (intervals_ms < 0).any():
+            return CheckResult("时间戳间隔", False, "时间戳倒退")
+
+        baseline_ms = float(intervals_ms.median())
+        if baseline_ms <= 0:
+            return CheckResult("时间戳间隔", False, "基准间隔无效")
+
+        diff_ms = (intervals_ms - baseline_ms).abs()
+        ratio_limit = baseline_ms * ratio_tolerance / 100
+        abnormal_mask = diff_ms > ratio_limit
+        limits = [f"±{ratio_tolerance:g}%"]
+
+        if ms_tolerance is not None:
+            abnormal_mask = abnormal_mask | (diff_ms > ms_tolerance)
+            limits.append(f"±{ms_tolerance:g}ms")
+
+        abnormal_count = int(abnormal_mask.sum())
+        total_count = len(intervals_ms)
+        ratio = abnormal_count / total_count * 100 if total_count > 0 else 0
+
+        details = []
+        if abnormal_count:
+            abnormal_items = intervals_ms[abnormal_mask].head(10)
+            for idx, interval in abnormal_items.items():
+                details.append(
+                    f"第{idx}个间隔: {interval:.3f}ms, " f"偏差 {abs(interval - baseline_ms):.3f}ms"
+                )
+
+        return self._build_result(
+            name="时间戳间隔",
+            abnormal_count=abnormal_count,
+            total_count=total_count,
+            threshold_ratio=threshold_ratio,
+            pass_summary=(
+                f"时间戳间隔稳定，基准间隔 {baseline_ms:.3f}ms，"
+                f"检查 {total_count} 个间隔，容差 {' / '.join(limits)}"
+            ),
+            abnormal_summary=(
+                f"异常间隔 {abnormal_count}/{total_count} ({ratio:.1f}%)，"
+                f"基准间隔 {baseline_ms:.3f}ms，容差 {' / '.join(limits)}"
+            ),
+            details=details,
+        )
+
+    @staticmethod
+    def _parse_timestamp_intervals_ms(series: pd.Series) -> Tuple[Optional[pd.Series], str]:
+        """解析时间戳并返回相邻间隔（毫秒）。"""
+        raw = series.dropna()
+        if raw.empty:
+            return None, "时间戳列无有效数据"
+
+        numeric = pd.to_numeric(raw, errors="coerce")
+        if numeric.notna().sum() >= max(3, int(len(raw) * 0.8)):
+            values = numeric.dropna().astype(float)
+            diffs = values.diff().dropna()
+            if diffs.empty:
+                return None, "有效时间戳不足，至少需要3个点"
+            median_diff = float(diffs.abs().median())
+            unit_scale = 1000.0 if 0 < median_diff < 1 else 1.0
+            return diffs * unit_scale, ""
+
+        text = raw.astype(str).str.strip()
+        parsed = pd.to_datetime(text, format="%H:%M:%S.%f", errors="coerce")
+        if parsed.notna().sum() < 3:
+            parsed = pd.to_datetime(text, format="%H:%M:%S", errors="coerce")
+        if parsed.notna().sum() < 3:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                parsed = pd.to_datetime(text, errors="coerce")
+        if parsed.notna().sum() < 3:
+            return None, "无法解析时间戳"
+
+        parsed = parsed.dropna()
+        intervals = parsed.diff().dropna().dt.total_seconds() * 1000
+        return intervals, ""
 
     def check_ipd_conversion(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查GH3036的Ipd_pA与Rawdata转换是否在误差范围内（±tolerance pA）"""

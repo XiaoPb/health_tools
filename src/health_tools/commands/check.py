@@ -1,6 +1,7 @@
 """数据检查命令"""
 
 import csv
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -14,7 +15,7 @@ console = Console()
 
 
 @click.command("check")
-@click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
+@click.option("-i", "--input", "input_path", help="输入CSV文件或目录")
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)，不指定则自动识别")
 @click.option(
     "--checks",
@@ -27,6 +28,14 @@ console = Console()
 @click.option("--center-ratio", type=float, default=1.0, help="数据居中异常允许比例 (%, 默认1)")
 @click.option("--ipd-ratio", type=float, default=1.0, help="Ipd超差允许比例 (%, 默认1)")
 @click.option("--acc-ratio", type=float, default=1.0, help="ACC异常帧允许比例 (%, 默认1)")
+@click.option("--check-timestamp", "timestamp_column", help="指定时间戳列并检查间隔稳定性")
+@click.option(
+    "--timestamp-ratio", type=float, default=20.0, help="时间戳间隔百分比容差 (%, 默认20)"
+)
+@click.option("--timestamp-ms", type=float, default=None, help="时间戳间隔固定毫秒容差")
+@click.option(
+    "--timestamp-fail-ratio", type=float, default=1.0, help="时间戳异常间隔允许比例 (%, 默认1)"
+)
 @click.option(
     "-o",
     "--output",
@@ -35,10 +44,15 @@ console = Console()
     default=None,
     help="检查报告CSV输出路径 (默认: <path>/check_report.csv)",
 )
+@click.option("--sort", "sort_report", is_flag=True, help="读取检查报告并分拣正常/异常文件")
+@click.option(
+    "--report", "report_path", type=click.Path(), default=None, help="分拣使用的检查报告路径"
+)
+@click.option("--sort-output", "sort_output", type=click.Path(), default=None, help="分拣输出目录")
 @click.option("-w", "--workers", type=int, default=4, help="并行线程数 (默认4)")
 @click.option("-v", "--verbose", is_flag=True, help="显示详细信息")
 def check_cmd(
-    input_path: str,
+    input_path: Optional[str],
     chip_name: Optional[str],
     checks: Optional[str],
     tolerance: int,
@@ -48,7 +62,14 @@ def check_cmd(
     center_ratio: float,
     ipd_ratio: float,
     acc_ratio: float,
+    timestamp_column: Optional[str],
+    timestamp_ratio: float,
+    timestamp_ms: Optional[float],
+    timestamp_fail_ratio: float,
     output_path: Optional[str],
+    sort_report: bool,
+    report_path: Optional[str],
+    sort_output: Optional[str],
     workers: int,
     verbose: bool,
 ) -> None:
@@ -56,6 +77,22 @@ def check_cmd(
     from health_tools.core.checker import AccAnomalyReport, DataChecker, FileCheckReport
     from health_tools.rules.loader import RuleLoader
     from health_tools.utils.csv_handler import CSVHandler
+
+    if sort_report:
+        if not sort_output:
+            raise click.ClickException("使用 --sort 时必须指定 --sort-output")
+        report = Path(report_path) if report_path else Path.cwd() / "check_report.csv"
+        if not report.exists():
+            raise click.ClickException(f"检查报告不存在: {report}，请指定 --report 或先运行 check")
+        stats = _sort_report_files(report, Path(sort_output))
+        console.print(
+            "[green]分拣完成[/green]: "
+            f"{stats['normal']} 正常, {stats['abnormal']} 异常, {stats['skipped']} 跳过"
+        )
+        return
+
+    if not input_path:
+        raise click.ClickException("普通检查模式必须指定 -i/--input")
 
     target = Path(input_path)
     if not target.exists():
@@ -104,6 +141,16 @@ def check_cmd(
             report.results.append(checker.check_frame_completeness(df, threshold_ratio=frame_ratio))
         if "center" in check_set:
             report.results.append(checker.check_data_centering(df, threshold_ratio=center_ratio))
+        if timestamp_column:
+            report.results.append(
+                checker.check_timestamp_interval(
+                    df,
+                    timestamp_column,
+                    ratio_tolerance=timestamp_ratio,
+                    ms_tolerance=timestamp_ms,
+                    threshold_ratio=timestamp_fail_ratio,
+                )
+            )
 
         ipd_detail = None
         if "ipd" in check_set and chip.startswith("gh3036"):
@@ -160,10 +207,15 @@ def check_cmd(
         "ipd": ipd_ratio,
         "acc": acc_ratio,
     }
-    _print_criteria(check_set, tolerance, static_min, ratios)
+    if timestamp_column:
+        ratios["timestamp"] = timestamp_fail_ratio
+    _print_criteria(
+        check_set, tolerance, static_min, ratios, timestamp_column, timestamp_ratio, timestamp_ms
+    )
 
     csv_out = Path(output_path) if output_path else _default_output(target)
-    _save_report_csv(reports, acc_reports, csv_out)
+    base_dir = target.parent if target.is_file() else target
+    _save_report_csv(reports, acc_reports, csv_out, base_dir=base_dir)
 
     if ipd_details:
         out_dir = csv_out.parent
@@ -286,7 +338,15 @@ def _print_acc_table(acc_reports: list) -> None:
     )
 
 
-def _print_criteria(check_set: set, tolerance: int, static_min: int, ratios: dict) -> None:
+def _print_criteria(
+    check_set: set,
+    tolerance: int,
+    static_min: int,
+    ratios: dict,
+    timestamp_column: Optional[str] = None,
+    timestamp_ratio: float = 20.0,
+    timestamp_ms: Optional[float] = None,
+) -> None:
     """打印当前检查项及判断标准"""
     console.print("\n[dim]─── 检查标准 ───[/dim]")
     criteria = {
@@ -313,9 +373,21 @@ def _print_criteria(check_set: set, tolerance: int, static_min: int, ratios: dic
     for key in sorted(check_set):
         if key in criteria:
             console.print(f"  [dim]{criteria[key]}[/dim]")
+    if timestamp_column:
+        ms_text = f", 固定容差±{timestamp_ms:g}ms" if timestamp_ms is not None else ""
+        console.print(
+            f"  [dim]时间戳间隔: 列 {timestamp_column}, "
+            f"相邻间隔偏差≤±{timestamp_ratio:g}%{ms_text} "
+            f"(异常比例≤{ratios.get('timestamp', 1.0):g}% 为Warning)[/dim]"
+        )
 
 
-def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> None:
+def _save_report_csv(
+    reports: list,
+    acc_reports: dict,
+    output_path: Path,
+    base_dir: Optional[Path] = None,
+) -> None:
     """将全部检查结果保存到统一CSV文件"""
     header = ["文件名", "芯片", "总异常(结果)"]
 
@@ -363,6 +435,7 @@ def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> Non
             ]
         )
 
+    header.append("文件相对路径")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -405,6 +478,106 @@ def _save_report_csv(reports: list, acc_reports: dict, output_path: Path) -> Non
                 else:
                     row.extend(["-"] * 27)
 
+            row.append(_relative_report_path(report.file_path, base_dir))
             writer.writerow(row)
 
     console.print(f"[green]检查报告已保存: {output_path}[/green]")
+
+
+def _relative_report_path(file_path: Path, base_dir: Optional[Path]) -> str:
+    """生成写入报告的相对文件路径。"""
+    if base_dir is None:
+        return file_path.name
+    try:
+        return file_path.resolve().relative_to(base_dir.resolve()).as_posix()
+    except ValueError:
+        return file_path.name
+
+
+def _sort_report_files(report_path: Path, output_dir: Path) -> Dict[str, int]:
+    """根据检查报告移动文件到正常/异常目录，并生成列表CSV。"""
+    rows = _read_report_rows(report_path)
+    if not rows:
+        raise click.ClickException(f"检查报告为空: {report_path}")
+
+    fieldnames = rows[0].keys()
+    required = {"文件名", "总异常(结果)", "文件相对路径"}
+    missing = required - set(fieldnames)
+    if missing:
+        raise click.ClickException(
+            "检查报告缺少必要列: "
+            + ", ".join(sorted(missing))
+            + "，请重新运行 check 生成带文件相对路径的新报告"
+        )
+
+    normal_records: List[List[str]] = []
+    abnormal_records: List[List[str]] = []
+    stats = {"normal": 0, "abnormal": 0, "skipped": 0}
+    report_dir = report_path.parent
+
+    for row in rows:
+        status = row.get("总异常(结果)", "").strip().upper()
+        rel_path_text = row.get("文件相对路径", "").strip()
+        file_name = row.get("文件名", "").strip()
+        if not rel_path_text:
+            record = [file_name, rel_path_text, "", "跳过", "文件相对路径为空"]
+            _append_sort_record(status, normal_records, abnormal_records, record)
+            stats["skipped"] += 1
+            continue
+
+        rel_path = Path(rel_path_text)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            record = [file_name, rel_path_text, "", "跳过", "文件相对路径非法"]
+            _append_sort_record(status, normal_records, abnormal_records, record)
+            stats["skipped"] += 1
+            continue
+
+        category = "normal" if status == "PASS" else "abnormal"
+        target_dir = output_dir / category
+        src_path = report_dir / rel_path
+        dst_path = target_dir / rel_path
+        records = normal_records if category == "normal" else abnormal_records
+
+        if not src_path.exists():
+            records.append([file_name, rel_path_text, str(dst_path), "跳过", "源文件不存在"])
+            stats["skipped"] += 1
+            continue
+        if dst_path.exists():
+            records.append([file_name, rel_path_text, str(dst_path), "跳过", "目标文件已存在"])
+            stats["skipped"] += 1
+            continue
+
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src_path), str(dst_path))
+        records.append([file_name, rel_path_text, str(dst_path), "已移动", ""])
+        stats[category] += 1
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _write_sort_list(output_dir / "normal_files.csv", normal_records)
+    _write_sort_list(output_dir / "abnormal_files.csv", abnormal_records)
+    return stats
+
+
+def _read_report_rows(report_path: Path) -> List[Dict[str, str]]:
+    with open(report_path, newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def _append_sort_record(
+    status: str,
+    normal_records: List[List[str]],
+    abnormal_records: List[List[str]],
+    record: List[str],
+) -> None:
+    if status == "PASS":
+        normal_records.append(record)
+    else:
+        abnormal_records.append(record)
+
+
+def _write_sort_list(path: Path, records: List[List[str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["文件名", "文件相对路径", "目标路径", "状态", "原因"])
+        writer.writerows(records)

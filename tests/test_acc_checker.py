@@ -351,10 +351,84 @@ class TestCheckResultStatus:
         report.results.append(result)
         output = tmp_path / "check_report.csv"
 
-        _save_report_csv([report], {}, output)
+        _save_report_csv([report], {}, output, base_dir=tmp_path)
 
         with open(output, newline="", encoding="utf-8-sig") as f:
             rows = list(csv.reader(f))
 
         assert rows[0][:5] == ["文件名", "芯片", "总异常(结果)", "帧完整性(结果)", "帧完整性(说明)"]
         assert rows[1][:5] == ["data.csv", "gh3220", "PASS", "WARNING", "丢包 1 帧"]
+        assert rows[0][-1] == "文件相对路径"
+        assert rows[1][-1] == "data.csv"
+
+
+class TestTimestampInterval:
+    """测试时间戳间隔稳定性检查。"""
+
+    def test_numeric_timestamp_interval_pass(self, checker):
+        df = pd.DataFrame({"timestamp": [0, 40, 80, 120, 160]})
+        result = checker.check_timestamp_interval(df, "timestamp", ratio_tolerance=0.2)
+
+        assert result.status == "PASS"
+        assert result.passed
+        assert "基准间隔 40" in result.summary
+
+    def test_timestamp_ratio_uses_percent_number(self, checker):
+        df = pd.DataFrame({"timestamp": [0, 40, 80, 120.2, 160.2]})
+        result = checker.check_timestamp_interval(
+            df,
+            "timestamp",
+            ratio_tolerance=0.2,
+            threshold_ratio=0.1,
+        )
+
+        assert result.status == "FAIL"
+        assert not result.passed
+        assert result.abnormal_ratio == pytest.approx(25.0)
+
+    def test_timestamp_ms_tolerance_also_applies(self, checker):
+        df = pd.DataFrame({"timestamp": [0, 40, 80, 122, 162]})
+        result = checker.check_timestamp_interval(
+            df,
+            "timestamp",
+            ratio_tolerance=20,
+            ms_tolerance=1,
+            threshold_ratio=0.1,
+        )
+
+        assert result.status == "FAIL"
+        assert "异常间隔 1/4" in result.summary
+
+    def test_string_timestamp_interval_pass(self, checker):
+        df = pd.DataFrame(
+            {"timestamp": ["11:17:20.000", "11:17:20.040", "11:17:20.080", "11:17:20.120"]}
+        )
+        result = checker.check_timestamp_interval(df, "timestamp", ratio_tolerance=1)
+
+        assert result.status == "PASS"
+        assert result.passed
+
+    def test_timestamp_missing_column_fail(self, checker):
+        result = checker.check_timestamp_interval(pd.DataFrame({"time": [1, 2, 3]}), "timestamp")
+
+        assert result.status == "FAIL"
+        assert not result.passed
+        assert "未找到时间戳列" in result.summary
+
+    def test_timestamp_parse_fail(self, checker):
+        result = checker.check_timestamp_interval(
+            pd.DataFrame({"timestamp": ["a", "b", "c"]}),
+            "timestamp",
+        )
+
+        assert result.status == "FAIL"
+        assert "无法解析" in result.summary
+
+    def test_timestamp_backward_fail(self, checker):
+        result = checker.check_timestamp_interval(
+            pd.DataFrame({"timestamp": [0, 40, 30, 70]}),
+            "timestamp",
+        )
+
+        assert result.status == "FAIL"
+        assert "时间戳倒退" in result.summary
