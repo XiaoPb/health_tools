@@ -21,6 +21,52 @@ ghealth_tool cfg [options]
 | `--offline-default` | 设置芯片默认版本（格式: `chip=version`） |
 | `--offline-scan` | 重新扫描离线工具版本 |
 
+## 离线命令参数模板
+
+`offline_versions` 只记录扫描到的算法版本和默认版本。`offline_cmd` 用来为特定
+`芯片 + 算法版本` 指定传给 `TEE_Algorithm.exe` 的参数顺序和数量。
+
+`cmd_arg` 写什么参数，最终命令就传什么参数；未写入 `cmd_arg` 的变量不会加入命令。
+`cmd_default` 给 `start_idx`、`end_idx`、`datatype` 等非列索引变量提供默认值。
+`accx`、`ppg_ch0`、`polor` 等列号不写在 `config.yaml` 中，会从 `rules/chip/<chip>.yaml`
+自动推导，规则缺失时使用内置默认值。
+
+按当前 GH3036 默认顺序，可配置为：
+
+```yaml
+offline_cmd:
+  gh3036:
+    GH_HR_exc_keep-B6lite_v1.0.1.2:
+      cmd_arg:
+        - start_idx
+        - end_idx
+        - input_dir
+        - output_dir
+        - csv
+        - hba_fs
+        - scene_en
+        - datatype
+        - ch_num
+        - accx
+        - accy
+        - accz
+        - ppg_ch0
+        - ppg_ch1
+        - ppg_ch2
+        - ppg_ch3
+        - polor
+        - mcu_out
+        - comp_out
+      cmd_default:
+        start_idx: 0
+        end_idx: -1
+        datatype: 0
+        scene_en: 0
+```
+
+如果某个版本不需要 `comp_out`，只从 `cmd_arg` 删除 `comp_out` 即可。`polor` 与
+`polar` 都会解析为心率参考列。
+
 ## 配置目录结构
 
 ```

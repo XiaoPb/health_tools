@@ -109,14 +109,15 @@ def _set_offline_path(path_str: str) -> None:
     """设置离线工具路径并自动扫描"""
     from pathlib import Path
 
-    from health_tools.core.offline import save_offline_config, scan_versions
+    from health_tools.core.offline import merge_scanned_versions, save_offline_config, scan_versions
 
     tools_path = Path(path_str)
     if not tools_path.exists():
         console.print(f"[red]错误: 路径不存在: {path_str}[/red]")
         raise SystemExit(1)
 
-    versions = scan_versions(tools_path)
+    config = load_config()
+    versions = merge_scanned_versions(scan_versions(tools_path), config.get("offline_versions", {}))
     save_offline_config(tools_path, versions)
 
     console.print(f"[green]OK[/green] 离线工具路径已设置: {tools_path}")
@@ -175,7 +176,12 @@ def _set_offline_default(default_str: str) -> None:
 
 def _scan_offline_versions() -> None:
     """重新扫描离线工具版本"""
-    from health_tools.core.offline import get_offline_config, save_offline_config, scan_versions
+    from health_tools.core.offline import (
+        get_offline_config,
+        merge_scanned_versions,
+        save_offline_config,
+        scan_versions,
+    )
 
     cfg = get_offline_config()
     if not cfg.tools_path.exists():
@@ -183,7 +189,10 @@ def _scan_offline_versions() -> None:
         console.print("请先设置: ghealth_tool cfg --offline-path <路径>")
         raise SystemExit(1)
 
-    versions = scan_versions(cfg.tools_path)
+    config = load_config()
+    versions = merge_scanned_versions(
+        scan_versions(cfg.tools_path), config.get("offline_versions", {})
+    )
     save_offline_config(cfg.tools_path, versions)
 
     console.print(f"[green]OK[/green] 扫描完成: {cfg.tools_path}")

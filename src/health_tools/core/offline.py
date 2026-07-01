@@ -1,15 +1,17 @@
 """离线跑库核心逻辑"""
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import pandas as pd
 
 from health_tools.config import CONFIG_DIR, load_config, save_config
+from health_tools.rules.loader import RuleLoader
 from health_tools.utils.accuracy import calculate_accuracy, format_metric_name
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
@@ -63,13 +65,15 @@ class OfflineConfig:
 
     tools_path: Path = field(default_factory=lambda: OFFLINE_TOOLS_DIR)
     versions: Dict[str, dict] = field(default_factory=dict)
+    commands: Dict[str, dict] = field(default_factory=dict)
 
 
 def get_offline_config() -> OfflineConfig:
     config = load_config()
     tools_path = Path(config.get("offline_tools_path", str(OFFLINE_TOOLS_DIR)))
     versions = config.get("offline_versions", {})
-    return OfflineConfig(tools_path=tools_path, versions=versions)
+    commands = config.get("offline_cmd", {})
+    return OfflineConfig(tools_path=tools_path, versions=versions, commands=commands)
 
 
 def scan_versions(tools_path: Optional[Path] = None) -> Dict[str, dict]:
@@ -121,6 +125,48 @@ def save_offline_config(tools_path: Path, versions: Dict[str, dict]) -> None:
     save_config(config)
 
 
+def _iter_versions(chip_info: dict) -> List[str]:
+    """展开芯片版本配置中的版本列表。"""
+    versions_data = chip_info.get("versions", {})
+    if isinstance(versions_data, dict):
+        return [v for ver_list in versions_data.values() for v in ver_list]
+    if isinstance(versions_data, list):
+        return versions_data
+    return []
+
+
+def _find_version_category(chip_info: dict, version: str) -> Optional[str]:
+    versions_data = chip_info.get("versions", {})
+    if isinstance(versions_data, dict):
+        for category, ver_list in versions_data.items():
+            if version in ver_list:
+                return category
+    elif isinstance(versions_data, list) and version in versions_data:
+        return "exclusive"
+    return None
+
+
+def merge_scanned_versions(scanned: Dict[str, dict], existing: Dict[str, dict]) -> Dict[str, dict]:
+    """合并扫描结果，保留仍然有效的用户默认版本。"""
+    merged = {}
+    for chip, scanned_info in scanned.items():
+        info = dict(scanned_info)
+        old_info = existing.get(chip, {}) if isinstance(existing, dict) else {}
+        old_default = old_info.get("default") if isinstance(old_info, dict) else None
+
+        if old_default and old_default in _iter_versions(info):
+            info["default"] = old_default
+            old_category = old_info.get("default_category")
+            if old_category and old_default in info.get("versions", {}).get(old_category, []):
+                info["default_category"] = old_category
+            else:
+                found_category = _find_version_category(info, old_default)
+                if found_category:
+                    info["default_category"] = found_category
+        merged[chip] = info
+    return merged
+
+
 def find_exe(chip: str, version: Optional[str] = None) -> Optional[Path]:
     """查找指定芯片和版本的 exe 路径（搜索所有类别目录）"""
     cfg = get_offline_config()
@@ -162,6 +208,98 @@ def list_versions(chip: Optional[str] = None) -> Dict[str, dict]:
     return cfg.versions
 
 
+def _normalize_cmd_arg(value: object) -> str:
+    """规范化 cmd_arg 变量名，支持 {polar} 和 polor 写法。"""
+    key = str(value)
+    if key.startswith("{") and key.endswith("}"):
+        key = key[1:-1]
+    if key == "polor":
+        return "polar"
+    return key
+
+
+def _default_indices_for_chip(chip: str) -> Dict[str, int]:
+    """按芯片名获取内置默认列号。"""
+    if chip in DEFAULT_COLUMN_INDICES:
+        return dict(DEFAULT_COLUMN_INDICES[chip])
+    for prefix, indices in DEFAULT_COLUMN_INDICES.items():
+        if chip.startswith(prefix):
+            return dict(indices)
+    return {}
+
+
+def _match_first_index(column_index: Dict[str, int], patterns: List[str]) -> Optional[int]:
+    """按正则列表返回第一个匹配列号。"""
+    for pattern in patterns:
+        regex = re.compile(pattern, re.IGNORECASE)
+        for name, index in column_index.items():
+            if regex.fullmatch(name):
+                return index
+    return None
+
+
+def _find_ppg_indices(column_index: Dict[str, int]) -> List[int]:
+    """从展开后的列名中推导前4个PPG通道列号。"""
+    ppg_patterns = [
+        r"ipd\d+",
+        r"ch\d+",
+        r"slotcfg\d+rx\d+",
+        r"rawdata\d+",
+    ]
+    for pattern in ppg_patterns:
+        regex = re.compile(pattern, re.IGNORECASE)
+        matched = [
+            (index, name)
+            for name, index in column_index.items()
+            if regex.fullmatch(name)
+            and not re.search(r"agc|led|physics|amb|cap|flag", name, re.IGNORECASE)
+        ]
+        matched.sort()
+        if len(matched) >= 4:
+            return [index for index, _ in matched[:4]]
+    return []
+
+
+def build_column_indices(chip: str) -> Dict[str, int]:
+    """从芯片规则推导离线工具列号，失败时使用内置默认值。"""
+    indices = _default_indices_for_chip(chip)
+    try:
+        rule = RuleLoader.load_chip_rule(chip)
+    except Exception:
+        return indices
+
+    columns = RuleLoader.expand_columns(rule.columns)
+    column_index = {name: pos for pos, name in enumerate(columns)}
+
+    for key, patterns in {
+        "accx": [r"accx", r"acc_x"],
+        "accy": [r"accy", r"acc_y"],
+        "accz": [r"accz", r"acc_z"],
+        "mcu_out": [r"algo_result0"],
+        "comp_out": [r"ref_result1"],
+    }.items():
+        matched = _match_first_index(column_index, patterns)
+        if matched is not None:
+            indices[key] = matched
+
+    ppg_indices = _find_ppg_indices(column_index)
+    for idx, column_pos in enumerate(ppg_indices[:4]):
+        indices[f"ppg_ch{idx}"] = column_pos
+
+    if rule.hr_ref_column:
+        first_ref = next(iter(rule.hr_ref_column.values()))
+        if first_ref is not None:
+            indices["polar"] = int(first_ref) - 1
+    else:
+        matched_ref = _match_first_index(column_index, [r"ref_result0"])
+        if matched_ref is not None:
+            indices["polar"] = matched_ref
+
+    if "polar" in indices:
+        indices["polor"] = indices["polar"]
+    return indices
+
+
 class OfflineRunner:
     """离线跑库执行器"""
 
@@ -169,9 +307,9 @@ class OfflineRunner:
         self,
         chip: str,
         version: Optional[str] = None,
-        hba_fs: int = 25,
-        scene_en: int = 0,
-        ch_num: int = 2,
+        hba_fs: Optional[int] = None,
+        scene_en: Optional[int] = None,
+        ch_num: Optional[int] = None,
         column_indices: Optional[Dict[str, int]] = None,
     ):
         self.chip = chip
@@ -179,18 +317,46 @@ class OfflineRunner:
         self.hba_fs = hba_fs
         self.scene_en = scene_en
         self.ch_num = ch_num
-        self.column_indices = column_indices or DEFAULT_COLUMN_INDICES.get(chip, {})
+        self.column_indices = build_column_indices(chip)
+        if column_indices:
+            self.column_indices.update(column_indices)
 
         self.exe_path = find_exe(chip, version)
         if self.exe_path:
             self.tool_dir = self.exe_path.parent
+            self.resolved_version = self.exe_path.parent.name
         else:
             self.tool_dir = None
+            self.resolved_version = version
+
+    def _get_cmd_config(self) -> dict:
+        """获取当前芯片和算法版本的命令模板配置。"""
+        if not self.resolved_version:
+            return {}
+        cfg = get_offline_config()
+        chip_cmd = cfg.commands.get(self.chip, {})
+        if not isinstance(chip_cmd, dict):
+            return {}
+        cmd_cfg = chip_cmd.get(self.resolved_version, {})
+        return cmd_cfg if isinstance(cmd_cfg, dict) else {}
 
     def _build_command(self, input_dir: str, output_dir: str) -> str:
         """构建 exe 命令行"""
         exe = str(self.exe_path)
+        cmd_cfg = self._get_cmd_config()
+        cmd_arg = cmd_cfg.get("cmd_arg", [])
+        if isinstance(cmd_arg, list) and cmd_arg:
+            args = [exe]
+            values = self._build_template_values(input_dir, output_dir, cmd_cfg)
+            for item in cmd_arg:
+                key = _normalize_cmd_arg(item)
+                args.append(str(values.get(key, item)))
+            return subprocess.list2cmdline(args)
+
         idx = self.column_indices
+        hba_fs = self.hba_fs if self.hba_fs is not None else 25
+        scene_en = self.scene_en if self.scene_en is not None else 0
+        ch_num = self.ch_num if self.ch_num is not None else 2
 
         if self.chip.startswith("gh3036"):
             debug_para = (
@@ -202,14 +368,42 @@ class OfflineRunner:
             )
             cmd = (
                 f'"{exe}" 0 -1 "{input_dir}" "{output_dir}" csv '
-                f"{self.hba_fs} {self.scene_en} {self.ch_num} {debug_para}"
+                f"{hba_fs} {scene_en} {ch_num} {debug_para}"
             )
         else:
-            cmd = (
-                f'"{exe}" 0 -1 "{input_dir}" "{output_dir}" csv '
-                f"0 {self.scene_en} {self.hba_fs} 0"
-            )
+            cmd = f'"{exe}" 0 -1 "{input_dir}" "{output_dir}" csv ' f"0 {scene_en} {hba_fs} 0"
         return cmd
+
+    def _build_template_values(
+        self, input_dir: str, output_dir: str, cmd_cfg: dict
+    ) -> Dict[str, Union[int, str]]:
+        """构建 cmd_arg 变量表。"""
+        defaults = cmd_cfg.get("cmd_default", {})
+        if not isinstance(defaults, dict):
+            defaults = {}
+
+        values: Dict[str, Union[int, str]] = dict(defaults)
+        values.update(
+            {
+                "input_dir": input_dir,
+                "output_dir": output_dir,
+            }
+        )
+        values["hba_fs"] = self.hba_fs if self.hba_fs is not None else defaults.get("hba_fs", 25)
+        values["scene_en"] = (
+            self.scene_en if self.scene_en is not None else defaults.get("scene_en", 0)
+        )
+        values["ch_num"] = self.ch_num if self.ch_num is not None else defaults.get("ch_num", 2)
+        values.setdefault("csv", "csv")
+        values.setdefault("start_idx", 0)
+        values.setdefault("end_idx", -1)
+        values.setdefault("datatype", 0)
+        values.update(self.column_indices)
+        if "polar" in values:
+            values["polor"] = values["polar"]
+        elif "polor" in values:
+            values["polar"] = values["polor"]
+        return values
 
     def run(self, input_dir: Path, output_dir: Path, timeout: int = 300) -> bool:
         """执行离线跑库

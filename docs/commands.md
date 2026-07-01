@@ -485,6 +485,47 @@ ghealth_tool cfg --offline-scan
 ghealth_tool cfg --offline-default gh3220=V4300_GH_HR_exc_pv_v2.0.3.0
 ```
 
+### 算法参数模板
+
+不同算法版本的 `TEE_Algorithm.exe` 参数数量和顺序可能不同，可在
+`C:\Users\lzh17\.ghealth_tools\config.yaml` 中按 `芯片 + 算法版本` 配置：
+
+```yaml
+offline_cmd:
+  gh3036:
+    GH_HR_exc_keep-B6lite_v1.0.1.2:
+      cmd_arg:
+        - start_idx
+        - end_idx
+        - input_dir
+        - output_dir
+        - csv
+        - hba_fs
+        - scene_en
+        - datatype
+        - ch_num
+        - accx
+        - accy
+        - accz
+        - ppg_ch0
+        - ppg_ch1
+        - ppg_ch2
+        - ppg_ch3
+        - polor
+        - mcu_out
+        - comp_out
+      cmd_default:
+        start_idx: 0
+        end_idx: -1
+        datatype: 0
+        scene_en: 0
+```
+
+`cmd_arg` 决定最终传参顺序和数量，删除某个变量后该参数不会传入。列号变量
+`accx`、`ppg_ch0`、`polor` 等由 `rules/chip/<chip>.yaml` 自动推导，不需要写具体索引值。
+未配置 `offline_cmd` 的版本继续使用内置默认命令格式。执行 `cfg --offline-scan` 会保留
+仍然有效的默认版本和手写的 `offline_cmd` 配置。
+
 ### 示例
 
 ```bash

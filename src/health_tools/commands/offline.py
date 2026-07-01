@@ -25,9 +25,9 @@ console = Console()
 @click.option("-o", "--output", "output_path", type=click.Path(), help="输出结果目录")
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)")
 @click.option("--version", "ver", help="算法版本（覆盖默认版本）")
-@click.option("--hba-fs", type=int, default=25, help="采样率 (默认25)")
-@click.option("--scene-en", type=int, default=0, help="场景适配 0=关 1=开")
-@click.option("--ch-num", type=int, default=2, help="有效PPG通道数 (默认2)")
+@click.option("--hba-fs", type=int, help="采样率 (默认25)")
+@click.option("--scene-en", type=int, help="场景适配 0=关 1=开")
+@click.option("--ch-num", type=int, help="有效PPG通道数 (默认2)")
 @click.option("--ref-col", type=int, help="源CSV中金标列索引(1-based，覆盖芯片配置)")
 @click.option("--no-accuracy", is_flag=True, help="跳过准确度统计")
 @click.option("--no-plot", is_flag=True, help="跳过PSD时频图绘制")
@@ -40,9 +40,9 @@ def offline_cmd(
     output_path: Optional[str],
     chip_name: Optional[str],
     ver: Optional[str],
-    hba_fs: int,
-    scene_en: int,
-    ch_num: int,
+    hba_fs: Optional[int],
+    scene_en: Optional[int],
+    ch_num: Optional[int],
     ref_col: Optional[int],
     no_accuracy: bool,
     no_plot: bool,
@@ -82,10 +82,7 @@ def offline_cmd(
 
         column_indices = None
         if ref_col is not None:
-            from health_tools.core.offline import DEFAULT_COLUMN_INDICES
-
-            column_indices = dict(DEFAULT_COLUMN_INDICES.get(chip_name, {}))
-            column_indices["polar"] = ref_col
+            column_indices = {"polar": ref_col, "polor": ref_col}
 
         runner = OfflineRunner(
             chip=chip_name,
@@ -101,7 +98,12 @@ def offline_cmd(
         console.print(f"  版本: {exe_path.parent.name}")
         console.print(f"  输入: {input_dir}")
         console.print(f"  输出: {output_dir}")
-        console.print(f"  参数: hba_fs={hba_fs}, scene_en={scene_en}, ch_num={ch_num}")
+        console.print(
+            "  参数: "
+            f"hba_fs={hba_fs if hba_fs is not None else '默认'}, "
+            f"scene_en={scene_en if scene_en is not None else '默认'}, "
+            f"ch_num={ch_num if ch_num is not None else '默认'}"
+        )
         if ref_col is not None:
             console.print(f"  金标列: {ref_col}")
         console.print("")
