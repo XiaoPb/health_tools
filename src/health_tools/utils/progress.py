@@ -4,7 +4,7 @@ from collections.abc import Iterable, Iterator
 from typing import Optional, TypeVar
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress
 
 T = TypeVar("T")
 
@@ -21,9 +21,5 @@ def progress_track(
         yield from items
         return
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
+    with Progress(console=console) as progress:
         yield from progress.track(items, description=description, total=total)

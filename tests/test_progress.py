@@ -5,6 +5,34 @@ from click.testing import CliRunner
 from health_tools.cli import main
 
 
+def test_progress_track_uses_default_rich_progress_columns(monkeypatch):
+    import health_tools.utils.progress as progress_module
+
+    calls = []
+
+    class FakeProgress:
+        def __init__(self, *args, **kwargs):
+            calls.append({"args": args, "kwargs": kwargs})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def track(self, items, description, total=None):
+            calls.append({"description": description, "total": total})
+            yield from items
+
+    monkeypatch.setattr(progress_module, "Progress", FakeProgress)
+
+    assert list(progress_module.progress_track([1, 2], "转换CSV...", console="console")) == [1, 2]
+    assert calls == [
+        {"args": (), "kwargs": {"console": "console"}},
+        {"description": "转换CSV...", "total": None},
+    ]
+
+
 def test_progress_track_can_be_disabled():
     from health_tools.utils.progress import progress_track
 
