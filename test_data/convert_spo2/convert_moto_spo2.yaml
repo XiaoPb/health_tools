@@ -38,25 +38,26 @@ column_mapping:
   
 
 extra_source:
-  description: 血氧金标CSV；不依赖文件名，通过必备列识别，并通过时间列对齐到原始数据time列
-  pattern: '*.csv'
-  required_columns:
-    - 时间
-  any_required_columns:
-    - SpO2
-    - O2 饱和度
-  csv:
-    header_row: 1
-    data_start_row: 2
-    delimiter: ','
-  align:
-    left_on: time
-    right_on: 时间
-    right_extract: '(\d{2}:\d{2}:\d{2})'
-  column_mapping:
-    SpO2: ref_spo2
-    O2 饱和度: ref_spo2
-    ref_spo2: ref_spo2
+  - name: spo2_ref
+    description: 血氧金标CSV；不依赖文件名，通过必备列识别，并通过时间列对齐到原始数据time列
+    pattern: '*.csv'
+    required_columns:
+      - 时间
+    any_required_columns:
+      - SpO2
+      - O2 饱和度
+    csv:
+      header_row: 1
+      data_start_row: 2
+      delimiter: ','
+    align:
+      left_on: time
+      right_on: 时间
+      right_extract: '(\d{2}:\d{2}:\d{2})'
+    column_mapping:
+      SpO2: ref_spo2
+      O2 饱和度: ref_spo2
+      ref_spo2: ref_spo2
 
 forward_fill: 
   - spo2

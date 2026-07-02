@@ -162,26 +162,39 @@ class RuleValidator:
 
         extra_source = rule.get("extra_source")
         if extra_source is not None:
-            if not isinstance(extra_source, dict):
-                errors.append("'extra_source' 必须是字典")
-            else:
-                if "column_mapping" in extra_source and not isinstance(
-                    extra_source.get("column_mapping"), dict
-                ):
-                    errors.append("'extra_source.column_mapping' 必须是字典")
-                for key in ("required_columns", "any_required_columns"):
-                    if key in extra_source and not isinstance(extra_source.get(key), list):
-                        errors.append(f"'extra_source.{key}' 必须是列表")
-                align = extra_source.get("align")
-                if align is not None:
-                    if not isinstance(align, dict):
-                        errors.append("'extra_source.align' 必须是字典")
+            if isinstance(extra_source, list):
+                for index, item in enumerate(extra_source):
+                    if not isinstance(item, dict):
+                        errors.append(f"'extra_source[{index}]' 必须是字典")
                     else:
-                        if not align.get("left_on") or not align.get("right_on"):
-                            errors.append(
-                                "'extra_source.align' 需要同时提供 'left_on' 和 'right_on'"
+                        errors.extend(
+                            RuleValidator._validate_extra_source_config(
+                                item, f"extra_source[{index}]"
                             )
+                        )
+            elif isinstance(extra_source, dict):
+                errors.extend(
+                    RuleValidator._validate_extra_source_config(extra_source, "extra_source")
+                )
+            else:
+                errors.append("'extra_source' 必须是字典或列表")
 
+        return errors
+
+    @staticmethod
+    def _validate_extra_source_config(config: dict, prefix: str) -> List[str]:
+        errors = []
+        if "column_mapping" in config and not isinstance(config.get("column_mapping"), dict):
+            errors.append(f"'{prefix}.column_mapping' 必须是字典")
+        for key in ("required_columns", "any_required_columns"):
+            if key in config and not isinstance(config.get(key), list):
+                errors.append(f"'{prefix}.{key}' 必须是列表")
+        align = config.get("align")
+        if align is not None:
+            if not isinstance(align, dict):
+                errors.append(f"'{prefix}.align' 必须是字典")
+            elif not align.get("left_on") or not align.get("right_on"):
+                errors.append(f"'{prefix}.align' 需要同时提供 'left_on' 和 'right_on'")
         return errors
 
     @staticmethod

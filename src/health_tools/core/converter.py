@@ -70,10 +70,33 @@ class DataConverter:
     def _merge_extra_source(
         self, df: pd.DataFrame, source_file: Optional[Path] = None
     ) -> pd.DataFrame:
-        config = self.rule.extra_source or {}
-        if not config or source_file is None:
+        configs = self._extra_source_configs()
+        if not configs or source_file is None:
             return df
 
+        merged = df
+        for config in configs:
+            merged = self._merge_one_extra_source(merged, source_file, config)
+        return merged
+
+    def _extra_source_configs(self) -> List[Dict[str, Any]]:
+        config = self.rule.extra_source or {}
+        if isinstance(config, list):
+            configs = []
+            for item in config:
+                if isinstance(item, dict):
+                    configs.append(item)
+                else:
+                    logger.warning("extra_source 列表项必须是字典，已跳过: %s", item)
+            return configs
+        if isinstance(config, dict):
+            return [config]
+        logger.warning("extra_source 必须是字典或列表，已跳过")
+        return []
+
+    def _merge_one_extra_source(
+        self, df: pd.DataFrame, source_file: Path, config: Dict[str, Any]
+    ) -> pd.DataFrame:
         extra_file = self._resolve_extra_source_file(source_file, config)
         if extra_file is None:
             return df
