@@ -5,10 +5,6 @@ import click
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from health_tools.core.parser import LogParser
-from health_tools.rules.loader import RuleLoader
-from health_tools.utils.csv_handler import write_csv
-
 console = Console()
 
 
@@ -36,6 +32,8 @@ def parse_cmd(
     dry_run: bool,
 ) -> None:
     """log解析转CSV命令"""
+    from health_tools.rules.loader import RuleLoader
+
     chip_columns = None
     chip_rule = None
     if rule_file:
@@ -122,6 +120,9 @@ def _parse_file(
     encoding: str,
     verbose: bool,
 ) -> None:
+    from health_tools.core.parser import LogParser
+    from health_tools.utils.csv_handler import write_csv
+
     parser = LogParser(rule, chip_columns=chip_columns)
     try:
         df = parser.parse_file(input_file, encoding)
@@ -149,6 +150,9 @@ def _parse_file_multi(
     encoding: str,
     verbose: bool,
 ) -> None:
+    from health_tools.core.parser import LogParser
+    from health_tools.utils.csv_handler import write_csv
+
     parser = LogParser(rule, chip_columns=chip_columns)
     try:
         results = parser.parse_file_multi(input_file, encoding)

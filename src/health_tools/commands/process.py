@@ -4,9 +4,6 @@ from typing import Optional
 import click
 from rich.console import Console
 
-from health_tools.core.processor import BatchProcessor
-from health_tools.rules.loader import RuleLoader
-
 console = Console()
 
 
@@ -34,6 +31,9 @@ def process_cmd(
     verbose: bool,
 ) -> None:
     """批量处理命令"""
+    from health_tools.core.processor import BatchProcessor
+    from health_tools.rules.loader import RuleLoader
+
     chip_rule = None
     if chip_name:
         chip_rule = RuleLoader.load_chip_rule(chip_name)

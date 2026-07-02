@@ -12,6 +12,14 @@ def test_cli_help():
     assert "ghealth_tool" in result.output or "Usage" in result.output
 
 
+def test_cli_help_lists_aliases_without_loading_commands():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--help"])
+    assert result.exit_code == 0
+    assert "parse (p)" in result.output
+    assert "convert (cv)" in result.output
+
+
 def test_cli_version():
     runner = CliRunner()
     result = runner.invoke(main, ["--version"])

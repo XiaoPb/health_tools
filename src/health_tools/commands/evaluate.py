@@ -4,8 +4,6 @@ from pathlib import Path
 
 import click
 
-from health_tools.rules.loader import RuleLoader
-
 
 @click.command("evaluate")
 @click.option(
@@ -46,6 +44,7 @@ def evaluate_cmd(
 ):
     """批量准确度评估（心率/血氧）"""
     from health_tools.core.evaluator import BatchEvaluator
+    from health_tools.rules.loader import RuleLoader
 
     if not rule_file:
         rule_file = f"evaluate_{eval_type}.yaml"

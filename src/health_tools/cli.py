@@ -33,6 +33,23 @@ COMMAND_MAP = {
     "ui": ("health_tools.commands.ui", "ui_cmd"),
 }
 
+COMMAND_HELP = {
+    "parse": "log解析转CSV命令",
+    "plot": "数据绘图命令",
+    "classify": "数据分类命令",
+    "convert": "CSV格式转换",
+    "info": "查看规则和文件信息",
+    "validate": "验证规则文件",
+    "split": "数据分割命令",
+    "process": "批量处理命令",
+    "factory": "工厂测试数据分析",
+    "config": "配置管理",
+    "evaluate": "评估指标命令",
+    "offline": "离线评估流程",
+    "check": "数据质量检查",
+    "ui": "启动图形界面",
+}
+
 PRIMARY_COMMANDS = [
     "parse",
     "plot",
@@ -75,10 +92,7 @@ class LazyGroup(click.Group):
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         commands = []
         for subcommand in self.list_commands(ctx):
-            cmd = self.get_command(ctx, subcommand)
-            if cmd is None:
-                continue
-            help_text = cmd.get_short_help_str(limit=formatter.width)
+            help_text = COMMAND_HELP.get(subcommand, "")
             aliases = ALIASES.get(subcommand, [])
             name_col = f"{subcommand} ({', '.join(aliases)})" if aliases else subcommand
             commands.append((name_col, help_text))

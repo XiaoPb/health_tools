@@ -4,9 +4,6 @@ from typing import Optional
 import click
 from rich.console import Console
 
-from health_tools.core.splitter import DataSplitter
-from health_tools.rules.loader import RuleLoader
-
 console = Console()
 
 
@@ -36,6 +33,9 @@ def split_cmd(
     verbose: bool,
 ) -> None:
     """数据分割命令"""
+    from health_tools.core.splitter import DataSplitter
+    from health_tools.rules.loader import RuleLoader
+
     chip_rule = None
     if chip_name:
         chip_rule = RuleLoader.load_chip_rule(chip_name)

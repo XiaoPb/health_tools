@@ -14,7 +14,6 @@ from health_tools.config import (
     load_config,
     save_config,
 )
-from health_tools.core.offline import get_category_label
 
 console = Console()
 
@@ -177,6 +176,7 @@ def _set_offline_default(default_str: str) -> None:
 def _scan_offline_versions() -> None:
     """重新扫描离线工具版本"""
     from health_tools.core.offline import (
+        get_category_label,
         get_offline_config,
         merge_scanned_versions,
         save_offline_config,

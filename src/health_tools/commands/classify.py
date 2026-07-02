@@ -7,11 +7,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from health_tools.core.classifier import DataClassifier
-from health_tools.rules.loader import RuleLoader
-from health_tools.utils.accuracy import AccuracyCalculator
-from health_tools.utils.csv_handler import CSVHandler
-
 console = Console()
 
 
@@ -55,6 +50,11 @@ def classify_cmd(
     verbose: bool,
 ) -> None:
     """根据规则对数据进行分类保存"""
+    from health_tools.core.classifier import DataClassifier
+    from health_tools.rules.loader import RuleLoader
+    from health_tools.utils.accuracy import AccuracyCalculator
+    from health_tools.utils.csv_handler import CSVHandler
+
     extend_list = list(extend_files) if extend_files else None
     rule = RuleLoader.load_classify_rule(rule_file, extend_list)
 

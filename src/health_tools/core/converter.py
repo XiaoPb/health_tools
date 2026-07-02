@@ -218,27 +218,15 @@ class DataConverter:
             resolved = self._resolve_column_name(col, df)
             if resolved is None:
                 continue
-            values = df[resolved].to_numpy(dtype=np.int64, copy=True)
-            first_nonzero = None
-            for i in range(len(values)):
-                v = values[i]
-                if isinstance(v, np.ndarray):
-                    v = v.item() if v.size == 1 else 0
-                if v != 0:
-                    first_nonzero = i
-                    break
-            if first_nonzero is None:
+            series = pd.to_numeric(df[resolved], errors="coerce")
+            nonzero_mask = series.ne(0) & series.notna()
+            if not bool(nonzero_mask.any()):
                 continue
-            last_val = values[first_nonzero]
-            for i in range(first_nonzero + 1, len(values)):
-                cur = values[i]
-                if isinstance(cur, np.ndarray):
-                    cur = cur.item() if cur.size == 1 else 0
-                if cur == 0:
-                    values[i] = last_val
-                else:
-                    last_val = cur
-            df[resolved] = values
+            filled = series.where(nonzero_mask).ffill().fillna(series)
+            try:
+                df[resolved] = filled.astype(df[resolved].dtype, copy=False)
+            except (TypeError, ValueError):
+                df[resolved] = filled
         return df
 
     def _compute_column(self, formula: str, df: pd.DataFrame) -> pd.Series:

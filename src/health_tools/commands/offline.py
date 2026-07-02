@@ -7,16 +7,6 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from health_tools.core.offline import (
-    OfflineRunner,
-    calculate_offline_accuracy,
-    find_exe,
-    get_category_label,
-    get_offline_config,
-    list_versions,
-    reorganize_output,
-)
-
 console = Console()
 
 
@@ -52,6 +42,8 @@ def offline_cmd(
     verbose: bool,
 ) -> None:
     """离线跑库（调用TEE_Algorithm.exe）"""
+    from health_tools.core.offline import OfflineRunner, find_exe, reorganize_output
+
     if do_list:
         _show_versions(chip_name)
         return
@@ -142,6 +134,8 @@ def _run_psd_plot(result_dir: Path, save_dir: Path) -> None:
 
 def _run_accuracy(output_dir: Path) -> None:
     """执行准确度统计"""
+    from health_tools.core.offline import calculate_offline_accuracy
+
     console.print("\n[bold]准确度统计[/bold]")
 
     report_df = calculate_offline_accuracy(output_dir)
@@ -163,6 +157,8 @@ def _run_accuracy(output_dir: Path) -> None:
 
 def _show_versions(chip: Optional[str]) -> None:
     """显示可用版本列表"""
+    from health_tools.core.offline import get_category_label, get_offline_config, list_versions
+
     versions = list_versions(chip)
     if not versions:
         cfg = get_offline_config()

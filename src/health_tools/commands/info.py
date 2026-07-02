@@ -1,12 +1,8 @@
 from pathlib import Path
 
 import click
-import pandas as pd
-import yaml
 from rich.console import Console
 from rich.table import Table
-
-console = Console()
 
 console = Console()
 
@@ -41,6 +37,8 @@ def info_cmd(
 
 
 def _show_rule_info(file_path: Path, show_schema: bool) -> None:
+    import yaml
+
     with open(file_path, "r", encoding="utf-8") as f:
         rule = yaml.safe_load(f)
 
@@ -69,6 +67,8 @@ def _show_rule_info(file_path: Path, show_schema: bool) -> None:
 
 
 def _show_csv_info(file_path: Path, show_stats: bool, show_schema: bool, preview_rows: int) -> None:
+    import pandas as pd
+
     df = pd.read_csv(file_path)
 
     console.print(f"\n[bold cyan]CSV文件: {file_path.name}[/bold cyan]\n")

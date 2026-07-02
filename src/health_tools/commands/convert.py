@@ -1,16 +1,18 @@
+from __future__ import annotations
+
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import click
-import pandas as pd
 import yaml
 from rich.console import Console
 
-from health_tools.core.converter import DataConverter
-from health_tools.models.rules import ChipRule
-from health_tools.rules.loader import RuleLoader
-from health_tools.utils.csv_handler import CSVHandler
+if TYPE_CHECKING:
+    import pandas as pd
+
+    from health_tools.core.converter import DataConverter
+    from health_tools.models.rules import ChipRule
 
 console = Console()
 
@@ -74,6 +76,8 @@ def _match_target_col(target_col: str, source_index: Dict[str, str]) -> Optional
 def _generate_rule_template(
     chip_rule: ChipRule, output_path: Path, source_file: Optional[Path] = None
 ) -> None:
+    import pandas as pd
+
     source_columns: List[str] = []
     if source_file and source_file.is_file():
         try:
@@ -196,6 +200,9 @@ def convert_cmd(
     verbose: bool,
 ) -> None:
     """CSV格式转换"""
+    from health_tools.core.converter import DataConverter
+    from health_tools.rules.loader import RuleLoader
+
     if init_rule:
         if not chip_name:
             console.print("[red]错误: --init-rule 需要指定 --chip 参数[/red]")
@@ -266,7 +273,12 @@ def convert_cmd(
 
 
 def _read_input_csv(file_path: Path, csv_config: Optional[dict]) -> pd.DataFrame:
+    import pandas as pd
+
     if csv_config:
+        from health_tools.models.rules import ChipRule
+        from health_tools.utils.csv_handler import CSVHandler
+
         handler = CSVHandler(ChipRule(chip="input", csv=csv_config, columns=[]))
         try:
             _, df = handler.read(file_path, auto_detect_encoding=False)
@@ -287,6 +299,9 @@ def _read_input_csv(file_path: Path, csv_config: Optional[dict]) -> pd.DataFrame
 def _write_output_csv(df: pd.DataFrame, output_file: Path, csv_config: Optional[dict]) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     if csv_config:
+        from health_tools.models.rules import ChipRule
+        from health_tools.utils.csv_handler import CSVHandler
+
         handler = CSVHandler(ChipRule(chip="output", csv=csv_config, columns=[]))
         info = csv_config.get("info", "")
         handler.write(output_file, df, info=info if info else None)
@@ -326,6 +341,8 @@ def _merge_and_convert(
     filter_name: Optional[str],
     verbose: bool,
 ) -> None:
+    import pandas as pd
+
     files = list(input_dir.rglob("*.csv"))
     if filter_name:
         files = [f for f in files if filter_name in f.name]

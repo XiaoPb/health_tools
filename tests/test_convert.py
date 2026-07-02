@@ -82,6 +82,19 @@ def test_converter_returns_no_columns_when_rule_sources_do_not_match():
     assert list(result.columns) == []
 
 
+def test_forward_fill_uses_previous_nonzero_value():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"frame": "FRAME_ID"})
+    rule.forward_fill = ["FRAME_ID"]
+    converter = DataConverter(rule)
+    df = pd.DataFrame({"frame": [0, 10, 0, 0, 13]})
+
+    result = converter.convert(df)
+
+    assert list(result["FRAME_ID"]) == [0, 10, 10, 10, 13]
+
+
 def test_convert_file_skips_output_when_rule_sources_do_not_match(tmp_path: Path):
     from health_tools.commands.convert import _convert_file
 

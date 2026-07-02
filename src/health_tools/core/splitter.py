@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import List, Optional, Union
 
+import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import ChipRule
@@ -30,8 +31,7 @@ def split_by_column_value(
     else:
         col_data = df[column]
 
-    split_positions = col_data[col_data == value].index
-    positional_indices = [df.index.get_loc(idx) for idx in split_positions]
+    positional_indices = np.flatnonzero(col_data.to_numpy() == value).tolist()
 
     if not positional_indices:
         return [df]
@@ -105,22 +105,16 @@ def split_by_time(
     if times.isna().all():
         return [df]
 
-    dfs = []
-    start_time = times.iloc[0]
-    current_df_indices = [0]
+    elapsed = (times - times.iloc[0]).dt.total_seconds().to_numpy()
+    group_ids = np.floor(elapsed / seconds).astype(np.int64)
+    split_starts = np.flatnonzero(group_ids[1:] != group_ids[:-1]) + 1
+    boundaries = [0] + split_starts.tolist() + [len(df)]
 
-    for i in range(1, len(times)):
-        if (times.iloc[i] - start_time).total_seconds() >= seconds:
-            dfs.append(df.iloc[current_df_indices[0] : i].reset_index(drop=True))
-            current_df_indices = [i]
-            start_time = times.iloc[i]
-        else:
-            current_df_indices.append(i)
-
-    if current_df_indices:
-        dfs.append(df.iloc[current_df_indices[0] :].reset_index(drop=True))
-
-    return dfs
+    return [
+        df.iloc[start:end].reset_index(drop=True)
+        for start, end in zip(boundaries[:-1], boundaries[1:])
+        if start < end
+    ]
 
 
 class DataSplitter:

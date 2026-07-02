@@ -1,17 +1,19 @@
 """产测计算命令（SNR/CTR/Noise）"""
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import click
-import pandas as pd
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from health_tools.core.factory import ChipInfoExtractor, FactoryCalculator
-from health_tools.rules.loader import RuleLoader
-from health_tools.utils.csv_handler import read_csv_df
+if TYPE_CHECKING:
+    import pandas as pd
+
+    from health_tools.core.factory import FactoryCalculator
 
 console = Console()
 
@@ -49,6 +51,8 @@ def _build_calculator(
     adc_offset_override=None,
 ) -> FactoryCalculator:
     """从 chip_rule 构建 FactoryCalculator"""
+    from health_tools.core.factory import FactoryCalculator
+
     fc = chip_rule.factory_config if chip_rule else {}
     calc_sample_rate = sample_rate or fc.get("sample_rate", 100.0)
 
@@ -148,6 +152,12 @@ def factory_cmd(
     verbose: bool,
 ) -> None:
     """计算SNR/CTR/Noise（产测）"""
+    import pandas as pd
+
+    from health_tools.core.factory import ChipInfoExtractor
+    from health_tools.rules.loader import RuleLoader
+    from health_tools.utils.csv_handler import read_csv_df
+
     snr_override = _parse_metric_cfg(snr_cfg)
     ctr_override = _parse_metric_cfg(ctr_cfg)
     noise_override = _parse_metric_cfg(noise_cfg)
