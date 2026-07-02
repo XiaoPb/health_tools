@@ -18,6 +18,9 @@ class DataConverter:
 
     def convert(self, df: pd.DataFrame, source_file: Optional[Path] = None) -> pd.DataFrame:
         df = self._merge_extra_source(df, source_file)
+        if not self.has_matching_columns(df):
+            return pd.DataFrame()
+
         result = pd.DataFrame()
 
         if self.rule.column_mapping:
@@ -50,6 +53,19 @@ class DataConverter:
 
         result = self._ensure_int64(result)
         return result
+
+    def has_matching_columns(self, df: pd.DataFrame) -> bool:
+        expected_columns = self._expected_source_columns()
+        if not expected_columns:
+            return True
+        return any(col in df.columns for col in expected_columns)
+
+    def _expected_source_columns(self) -> List[str]:
+        if self.rule.column_mapping:
+            return list(self.rule.column_mapping.keys())
+        if self.rule.source_columns and self.rule.target_columns:
+            return self.rule.source_columns
+        return []
 
     def _merge_extra_source(
         self, df: pd.DataFrame, source_file: Optional[Path] = None

@@ -305,6 +305,10 @@ def _convert_file(
     try:
         df = _read_input_csv(input_file, input_csv_config)
         result = converter.convert(df, source_file=input_file)
+        if result.empty and len(result.columns) == 0:
+            if verbose:
+                console.print(f"[yellow]SKIP[/yellow] {input_file.name}: 不符合转换规则")
+            return
         _write_output_csv(result, output_file, output_csv_config)
         if verbose:
             console.print(f"[green]OK[/green] {input_file.name} -> {output_file}")
@@ -330,6 +334,10 @@ def _merge_and_convert(
         try:
             df = _read_input_csv(file, input_csv_config)
             df = converter._merge_extra_source(df, file)
+            if not converter.has_matching_columns(df):
+                if verbose:
+                    console.print(f"[yellow]SKIP[/yellow] {file.name}: 不符合转换规则")
+                continue
             dfs.append(df)
             if verbose:
                 console.print(f"[green]OK[/green] 读取: {file.name}")

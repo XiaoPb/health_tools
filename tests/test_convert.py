@@ -67,3 +67,52 @@ def test_convert_with_extra_source_custom_align_columns(tmp_path: Path):
     result = converter.convert(df, source_file=source_file)
 
     assert list(result["REF_RESULT0"]) == [100, 101]
+
+
+def test_converter_returns_no_columns_when_rule_sources_do_not_match():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "value": "VALUE"})
+    converter = DataConverter(rule)
+    df = pd.DataFrame({"foo": [1], "bar": [2]})
+
+    result = converter.convert(df)
+
+    assert result.empty
+    assert list(result.columns) == []
+
+
+def test_convert_file_skips_output_when_rule_sources_do_not_match(tmp_path: Path):
+    from health_tools.commands.convert import _convert_file
+
+    input_file = tmp_path / "invalid.csv"
+    output_file = tmp_path / "out.csv"
+    input_file.write_text("foo,bar\n1,2\n", encoding="utf-8")
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "value": "VALUE"})
+    converter = DataConverter(rule)
+
+    _convert_file(input_file, output_file, converter, None, None, verbose=False)
+
+    assert not output_file.exists()
+
+
+def test_merge_and_convert_skips_files_that_do_not_match_rule(tmp_path: Path):
+    from health_tools.commands.convert import _merge_and_convert
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "valid.csv").write_text("time,value\n1,10\n", encoding="utf-8")
+    (input_dir / "invalid.csv").write_text("foo,bar\n9,99\n", encoding="utf-8")
+    output_file = tmp_path / "merged.csv"
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "value": "VALUE"})
+    converter = DataConverter(rule)
+
+    _merge_and_convert(input_dir, output_file, converter, None, None, None, None, verbose=False)
+
+    import pandas as pd
+
+    result = pd.read_csv(output_file)
+    assert list(result.columns) == ["TimeStamp", "VALUE"]
+    assert result.to_dict("records") == [{"TimeStamp": 1, "VALUE": 10}]
