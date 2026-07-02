@@ -4,8 +4,8 @@ from typing import Dict, List, Optional, Tuple
 
 import click
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+from health_tools.utils.progress import progress_track
 
 console = Console()
 
@@ -105,61 +105,54 @@ def classify_cmd(
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        for file in progress.track(files, description="分类文件..."):
-            try:
-                target_dir = classifier.classify(file, output_path_obj)
-                if target_dir:
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    target_path = target_dir / file.name
+    for file in progress_track(files, "分类文件...", console=console):
+        try:
+            target_dir = classifier.classify(file, output_path_obj)
+            if target_dir:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target_path = target_dir / file.name
+                if mode == "copy":
+                    shutil.copy2(file, target_path)
+                elif mode == "move":
+                    shutil.move(str(file), str(target_path))
+                elif mode == "symlink":
+                    target_path.symlink_to(file.resolve())
+
+                category = str(target_dir.relative_to(output_path_obj))
+                stats[category] = stats.get(category, 0) + 1
+
+                if category not in category_files:
+                    category_files[category] = []
+                category_files[category].append(target_path)
+
+                if accuracy_calc:
+                    try:
+                        info, df = csv_handler.read(target_path)
+                        accuracy_calc.add_file_result(category, df)
+                    except Exception as e:
+                        if verbose:
+                            console.print(f"[yellow]WARN[/yellow] 准确率计算跳过 {file.name}: {e}")
+
+                if verbose:
+                    console.print(f"[green]✓[/green] {file.name} -> {category}")
+            else:
+                if unknown_dir:
+                    unknown_path = output_path_obj / unknown_dir
+                    unknown_path.mkdir(parents=True, exist_ok=True)
                     if mode == "copy":
-                        shutil.copy2(file, target_path)
+                        shutil.copy2(file, unknown_path / file.name)
                     elif mode == "move":
-                        shutil.move(str(file), str(target_path))
-                    elif mode == "symlink":
-                        target_path.symlink_to(file.resolve())
-
-                    category = str(target_dir.relative_to(output_path_obj))
-                    stats[category] = stats.get(category, 0) + 1
-
-                    if category not in category_files:
-                        category_files[category] = []
-                    category_files[category].append(target_path)
-
-                    if accuracy_calc:
-                        try:
-                            info, df = csv_handler.read(target_path)
-                            accuracy_calc.add_file_result(category, df)
-                        except Exception as e:
-                            if verbose:
-                                console.print(
-                                    f"[yellow]WARN[/yellow] 准确率计算跳过 {file.name}: {e}"
-                                )
-
-                    if verbose:
-                        console.print(f"[green]✓[/green] {file.name} -> {category}")
-                else:
-                    if unknown_dir:
-                        unknown_path = output_path_obj / unknown_dir
-                        unknown_path.mkdir(parents=True, exist_ok=True)
-                        if mode == "copy":
-                            shutil.copy2(file, unknown_path / file.name)
-                        elif mode == "move":
-                            shutil.move(str(file), str(unknown_path / file.name))
-                        stats[unknown_dir] = stats.get(unknown_dir, 0) + 1
-                    if verbose:
-                        console.print(f"[yellow]![/yellow] {file.name}: 未匹配")
-                        debug_info = classifier.get_last_values()
-                        if debug_info["filename"]:
-                            console.print(f"  文件名字段: {debug_info['filename']}")
-                        if debug_info["extracted"]:
-                            console.print(f"  提取值: {debug_info['extracted']}")
-            except Exception as e:
-                console.print(f"[red]FAIL[/red] {file.name}: {e}")
+                        shutil.move(str(file), str(unknown_path / file.name))
+                    stats[unknown_dir] = stats.get(unknown_dir, 0) + 1
+                if verbose:
+                    console.print(f"[yellow]![/yellow] {file.name}: 未匹配")
+                    debug_info = classifier.get_last_values()
+                    if debug_info["filename"]:
+                        console.print(f"  文件名字段: {debug_info['filename']}")
+                    if debug_info["extracted"]:
+                        console.print(f"  提取值: {debug_info['extracted']}")
+        except Exception as e:
+            console.print(f"[red]FAIL[/red] {file.name}: {e}")
 
     if report:
         _print_report(stats)

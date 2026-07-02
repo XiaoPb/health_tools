@@ -68,6 +68,7 @@ def split_cmd(
             time_column=time_column,
             filter_name=filter_name,
             verbose=verbose,
+            show_progress=True,
         )
         console.print(f"[green]✓[/green] 生成 {len(output_files)} 个文件")
     else:

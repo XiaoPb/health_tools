@@ -86,7 +86,11 @@ def evaluate_cmd(
     click.echo("")
 
     output_paths = evaluator.evaluate_directory(
-        input_dir, output_dir, filter_name=filter_name, verbose=verbose
+        input_dir,
+        output_dir,
+        filter_name=filter_name,
+        verbose=verbose,
+        show_progress=True,
     )
 
     if output_paths:

@@ -3,7 +3,7 @@ from typing import Optional
 
 import click
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from health_tools.utils.progress import progress_track
 
 console = Console()
 
@@ -90,21 +90,16 @@ def parse_cmd(
         files = list(input_path_obj.rglob("*.log")) + list(input_path_obj.rglob("*.txt"))
         if filter_name:
             files = [f for f in files if filter_name in f.name]
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            for file in progress.track(files, description="解析文件..."):
-                if multi_mode:
-                    _parse_file_multi(
-                        file, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
-                    )
-                else:
-                    out_file = output_path_obj / f"{file.stem}.csv"
-                    _parse_file(
-                        file, out_file, rule, chip_rule, chip_columns, delimiter, encoding, verbose
-                    )
+        for file in progress_track(files, "解析文件...", console=console):
+            if multi_mode:
+                _parse_file_multi(
+                    file, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
+                )
+            else:
+                out_file = output_path_obj / f"{file.stem}.csv"
+                _parse_file(
+                    file, out_file, rule, chip_rule, chip_columns, delimiter, encoding, verbose
+                )
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)

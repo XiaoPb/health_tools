@@ -3,7 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List
 
-from tqdm import tqdm
+from health_tools.utils.progress import progress_track
 
 
 def parallel_process(
@@ -32,10 +32,10 @@ def parallel_process(
         futures = {executor.submit(func, item): i for i, item in enumerate(items)}
 
         if show_progress:
-            futures_iter = tqdm(
+            futures_iter = progress_track(
                 as_completed(futures),
+                desc,
                 total=len(futures),
-                desc=desc,
             )
         else:
             futures_iter = as_completed(futures)
@@ -79,10 +79,10 @@ def parallel_process_with_index(
         futures = {executor.submit(wrapped_func, i, item): i for i, item in enumerate(items)}
 
         if show_progress:
-            futures_iter = tqdm(
+            futures_iter = progress_track(
                 as_completed(futures),
+                desc,
                 total=len(futures),
-                desc=desc,
             )
         else:
             futures_iter = as_completed(futures)
@@ -120,7 +120,7 @@ def batch_process(
     """
     all_results = []
 
-    for i in tqdm(range(0, len(items), batch_size), desc=desc):
+    for i in progress_track(range(0, len(items), batch_size), desc):
         batch = items[i : i + batch_size]
         batch_results = parallel_process(
             func,

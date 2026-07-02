@@ -3,6 +3,7 @@ from typing import List, Optional
 
 import click
 from rich.console import Console
+from health_tools.utils.progress import progress_track
 
 console = Console()
 
@@ -106,7 +107,7 @@ def plot_cmd(
         files = list(input_path_obj.rglob("*.csv"))
         if filter_name:
             files = [f for f in files if filter_name in f.name]
-        for file in files:
+        for file in progress_track(files, "绘制图表...", console=console):
             _plot_file(
                 file,
                 output_path_obj,

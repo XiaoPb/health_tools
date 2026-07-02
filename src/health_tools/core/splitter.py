@@ -8,6 +8,7 @@ import pandas as pd
 
 from health_tools.models.rules import ChipRule
 from health_tools.utils.csv_handler import CSVHandler
+from health_tools.utils.progress import progress_track
 
 
 def split_by_column_value(
@@ -200,6 +201,7 @@ class DataSplitter:
         time_column: Optional[str] = None,
         filter_name: Optional[str] = None,
         verbose: bool = False,
+        show_progress: bool = False,
     ) -> List[Path]:
         """
         分割目录下所有文件
@@ -214,6 +216,7 @@ class DataSplitter:
             time_column: 时间列名
             filter_name: 文件名过滤（仅处理包含此字符串的文件）
             verbose: 详细输出
+            show_progress: 是否显示进度条
 
         Returns:
             输出文件路径列表
@@ -226,7 +229,7 @@ class DataSplitter:
             files = [f for f in files if filter_name in f.name]
         all_output_files = []
 
-        for file in files:
+        for file in progress_track(files, "分割CSV...", enabled=show_progress):
             relative = file.relative_to(input_dir)
             file_output_dir = output_dir / relative.parent
             try:

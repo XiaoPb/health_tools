@@ -13,6 +13,7 @@ import pandas as pd
 from health_tools.config import CONFIG_DIR, load_config, save_config
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.accuracy import calculate_accuracy, format_metric_name
+from health_tools.utils.progress import progress_track
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"
@@ -470,7 +471,7 @@ def _strip_exe_prefix(name: str) -> str:
     return name
 
 
-def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
+def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = False) -> Path:
     """按输入目录的子目录结构重新整理输出文件
 
     将 output_dir 根目录下平铺的结果文件，按源 CSV 所在子目录归类到
@@ -487,7 +488,8 @@ def reorganize_output(input_dir: Path, output_dir: Path) -> Path:
         subdir = str(rel.parent) if len(rel.parts) > 1 else ""
         source_map[csv_file.stem] = subdir
 
-    for result_file in output_dir.iterdir():
+    result_files = list(output_dir.iterdir())
+    for result_file in progress_track(result_files, "整理输出文件...", enabled=show_progress):
         if not result_file.is_file():
             continue
         stem = result_file.stem
@@ -547,6 +549,7 @@ ACCURACY_METHODS = ["mae", "within_5", "within_10", "rmse", "correlation"]
 
 def calculate_offline_accuracy(
     output_dir: Path,
+    show_progress: bool = False,
 ) -> Optional[pd.DataFrame]:
     """计算离线跑库准确度
 
@@ -565,7 +568,7 @@ def calculate_offline_accuracy(
     parser = VshbParser()
     file_rows: List[Dict] = []
 
-    for vshb_path in vshb_files:
+    for vshb_path in progress_track(vshb_files, "统计准确度...", enabled=show_progress):
         df = parser.parse(vshb_path)
         if df.empty:
             continue

@@ -9,6 +9,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from health_tools.utils.progress import progress_track
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -202,7 +203,7 @@ def factory_cmd(
             return
 
         all_dfs = []
-        for f in csv_files:
+        for f in progress_track(csv_files, "计算产测指标...", console=console):
             try:
                 df = read_csv_df(f, chip_rule)
             except Exception:

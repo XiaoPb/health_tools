@@ -108,7 +108,7 @@ def offline_cmd(
             raise SystemExit(1)
 
     console.print("\n[bold]数据整理[/bold]")
-    reorg_dir = reorganize_output(input_dir, output_dir)
+    reorg_dir = reorganize_output(input_dir, output_dir, show_progress=True)
     console.print(f"[green]OK[/green] 已整理到: {reorg_dir}")
 
     if not no_plot:
@@ -125,7 +125,7 @@ def _run_psd_plot(result_dir: Path, save_dir: Path) -> None:
     from health_tools.core.psd_plotter import PsdPlotter
 
     plotter = PsdPlotter()
-    saved = plotter.plot(result_dir, save_dir=save_dir)
+    saved = plotter.plot(result_dir, save_dir=save_dir, show_progress=True)
     if saved:
         console.print(f"[green]OK[/green] 生成 {len(saved)} 张时频图: {save_dir}")
     else:
@@ -138,7 +138,7 @@ def _run_accuracy(output_dir: Path) -> None:
 
     console.print("\n[bold]准确度统计[/bold]")
 
-    report_df = calculate_offline_accuracy(output_dir)
+    report_df = calculate_offline_accuracy(output_dir, show_progress=True)
     if report_df is None or report_df.empty:
         console.print("[yellow]WARN[/yellow] 未找到有效的 .vshb 结果文件")
         return

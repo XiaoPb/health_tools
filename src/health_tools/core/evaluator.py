@@ -9,6 +9,7 @@ import pandas as pd
 from health_tools.models.rules import EvaluateRule
 from health_tools.utils.accuracy import calculate_accuracy
 from health_tools.utils.csv_handler import CSVHandler
+from health_tools.utils.progress import progress_track
 
 
 class PolarAnomalyDetector:
@@ -199,6 +200,7 @@ class BatchEvaluator:
         output_dir: Path,
         filter_name: Optional[str] = None,
         verbose: bool = False,
+        show_progress: bool = False,
     ) -> Dict[str, Path]:
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
@@ -211,7 +213,7 @@ class BatchEvaluator:
             return {}
 
         results: List[Dict[str, Any]] = []
-        for f in csv_files:
+        for f in progress_track(csv_files, "评估CSV...", enabled=show_progress):
             if verbose:
                 print(f"  处理: {f.name}")
             r = self._evaluate_file(f)

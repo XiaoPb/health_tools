@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 from rich.console import Console
+from health_tools.utils.progress import progress_track
 
 plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei"]
 plt.rcParams["axes.unicode_minus"] = False
@@ -58,7 +59,12 @@ class PsdPlotter:
     PSD_EXTENSIONS = ["0.prepsd", ".accxpsd", ".accypsd", ".acczpsd"]
     SUBPLOT_TITLES = ["PPG", "ACCX", "ACCY", "ACCZ"]
 
-    def plot(self, result_dir: Path, save_dir: Optional[Path] = None) -> List[Path]:
+    def plot(
+        self,
+        result_dir: Path,
+        save_dir: Optional[Path] = None,
+        show_progress: bool = False,
+    ) -> List[Path]:
         """生成PSD时频图
 
         Args:
@@ -77,7 +83,10 @@ class PsdPlotter:
             return []
 
         saved: List[Path] = []
-        for idx, vshb_path in enumerate(vshb_files, start=1):
+        for idx, vshb_path in enumerate(
+            progress_track(vshb_files, "生成PSD时频图...", console=console, enabled=show_progress),
+            start=1,
+        ):
             try:
                 fname = vshb_path.stem
                 base_name = fname.replace("_result", "")

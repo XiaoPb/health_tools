@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 import click
 import yaml
 from rich.console import Console
-from rich.progress import track
 from rich.table import Table
+from health_tools.utils.progress import progress_track
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -267,6 +267,7 @@ def convert_cmd(
                 split,
                 filter_name,
                 verbose,
+                show_progress=True,
             )
             _write_extra_source_align_error_report(converter, output_path_obj.parent)
         else:
@@ -275,7 +276,7 @@ def convert_cmd(
             if filter_name:
                 files = [f for f in files if filter_name in f.name]
             results = []
-            for file in track(files, description="转换CSV", console=console):
+            for file in progress_track(files, "转换CSV...", console=console):
                 relative = file.relative_to(input_path_obj)
                 out_file = output_path_obj / relative
                 out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -434,6 +435,7 @@ def _merge_and_convert(
     split: Optional[int],
     filter_name: Optional[str],
     verbose: bool,
+    show_progress: bool = True,
 ) -> None:
     import pandas as pd
 
@@ -442,7 +444,7 @@ def _merge_and_convert(
         files = [f for f in files if filter_name in f.name]
     dfs = []
     results: List[ConvertStatus] = []
-    for file in track(files, description="读取CSV", console=console):
+    for file in progress_track(files, "读取CSV...", console=console, enabled=show_progress):
         try:
             df = _read_input_csv(file, input_csv_config)
             if not converter.has_matching_columns(df):
