@@ -4,6 +4,9 @@ import subprocess
 import sys
 
 import click
+from rich.console import Console
+
+console = Console()
 
 
 @click.command()
@@ -13,7 +16,7 @@ def ui_cmd(port):
     try:
         import streamlit  # noqa: F401
     except ImportError:
-        click.echo("需要安装 UI 依赖: pip install ghealth-tools[ui]")
+        console.print("[red]需要安装 UI 依赖: pip install ghealth-tools[ui][/red]")
         raise SystemExit(1)
 
     from health_tools.ui import get_app_path

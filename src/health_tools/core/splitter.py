@@ -7,8 +7,10 @@ import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import ChipRule
+from health_tools.utils.errors import REASON_EMPTY_FILE
 from health_tools.utils.csv_handler import CSVHandler
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import FileResult, ResultCollector
 
 
 def split_by_column_value(
@@ -124,6 +126,7 @@ class DataSplitter:
     def __init__(self, chip_rule: Optional[ChipRule] = None):
         self.chip_rule = chip_rule
         self.csv_handler = CSVHandler(chip_rule)
+        self.last_collector = ResultCollector()
 
     def split_file(
         self,
@@ -152,6 +155,32 @@ class DataSplitter:
         Returns:
             输出文件路径列表
         """
+        result = self.split_file_result(
+            input_file,
+            output_dir,
+            by_column=by_column,
+            column_value=column_value,
+            by_size=by_size,
+            by_time=by_time,
+            time_column=time_column,
+            verbose=verbose,
+        )
+        if result.status != "OK":
+            return []
+        return [Path(p) for p in result.output.split(";") if p]
+
+    def split_file_result(
+        self,
+        input_file: Union[str, Path],
+        output_dir: Union[str, Path],
+        by_column: Optional[str] = None,
+        column_value: Union[int, float] = 0,
+        by_size: Optional[int] = None,
+        by_time: Optional[float] = None,
+        time_column: Optional[str] = None,
+        verbose: bool = False,
+    ) -> FileResult:
+        """分割单个文件并返回结构化结果。"""
         input_file = Path(input_file)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -159,11 +188,17 @@ class DataSplitter:
         try:
             info, df = self.csv_handler.read(input_file)
         except Exception as e:
-            print(f"  [FAIL] {input_file.name}: {e}")
-            return []
+            collector = ResultCollector()
+            return collector.add_exception(input_file, e, output=output_dir)
 
         if df.empty:
-            return []
+            return FileResult(
+                status="SKIP",
+                input=str(input_file),
+                output=str(output_dir),
+                reason=REASON_EMPTY_FILE,
+                detail="CSV没有数据行",
+            )
 
         if by_size:
             dfs = split_by_size(df, by_size)
@@ -186,9 +221,23 @@ class DataSplitter:
             output_files.append(output_file)
 
             if verbose:
-                print(f"  {output_file.name}: {len(split_df)} rows")
+                pass
 
-        return output_files
+        if not output_files:
+            return FileResult(
+                status="SKIP",
+                input=str(input_file),
+                output=str(output_dir),
+                reason=REASON_EMPTY_FILE,
+                detail="分割后没有可写入的数据",
+            )
+
+        return FileResult(
+            status="OK",
+            input=str(input_file),
+            output=";".join(str(p) for p in output_files),
+            rows=len(df),
+        )
 
     def split_directory(
         self,
@@ -228,23 +277,23 @@ class DataSplitter:
         if filter_name:
             files = [f for f in files if filter_name in f.name]
         all_output_files = []
+        self.last_collector = ResultCollector()
 
         for file in progress_track(files, "分割CSV...", enabled=show_progress):
             relative = file.relative_to(input_dir)
             file_output_dir = output_dir / relative.parent
-            try:
-                output_files = self.split_file(
-                    file,
-                    file_output_dir,
-                    by_column,
-                    column_value,
-                    by_size,
-                    by_time,
-                    time_column,
-                    verbose,
-                )
-                all_output_files.extend(output_files)
-            except Exception as e:
-                print(f"  [FAIL] {file.name}: {e}")
+            result = self.split_file_result(
+                file,
+                file_output_dir,
+                by_column,
+                column_value,
+                by_size,
+                by_time,
+                time_column,
+                verbose,
+            )
+            if result.status == "OK":
+                all_output_files.extend(Path(p) for p in result.output.split(";") if p)
+            self.last_collector.add(result)
 
         return all_output_files

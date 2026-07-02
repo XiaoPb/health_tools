@@ -10,6 +10,7 @@ import click
 from rich.console import Console
 from rich.progress import Progress
 from rich.table import Table
+from health_tools.utils.reporting import ResultCollector, print_summary
 
 console = Console()
 
@@ -181,6 +182,7 @@ def check_cmd(
     reports: List[FileCheckReport] = []
     acc_reports: Dict[Path, AccAnomalyReport] = {}
     ipd_details: Dict[Path, object] = {}
+    collector = ResultCollector()
 
     with Progress(console=console) as progress:
         task = progress.add_task("检查中", total=len(files))
@@ -189,18 +191,28 @@ def check_cmd(
             futures = {executor.submit(_process_file, f): f for f in files}
             for future in as_completed(futures):
                 csv_file = futures[future]
-                report, acc_report, ipd_detail, skip_reason = future.result()
+                try:
+                    report, acc_report, ipd_detail, skip_reason = future.result()
+                except Exception as e:
+                    collector.add_exception(csv_file, e)
+                    progress.advance(task)
+                    continue
                 if report:
                     reports.append(report)
+                    collector.add_ok(csv_file)
                     if acc_report:
                         acc_reports[csv_file] = acc_report
                     if ipd_detail is not None and not ipd_detail.empty:
                         ipd_details[csv_file] = ipd_detail
-                elif verbose and skip_reason:
-                    progress.console.print(
-                        f"[yellow]跳过（{skip_reason}）: {csv_file.name}[/yellow]"
-                    )
+                elif skip_reason:
+                    collector.add_skip(csv_file, reason=skip_reason)
+                    if verbose:
+                        progress.console.print(
+                            f"[yellow]跳过（{skip_reason}）: {csv_file.name}[/yellow]"
+                        )
                 progress.advance(task)
+
+    print_summary("检查处理结果", collector, console=console, verbose=verbose)
 
     if not reports:
         console.print("[yellow]无可检查的文件[/yellow]")

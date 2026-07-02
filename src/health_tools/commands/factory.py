@@ -9,7 +9,9 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from health_tools.utils.errors import REASON_NO_DATA
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import ResultCollector, print_summary
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -203,10 +205,12 @@ def factory_cmd(
             return
 
         all_dfs = []
+        collector = ResultCollector()
         for f in progress_track(csv_files, "计算产测指标...", console=console):
             try:
                 df = read_csv_df(f, chip_rule)
-            except Exception:
+            except Exception as e:
+                collector.add_exception(f, e)
                 continue
             ch_list = channel_list or _get_channel_list(None, chip_rule, df)
             results = calculator.calculate(df, ch_list, extractor=extractor)
@@ -217,13 +221,18 @@ def factory_cmd(
                 all_dfs.append(file_df)
                 if verbose:
                     console.print(f"  [dim]{rel_name}: {len(results)} 通道[/dim]")
+                collector.add_ok(f, rows=len(df), detail=f"{len(results)} 通道")
+            else:
+                collector.add_skip(f, reason=REASON_NO_DATA, detail="无有效数据通道")
 
         if not all_dfs:
+            print_summary("产测结果", collector, console=console, verbose=verbose)
             console.print("[yellow]WARN[/yellow] 无有效数据通道")
             return
 
         result_df = pd.concat(all_dfs, ignore_index=True)
-        console.print(f"[green]OK[/green] 处理 {len(all_dfs)} 个文件, 共 {len(result_df)} 条记录")
+        print_summary("产测结果", collector, console=console, verbose=verbose)
+        console.print(f"[green]OK[/green] 生成 {len(result_df)} 条记录")
     else:
         try:
             df = read_csv_df(input_p, chip_rule)

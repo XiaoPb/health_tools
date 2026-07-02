@@ -3,6 +3,7 @@ from typing import Optional
 
 import click
 from rich.console import Console
+from health_tools.utils.reporting import ResultCollector, print_summary
 
 console = Console()
 
@@ -46,17 +47,20 @@ def split_cmd(
     output_path_obj = Path(output_path)
 
     if input_path_obj.is_file():
-        output_files = splitter.split_file(
-            input_path_obj,
-            output_path_obj,
-            by_column=by_column,
-            column_value=column_value,
-            by_size=by_size,
-            by_time=by_time,
-            time_column=time_column,
-            verbose=verbose,
+        collector = ResultCollector()
+        collector.add(
+            splitter.split_file_result(
+                input_path_obj,
+                output_path_obj,
+                by_column=by_column,
+                column_value=column_value,
+                by_size=by_size,
+                by_time=by_time,
+                time_column=time_column,
+                verbose=verbose,
+            )
         )
-        console.print(f"[green]✓[/green] 生成 {len(output_files)} 个文件")
+        print_summary("分割结果", collector, console=console, verbose=verbose)
     elif input_path_obj.is_dir():
         output_files = splitter.split_directory(
             input_path_obj,
@@ -70,7 +74,10 @@ def split_cmd(
             verbose=verbose,
             show_progress=True,
         )
-        console.print(f"[green]✓[/green] 生成 {len(output_files)} 个文件")
+        collector = getattr(splitter, "last_collector", ResultCollector())
+        if len(collector) == 0 and output_files:
+            collector.add_ok(input_path_obj, output=output_path_obj)
+        print_summary("分割结果", collector, console=console, verbose=verbose)
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)

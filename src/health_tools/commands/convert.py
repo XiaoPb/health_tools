@@ -8,7 +8,9 @@ import click
 import yaml
 from rich.console import Console
 from rich.table import Table
+from health_tools.utils.errors import REASON_RULE_MISMATCH, classify_exception
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import ResultCollector, print_summary
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -254,6 +256,7 @@ def convert_cmd(
             )
         ]
         _print_convert_results_table(results, verbose)
+        _print_convert_summary(results, verbose)
         _write_extra_source_align_error_report(converter, output_path_obj.parent)
     elif input_path_obj.is_dir():
         if merge:
@@ -286,6 +289,7 @@ def convert_cmd(
                     )
                 )
             _print_convert_results_table(results, verbose)
+            _print_convert_summary(results, verbose)
             _write_extra_source_align_error_report(converter, output_path_obj)
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
@@ -354,6 +358,29 @@ def _print_convert_results_table(results: List[ConvertStatus], verbose: bool) ->
     console.print(table)
 
 
+def _print_convert_summary(results: List[ConvertStatus], verbose: bool) -> None:
+    collector = ResultCollector()
+    for result in results:
+        status = result["status"]
+        if status == "OK":
+            collector.add_ok(result["input"], output=result["output"])
+        elif status == "SKIP":
+            collector.add_skip(
+                result["input"],
+                reason=result.get("reason", result.get("message", "")),
+                output=result["output"],
+                detail=result.get("message", ""),
+            )
+        else:
+            collector.add_fail(
+                result["input"],
+                reason=result.get("reason", result.get("message", "")),
+                output=result["output"],
+                detail=result.get("message", ""),
+            )
+    print_summary("转换汇总", collector, console=console, verbose=verbose)
+
+
 def _write_extra_source_align_error_report(
     converter: DataConverter, output_dir: Path, report_name: str = "extra_source_align_errors.csv"
 ) -> None:
@@ -401,6 +428,7 @@ def _convert_file(
                 "input": str(input_file),
                 "output": str(output_file),
                 "message": "不符合转换规则",
+                "reason": REASON_RULE_MISMATCH,
             }
         result = converter.convert(df, source_file=input_file)
         if result.empty and len(result.columns) == 0:
@@ -409,6 +437,7 @@ def _convert_file(
                 "input": str(input_file),
                 "output": str(output_file),
                 "message": "不符合转换规则",
+                "reason": REASON_RULE_MISMATCH,
             }
         _write_output_csv(result, output_file, output_csv_config)
         return {
@@ -416,6 +445,7 @@ def _convert_file(
             "input": str(input_file),
             "output": str(output_file),
             "message": "",
+            "reason": "",
         }
     except Exception as e:
         return {
@@ -423,6 +453,7 @@ def _convert_file(
             "input": str(input_file),
             "output": str(output_file),
             "message": str(e),
+            "reason": classify_exception(e),
         }
 
 
@@ -454,6 +485,7 @@ def _merge_and_convert(
                         "input": str(file),
                         "output": str(output_file),
                         "message": "不符合转换规则",
+                        "reason": REASON_RULE_MISMATCH,
                     }
                 )
                 continue
@@ -465,6 +497,7 @@ def _merge_and_convert(
                         "input": str(file),
                         "output": str(output_file),
                         "message": "不符合转换规则",
+                        "reason": REASON_RULE_MISMATCH,
                     }
                 )
                 continue
@@ -475,6 +508,7 @@ def _merge_and_convert(
                     "input": str(file),
                     "output": str(output_file),
                     "message": "已读取",
+                    "reason": "",
                 }
             )
         except Exception as e:
@@ -484,10 +518,12 @@ def _merge_and_convert(
                     "input": str(file),
                     "output": str(output_file),
                     "message": str(e),
+                    "reason": classify_exception(e),
                 }
             )
 
     _print_convert_results_table(results, verbose)
+    _print_convert_summary(results, verbose)
 
     if dfs:
         merged = pd.concat(dfs, ignore_index=True)

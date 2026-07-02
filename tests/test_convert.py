@@ -354,6 +354,36 @@ def test_convert_results_table_hides_successes_when_not_verbose(capsys):
     assert "in.csv" not in output
 
 
+def test_convert_summary_groups_skip_reasons(capsys):
+    from health_tools.commands.convert import _print_convert_summary
+
+    _print_convert_summary(
+        [
+            {
+                "status": "SKIP",
+                "input": "bad.csv",
+                "output": "bad_out.csv",
+                "message": "不符合转换规则",
+                "reason": "规则不匹配",
+            },
+            {
+                "status": "FAIL",
+                "input": "empty.csv",
+                "output": "empty_out.csv",
+                "message": "No columns to parse from file",
+                "reason": "文件为空",
+            },
+        ],
+        verbose=False,
+    )
+
+    output = capsys.readouterr().out
+    assert "转换汇总" in output
+    assert "规则不匹配" in output
+    assert "文件为空" in output
+    assert "bad.csv" not in output
+
+
 def test_merge_and_convert_skips_files_that_do_not_match_rule(tmp_path: Path):
     from health_tools.commands.convert import _merge_and_convert
 

@@ -4,6 +4,7 @@ from typing import List, Optional
 import click
 from rich.console import Console
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
 
 console = Console()
 
@@ -92,23 +93,28 @@ def plot_cmd(
     )
 
     if input_path_obj.is_file():
-        _plot_file(
-            input_path_obj,
-            output_path_obj,
-            plotter,
-            plot_type,
-            channel_list,
-            ref_column,
-            no_show,
-            verbose,
-            chip_rule,
+        collector = ResultCollector()
+        collector.add(
+            _plot_file(
+                input_path_obj,
+                output_path_obj,
+                plotter,
+                plot_type,
+                channel_list,
+                ref_column,
+                no_show,
+                verbose,
+                chip_rule,
+            )
         )
+        print_summary("绘图结果", collector, console=console, verbose=verbose)
     elif input_path_obj.is_dir():
         files = list(input_path_obj.rglob("*.csv"))
         if filter_name:
             files = [f for f in files if filter_name in f.name]
+        collector = ResultCollector()
         for file in progress_track(files, "绘制图表...", console=console):
-            _plot_file(
+            result = _plot_file(
                 file,
                 output_path_obj,
                 plotter,
@@ -119,6 +125,11 @@ def plot_cmd(
                 verbose,
                 chip_rule,
             )
+            if result is None:
+                collector.add_ok(file)
+            else:
+                collector.add(result)
+        print_summary("绘图结果", collector, console=console, verbose=verbose)
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
@@ -134,35 +145,47 @@ def _plot_file(
     no_show: bool,
     verbose: bool,
     chip_rule=None,
-) -> None:
+) -> FileResult:
     try:
         from health_tools.utils.csv_handler import read_csv_df
 
         df = read_csv_df(input_file, chip_rule)
+        output_files = []
 
         if plot_type in ("time", "both"):
             output_file = output_dir / f"{input_file.stem}_time.{plotter.fmt}"
             plotter.plot_time(df, output_file, channels)
+            output_files.append(str(output_file))
             if verbose:
                 console.print(f"[green]OK[/green] 时域图: {output_file}")
 
         if plot_type in ("freq", "both"):
             output_file = output_dir / f"{input_file.stem}_freq.{plotter.fmt}"
             plotter.plot_freq(df, output_file, channels)
+            output_files.append(str(output_file))
             if verbose:
                 console.print(f"[green]OK[/green] 频域图: {output_file}")
 
         if plot_type in ("stft", "both"):
             if chip_rule and not channels:
                 out_files = plotter.plot_chip_stft(df, output_dir, input_file.stem)
+                output_files.extend(str(f) for f in out_files)
                 if verbose:
                     for f in out_files:
                         console.print(f"[green]OK[/green] 时频图: {f}")
             else:
                 output_file = output_dir / f"{input_file.stem}_stft.{plotter.fmt}"
                 plotter.plot_stft(df, output_file, channels, ref_column)
+                output_files.append(str(output_file))
                 if verbose:
                     console.print(f"[green]OK[/green] 时频图: {output_file}")
 
+        return FileResult(
+            status="OK",
+            input=str(input_file),
+            output=";".join(output_files),
+            rows=len(df),
+        )
     except Exception as e:
-        console.print(f"[red]FAIL[/red] {input_file.name}: {e}")
+        collector = ResultCollector()
+        return collector.add_exception(input_file, e, output=output_dir)

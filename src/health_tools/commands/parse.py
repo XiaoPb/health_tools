@@ -3,7 +3,9 @@ from typing import Optional
 
 import click
 from rich.console import Console
+from health_tools.utils.errors import REASON_NO_DATA
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
 
 console = Console()
 
@@ -71,11 +73,11 @@ def parse_cmd(
 
     if input_path_obj.is_file():
         if multi_mode:
-            _parse_file_multi(
+            result = _parse_file_multi(
                 input_path_obj, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
             )
         else:
-            _parse_file(
+            result = _parse_file(
                 input_path_obj,
                 output_path_obj,
                 rule,
@@ -85,21 +87,37 @@ def parse_cmd(
                 encoding,
                 verbose,
             )
+        collector = ResultCollector()
+        collector.add(result)
+        print_summary("解析结果", collector, console=console, verbose=verbose)
     elif input_path_obj.is_dir():
         output_path_obj.mkdir(parents=True, exist_ok=True)
         files = list(input_path_obj.rglob("*.log")) + list(input_path_obj.rglob("*.txt"))
         if filter_name:
             files = [f for f in files if filter_name in f.name]
+        collector = ResultCollector()
         for file in progress_track(files, "解析文件...", console=console):
             if multi_mode:
-                _parse_file_multi(
-                    file, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
+                collector.add(
+                    _parse_file_multi(
+                        file, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
+                    )
                 )
             else:
                 out_file = output_path_obj / f"{file.stem}.csv"
-                _parse_file(
-                    file, out_file, rule, chip_rule, chip_columns, delimiter, encoding, verbose
+                collector.add(
+                    _parse_file(
+                        file,
+                        out_file,
+                        rule,
+                        chip_rule,
+                        chip_columns,
+                        delimiter,
+                        encoding,
+                        verbose,
+                    )
                 )
+        print_summary("解析结果", collector, console=console, verbose=verbose)
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
@@ -114,7 +132,7 @@ def _parse_file(
     delimiter: str,
     encoding: str,
     verbose: bool,
-) -> None:
+) -> FileResult:
     from health_tools.core.parser import LogParser
     from health_tools.utils.csv_handler import write_csv
 
@@ -129,11 +147,23 @@ def _parse_file(
                 df.to_csv(output_file, index=False, sep=delimiter)
             if verbose:
                 console.print(f"[green]OK[/green] {input_file.name} -> {output_file} ({len(df)}行)")
+            return FileResult(
+                status="OK",
+                input=str(input_file),
+                output=str(output_file),
+                rows=len(df),
+            )
         else:
-            if verbose:
-                console.print(f"[yellow]WARN[/yellow] {input_file.name}: 无有效数据")
+            return FileResult(
+                status="SKIP",
+                input=str(input_file),
+                output=str(output_file),
+                reason=REASON_NO_DATA,
+                detail="未匹配到可解析记录",
+            )
     except Exception as e:
-        console.print(f"[red]FAIL[/red] {input_file.name}: {e}")
+        collector = ResultCollector()
+        return collector.add_exception(input_file, e, output=output_file)
 
 
 def _parse_file_multi(
@@ -144,7 +174,7 @@ def _parse_file_multi(
     chip_columns,
     encoding: str,
     verbose: bool,
-) -> None:
+) -> FileResult:
     from health_tools.core.parser import LogParser
     from health_tools.utils.csv_handler import write_csv
 
@@ -152,9 +182,15 @@ def _parse_file_multi(
     try:
         results = parser.parse_file_multi(input_file, encoding)
         if not results:
-            if verbose:
-                console.print(f"[yellow]WARN[/yellow] {input_file.name}: 无有效数据")
-            return
+            return FileResult(
+                status="SKIP",
+                input=str(input_file),
+                output=str(output_dir),
+                reason=REASON_NO_DATA,
+                detail="未匹配到可解析记录",
+            )
+        row_count = 0
+        outputs = []
         for name, df in results.items():
             out_file = output_dir / f"{input_file.stem}_{name}.csv"
             if chip_rule:
@@ -165,5 +201,14 @@ def _parse_file_multi(
                 console.print(
                     f"[green]OK[/green] {input_file.name} [{name}] -> {out_file} ({len(df)}行)"
                 )
+            row_count += len(df)
+            outputs.append(str(out_file))
+        return FileResult(
+            status="OK",
+            input=str(input_file),
+            output=";".join(outputs),
+            rows=row_count,
+        )
     except Exception as e:
-        console.print(f"[red]FAIL[/red] {input_file.name}: {e}")
+        collector = ResultCollector()
+        return collector.add_exception(input_file, e, output=output_dir)

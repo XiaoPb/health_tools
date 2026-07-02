@@ -5,7 +5,9 @@ from typing import Dict, List, Optional, Tuple
 import click
 from rich.console import Console
 from rich.table import Table
+from health_tools.utils.errors import REASON_NO_DATA, REASON_PROCESS_FAILED
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
 
 console = Console()
 
@@ -94,6 +96,7 @@ def classify_cmd(
     csv_handler = CSVHandler(chip_rule)
     stats: Dict[str, int] = {}
     category_files: Dict[str, List[Path]] = {}
+    collector = ResultCollector()
 
     if input_path_obj.is_file():
         files = [input_path_obj]
@@ -130,11 +133,20 @@ def classify_cmd(
                         info, df = csv_handler.read(target_path)
                         accuracy_calc.add_file_result(category, df)
                     except Exception as e:
-                        if verbose:
-                            console.print(f"[yellow]WARN[/yellow] 准确率计算跳过 {file.name}: {e}")
+                        collector.add(
+                            FileResult(
+                                status="WARN",
+                                input=str(file),
+                                output=str(target_path),
+                                reason=REASON_PROCESS_FAILED,
+                                detail=f"准确率计算跳过: {e}",
+                                category=category,
+                            )
+                        )
 
                 if verbose:
                     console.print(f"[green]✓[/green] {file.name} -> {category}")
+                collector.add_ok(file, output=target_path, category=category)
             else:
                 if unknown_dir:
                     unknown_path = output_path_obj / unknown_dir
@@ -144,6 +156,15 @@ def classify_cmd(
                     elif mode == "move":
                         shutil.move(str(file), str(unknown_path / file.name))
                     stats[unknown_dir] = stats.get(unknown_dir, 0) + 1
+                    collector.add_skip(
+                        file,
+                        reason=REASON_NO_DATA,
+                        output=unknown_path / file.name,
+                        detail="未匹配任何分类规则，已放入未知目录",
+                        category=unknown_dir,
+                    )
+                else:
+                    collector.add_skip(file, reason=REASON_NO_DATA, detail="未匹配任何分类规则")
                 if verbose:
                     console.print(f"[yellow]![/yellow] {file.name}: 未匹配")
                     debug_info = classifier.get_last_values()
@@ -152,7 +173,9 @@ def classify_cmd(
                     if debug_info["extracted"]:
                         console.print(f"  提取值: {debug_info['extracted']}")
         except Exception as e:
-            console.print(f"[red]FAIL[/red] {file.name}: {e}")
+            collector.add_exception(file, e)
+
+    print_summary("分类结果", collector, console=console, verbose=verbose)
 
     if report:
         _print_report(stats)

@@ -3,6 +3,8 @@ from typing import Optional
 
 import click
 from rich.console import Console
+from health_tools.utils.errors import REASON_PROCESS_FAILED, normalize_reason
+from health_tools.utils.reporting import ResultCollector, print_summary
 
 console = Console()
 
@@ -59,7 +61,20 @@ def process_cmd(
         verbose=verbose,
     )
 
-    success_count = sum(1 for r in results if r.get("success"))
-    error_count = len(results) - success_count
+    collector = ResultCollector()
+    for result in results:
+        if result.get("success"):
+            collector.add_ok(
+                result.get("input", input_path_obj),
+                output=result.get("output", output_path_obj),
+                rows=int(result.get("rows", 0) or 0),
+            )
+        else:
+            collector.add_fail(
+                result.get("input", input_path_obj),
+                reason=normalize_reason(result.get("reason") or REASON_PROCESS_FAILED),
+                output=result.get("output", output_path_obj),
+                detail=str(result.get("error") or ""),
+            )
 
-    console.print(f"[green]✓[/green] 处理完成: {success_count} 成功, {error_count} 失败")
+    print_summary("处理结果", collector, console=console, verbose=verbose)

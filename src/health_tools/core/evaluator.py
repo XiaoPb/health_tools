@@ -7,9 +7,11 @@ import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import EvaluateRule
+from health_tools.utils.errors import REASON_EMPTY_FILE, REASON_MISSING_COLUMN
 from health_tools.utils.accuracy import calculate_accuracy
 from health_tools.utils.csv_handler import CSVHandler
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import ResultCollector
 
 
 class PolarAnomalyDetector:
@@ -98,6 +100,9 @@ class BatchEvaluator:
             by_filename=rule.classify.get("by_filename", {}),
             default=rule.default_category,
         )
+        self.last_collector = ResultCollector()
+        self._last_skip_reason = ""
+        self._last_skip_detail = ""
 
     def _resolve_column(self, df: pd.DataFrame, col_type: str) -> Optional[str]:
         """解析列: 显式列索引 > 列名匹配 > chip_rule映射回退"""
@@ -150,18 +155,24 @@ class BatchEvaluator:
         return pos / self.rule.sample_rate
 
     def _evaluate_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        self._last_skip_reason = ""
+        self._last_skip_detail = ""
         try:
             _, df = self.csv_handler.read(file_path)
-        except Exception:
-            return None
+        except Exception as e:
+            raise e
 
         if df is None or df.empty:
+            self._last_skip_reason = REASON_EMPTY_FILE
+            self._last_skip_detail = "CSV没有数据行"
             return None
 
         ref_col = self._resolve_column(df, "ref")
         pred_col = self._resolve_column(df, "pred")
 
         if ref_col is None or pred_col is None:
+            self._last_skip_reason = REASON_MISSING_COLUMN
+            self._last_skip_detail = "未找到参考列或预测列"
             return None
 
         category = self.classifier.classify(file_path)
@@ -213,12 +224,24 @@ class BatchEvaluator:
             return {}
 
         results: List[Dict[str, Any]] = []
+        self.last_collector = ResultCollector()
         for f in progress_track(csv_files, "评估CSV...", enabled=show_progress):
             if verbose:
-                print(f"  处理: {f.name}")
-            r = self._evaluate_file(f)
+                pass
+            try:
+                r = self._evaluate_file(f)
+            except Exception as e:
+                self.last_collector.add_exception(f, e)
+                continue
             if r:
                 results.append(r)
+                self.last_collector.add_ok(f, rows=int(r.get("total_rows", 0) or 0))
+            else:
+                self.last_collector.add_skip(
+                    f,
+                    reason=self._last_skip_reason,
+                    detail=self._last_skip_detail,
+                )
 
         if not results:
             return {}

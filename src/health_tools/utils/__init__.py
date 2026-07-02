@@ -3,6 +3,7 @@ from health_tools.utils.logger import setup_logger
 from health_tools.utils.columns import expand_columns
 from health_tools.utils.parallel import parallel_process, parallel_process_with_index, batch_process
 from health_tools.utils.progress import progress_track
+from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
 from health_tools.utils.classify_helpers import (
     calculate_median,
     calculate_mean,
@@ -30,6 +31,9 @@ __all__ = [
     "parallel_process_with_index",
     "batch_process",
     "progress_track",
+    "FileResult",
+    "ResultCollector",
+    "print_summary",
     "calculate_median",
     "calculate_mean",
     "calculate_std",

@@ -3,6 +3,10 @@
 from pathlib import Path
 
 import click
+from rich.console import Console
+from health_tools.utils.reporting import print_summary
+
+console = Console()
 
 
 @click.command("evaluate")
@@ -71,19 +75,19 @@ def evaluate_cmd(
     input_dir = Path(input_path)
     output_dir = Path(output_path)
 
-    click.echo(f"评估类型: {eval_type.upper()}")
+    console.print(f"评估类型: {eval_type.upper()}")
     if ref_column_col:
-        click.echo(f"参考列索引: {ref_column_col} (1-based)")
+        console.print(f"参考列索引: {ref_column_col} (1-based)")
     elif rule.ref_column:
-        click.echo(f"参考列: {rule.ref_column}")
+        console.print(f"参考列: {rule.ref_column}")
     if pred_column_col:
-        click.echo(f"预测列索引: {pred_column_col} (1-based)")
+        console.print(f"预测列索引: {pred_column_col} (1-based)")
     elif rule.pred_column:
-        click.echo(f"预测列: {rule.pred_column}")
-    click.echo(f"异常检测: diff>{rule.diff_threshold}, stale>{rule.stale_minutes}min")
-    click.echo(f"输入: {input_dir}")
-    click.echo(f"输出: {output_dir}")
-    click.echo("")
+        console.print(f"预测列: {rule.pred_column}")
+    console.print(f"异常检测: diff>{rule.diff_threshold}, stale>{rule.stale_minutes}min")
+    console.print(f"输入: {input_dir}")
+    console.print(f"输出: {output_dir}")
+    console.print("")
 
     output_paths = evaluator.evaluate_directory(
         input_dir,
@@ -93,10 +97,13 @@ def evaluate_cmd(
         show_progress=True,
     )
 
+    if hasattr(evaluator, "last_collector"):
+        print_summary("评估结果", evaluator.last_collector, console=console, verbose=verbose)
+
     if output_paths:
-        click.echo("")
-        click.echo("输出文件:")
+        console.print("")
+        console.print("输出文件:")
         for name, path in output_paths.items():
-            click.echo(f"  {name}: {path}")
+            console.print(f"  {name}: {path}")
     else:
-        click.echo("未找到有效数据文件")
+        console.print("[yellow]未找到有效数据文件[/yellow]")
