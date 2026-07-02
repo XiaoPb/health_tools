@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, cast
 
 import click
 import yaml
@@ -93,7 +93,7 @@ class RuleLoader:
         rule_path = cls._resolve_rule_path(rule_file, "chip")
 
         if not rule_path.exists():
-            available = set()
+            available: Set[str] = set()
             chip_dir = cls.get_builtin_rules_path() / "chip"
             if chip_dir.exists():
                 available.update(f.stem for f in chip_dir.glob("*.yaml"))
@@ -211,7 +211,7 @@ class RuleLoader:
     def load_patterns(cls, patterns_file: str) -> Dict[str, List[str]]:
         patterns_path = cls._resolve_rule_path(patterns_file, "classify")
         data = cls._load_yaml(patterns_path)
-        return data.get("patterns", {})
+        return cast(Dict[str, List[str]], data.get("patterns", {}))
 
     @classmethod
     def expand_columns(cls, columns: List[str]) -> List[str]:

@@ -49,7 +49,7 @@ def find_files(
     if extensions is None:
         extensions = [".csv", ".log", ".txt"]
 
-    files = []
+    files: List[Path] = []
     if recursive:
         for ext in extensions:
             files.extend(directory.rglob(f"*{ext}"))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, cast
 
 import click
 import yaml
@@ -169,10 +169,10 @@ def _generate_rule_template(
         f.write("# expand_repeat: []  # 重复扩展列（如 [REF_RESULT{0-15}]）\n")
 
     if source_columns:
-        matched = sum(1 for v in column_mapping.values() if v != "Unknown")
+        matched_count = sum(1 for v in column_mapping.values() if v != "Unknown")
         console.print(
             f"[green]OK[/green] 模板已生成: {output_path} "
-            f"(源列 {len(source_columns)} 个, 匹配 {matched}/{len(source_columns)})"
+            f"(源列 {len(source_columns)} 个, 匹配 {matched_count}/{len(source_columns)})"
         )
     else:
         console.print(f"[green]OK[/green] 模板已生成: {output_path}")
@@ -215,16 +215,16 @@ def convert_cmd(
             raise SystemExit(1)
         if not output_path:
             output_path = f"convert_{chip_name}.yaml"
-        chip_rule = RuleLoader.load_chip_rule(chip_name)
+        init_chip_rule = RuleLoader.load_chip_rule(chip_name)
         source_file = Path(input_path) if input_path else None
-        _generate_rule_template(chip_rule, Path(output_path), source_file)
+        _generate_rule_template(init_chip_rule, Path(output_path), source_file)
         return
 
     if not input_path or not output_path:
         console.print("[red]错误: 需要指定 --input 和 --output 参数[/red]")
         raise SystemExit(1)
 
-    chip_rule = None
+    chip_rule: Optional[ChipRule] = None
     if rule_file:
         rule = RuleLoader.load_convert_rule(rule_file)
         if rule.target_chip:
@@ -532,7 +532,7 @@ def _merge_and_convert(
         if split:
             total_rows = len(result)
             for i, start in enumerate(range(0, total_rows, split)):
-                chunk = result.iloc[start : start + split]
+                chunk = cast("pd.DataFrame", result.iloc[start : start + split])
                 chunk_file = output_file.parent / f"{output_file.stem}_{i + 1}.csv"
                 _write_output_csv(chunk, chunk_file, output_csv_config)
                 if verbose:

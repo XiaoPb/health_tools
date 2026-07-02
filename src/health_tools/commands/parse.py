@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import click
 from rich.console import Console
@@ -38,6 +38,7 @@ def parse_cmd(
 
     chip_columns = None
     chip_rule = None
+    rule: Any
     if rule_file:
         rule = RuleLoader.load_parse_rule(rule_file)
         if rule.chip:

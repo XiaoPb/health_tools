@@ -56,27 +56,27 @@ class ChipRule:
 
     @property
     def info_row(self) -> int:
-        return self.csv.get("info_row", 0)
+        return int(self.csv.get("info_row", 0))
 
     @property
     def header_row(self) -> int:
-        return self.csv.get("header_row", 1)
+        return int(self.csv.get("header_row", 1))
 
     @property
     def data_start_row(self) -> int:
-        return self.csv.get("data_start_row", 2)
+        return int(self.csv.get("data_start_row", 2))
 
     @property
     def delimiter(self) -> str:
-        return self.csv.get("delimiter", ",")
+        return str(self.csv.get("delimiter", ","))
 
     @property
     def encoding(self) -> str:
-        return self.csv.get("encoding", "utf-8")
+        return str(self.csv.get("encoding", "utf-8"))
 
     @property
     def info(self) -> str:
-        return self.csv.get("info", "")
+        return str(self.csv.get("info", ""))
 
 
 @dataclass
@@ -124,23 +124,23 @@ class ConvertRule:
 
     @property
     def info_row(self) -> int:
-        return self.csv.get("info_row", 0)
+        return int(self.csv.get("info_row", 0))
 
     @property
     def header_row(self) -> int:
-        return self.csv.get("header_row", 1)
+        return int(self.csv.get("header_row", 1))
 
     @property
     def data_start_row(self) -> int:
-        return self.csv.get("data_start_row", 2)
+        return int(self.csv.get("data_start_row", 2))
 
     @property
     def delimiter(self) -> str:
-        return self.csv.get("delimiter", ",")
+        return str(self.csv.get("delimiter", ","))
 
     @property
     def encoding(self) -> str:
-        return self.csv.get("encoding", "utf-8")
+        return str(self.csv.get("encoding", "utf-8"))
 
 
 @dataclass
@@ -187,12 +187,12 @@ class EvaluateRule:
 
     @property
     def diff_threshold(self) -> float:
-        return self.anomaly.get("diff_threshold", 30 if self.type == "hr" else 5)
+        return float(self.anomaly.get("diff_threshold", 30 if self.type == "hr" else 5))
 
     @property
     def stale_minutes(self) -> float:
-        return self.anomaly.get("stale_minutes", 2)
+        return float(self.anomaly.get("stale_minutes", 2))
 
     @property
     def sample_rate(self) -> float:
-        return self.anomaly.get("sample_rate", 25)
+        return float(self.anomaly.get("sample_rate", 25))

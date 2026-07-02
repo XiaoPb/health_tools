@@ -4,7 +4,7 @@ import csv
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import click
 from rich.console import Console
@@ -13,6 +13,9 @@ from rich.table import Table
 from health_tools.utils.reporting import ResultCollector, print_summary
 
 console = Console()
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 @click.command("check")
@@ -113,7 +116,12 @@ def check_cmd(
 
     def _process_file(
         csv_file: Path,
-    ) -> Tuple[Optional["FileCheckReport"], Optional["AccAnomalyReport"], Optional[object], str]:
+    ) -> Tuple[
+        Optional["FileCheckReport"],
+        Optional["AccAnomalyReport"],
+        Optional["pd.DataFrame"],
+        str,
+    ]:
         """处理单个文件，返回 (report, acc_report, ipd_detail, skip_reason)"""
         chip = chip_name or _detect_chip(csv_file)
         if not chip:
@@ -181,7 +189,7 @@ def check_cmd(
 
     reports: List[FileCheckReport] = []
     acc_reports: Dict[Path, AccAnomalyReport] = {}
-    ipd_details: Dict[Path, object] = {}
+    ipd_details: Dict[Path, "pd.DataFrame"] = {}
     collector = ResultCollector()
 
     with Progress(console=console) as progress:
@@ -192,13 +200,13 @@ def check_cmd(
             for future in as_completed(futures):
                 csv_file = futures[future]
                 try:
-                    report, acc_report, ipd_detail, skip_reason = future.result()
+                    file_report, acc_report, ipd_detail, skip_reason = future.result()
                 except Exception as e:
                     collector.add_exception(csv_file, e)
                     progress.advance(task)
                     continue
-                if report:
-                    reports.append(report)
+                if file_report:
+                    reports.append(file_report)
                     collector.add_ok(csv_file)
                     if acc_report:
                         acc_reports[csv_file] = acc_report

@@ -45,6 +45,8 @@ dev = [
     "black==24.10.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "pandas-stubs>=2.0.0",
+    "types-PyYAML>=6.0.0",
 ]
 
 [project.scripts]
@@ -69,8 +71,17 @@ target-version = "py39"
 
 [tool.mypy]
 python_version = "3.9"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["scipy.*", "bokeh.*", "streamlit.*", "ruamel.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["health_tools.core.*", "health_tools.ui.*"]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -219,7 +219,7 @@ class AccuracyCalculator:
                 if key != "samples":
                     self.category_results[category][key] = 0.0
 
-        samples = result.get("samples", 0)
+        samples = int(result.get("samples", 0))
         self.category_results[category]["samples"] += samples
         self.category_results[category]["files"] += 1
         self.category_files[category] = self.category_files.get(category, 0) + 1

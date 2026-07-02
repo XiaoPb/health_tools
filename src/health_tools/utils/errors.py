@@ -21,7 +21,7 @@ def classify_exception(exc: BaseException, default: str = REASON_PROCESS_FAILED)
     try:
         import pandas as pd
     except Exception:  # pragma: no cover - pandas 是项目依赖，这里仅做兜底
-        pd = None
+        pd = None  # type: ignore[assignment]
 
     if isinstance(exc, FileNotFoundError):
         return REASON_READ_FAILED
