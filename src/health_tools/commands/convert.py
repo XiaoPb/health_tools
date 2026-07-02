@@ -319,6 +319,10 @@ def _convert_file(
 ) -> None:
     try:
         df = _read_input_csv(input_file, input_csv_config)
+        if not converter.has_matching_columns(df):
+            if verbose:
+                console.print(f"[yellow]SKIP[/yellow] {input_file.name}: 不符合转换规则")
+            return
         result = converter.convert(df, source_file=input_file)
         if result.empty and len(result.columns) == 0:
             if verbose:
@@ -350,6 +354,10 @@ def _merge_and_convert(
     for file in files:
         try:
             df = _read_input_csv(file, input_csv_config)
+            if not converter.has_matching_columns(df):
+                if verbose:
+                    console.print(f"[yellow]SKIP[/yellow] {file.name}: 不符合转换规则")
+                continue
             df = converter._merge_extra_source(df, file)
             if not converter.has_matching_columns(df):
                 if verbose:

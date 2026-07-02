@@ -98,8 +98,10 @@ class DataConverter:
             return df
 
         extra_df = extra_df.copy()
-        extra_df[right_on] = self._normalize_align_key(extra_df[right_on])
-        left_keys = self._normalize_align_key(df[left_on])
+        extra_df[right_on] = self._normalize_align_key(
+            extra_df[right_on], align.get("right_extract")
+        )
+        left_keys = self._normalize_align_key(df[left_on], align.get("left_extract"))
         extra_df = extra_df.drop_duplicates(subset=[right_on], keep="last")
 
         rename_map = config.get("column_mapping", {}) or {}
@@ -138,17 +140,50 @@ class DataConverter:
         suffix = config.get("suffix")
         if suffix:
             matches = sorted(source_file.parent.glob(f"*{suffix}"))
-            if matches:
-                return matches[0]
+            match = self._select_extra_source_candidate(matches, source_file, config)
+            if match:
+                return match
 
         pattern = config.get("pattern")
         if pattern:
             matches = sorted(source_file.parent.glob(pattern))
-            if matches:
-                return matches[0]
+            match = self._select_extra_source_candidate(matches, source_file, config)
+            if match:
+                return match
 
         logger.warning("未找到 extra_source 文件: %s", source_file)
         return None
+
+    def _select_extra_source_candidate(
+        self, candidates: List[Path], source_file: Path, config: Dict[str, Any]
+    ) -> Optional[Path]:
+        for candidate in candidates:
+            if candidate.resolve() == source_file.resolve():
+                continue
+            if self._extra_source_candidate_matches(candidate, config):
+                return candidate
+        return None
+
+    def _extra_source_candidate_matches(self, file_path: Path, config: Dict[str, Any]) -> bool:
+        required_columns = config.get("required_columns") or []
+        any_required_columns = config.get("any_required_columns") or []
+        if not required_columns and not any_required_columns:
+            return True
+
+        try:
+            df = self._read_extra_source_csv(file_path, config)
+        except Exception as e:
+            logger.warning("读取 extra_source 候选文件失败，已跳过: %s, %s", file_path, e)
+            return False
+
+        columns = set(str(col).strip() for col in df.columns)
+        if any(str(col).strip() not in columns for col in required_columns):
+            return False
+        if any_required_columns and not any(
+            str(col).strip() in columns for col in any_required_columns
+        ):
+            return False
+        return True
 
     def _read_extra_source_csv(self, file_path: Path, config: Dict[str, Any]) -> pd.DataFrame:
         csv_config = config.get("csv", {}) or {}
@@ -159,7 +194,7 @@ class DataConverter:
 
         if header_row > 0 and data_start_row > header_row:
             skiprows = [r for r in range(data_start_row - 1) if r != header_row - 1]
-            return pd.read_csv(
+            df = pd.read_csv(
                 file_path,
                 header=0,
                 skiprows=skiprows if skiprows else None,
@@ -167,17 +202,27 @@ class DataConverter:
                 encoding=encoding,
                 on_bad_lines="skip",
             )
+            df.columns = [str(col).strip() for col in df.columns]
+            return df
 
-        return pd.read_csv(
+        df = pd.read_csv(
             file_path,
             header=header_row - 1 if header_row > 0 else None,
             delimiter=delimiter,
             encoding=encoding,
             on_bad_lines="skip",
         )
+        df.columns = [str(col).strip() for col in df.columns]
+        return df
 
-    def _normalize_align_key(self, series: pd.Series) -> pd.Series:
-        return series.astype(str).str.strip()
+    def _normalize_align_key(
+        self, series: pd.Series, extract_pattern: Optional[str] = None
+    ) -> pd.Series:
+        normalized = series.astype(str).str.strip()
+        if extract_pattern:
+            extracted = normalized.str.extract(extract_pattern, expand=False)
+            normalized = extracted.fillna(normalized)
+        return normalized
 
     def _ensure_int64(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.select_dtypes(include=["float64"]).columns:

@@ -169,6 +169,9 @@ class RuleValidator:
                     extra_source.get("column_mapping"), dict
                 ):
                     errors.append("'extra_source.column_mapping' 必须是字典")
+                for key in ("required_columns", "any_required_columns"):
+                    if key in extra_source and not isinstance(extra_source.get(key), list):
+                        errors.append(f"'extra_source.{key}' 必须是列表")
                 align = extra_source.get("align")
                 if align is not None:
                     if not isinstance(align, dict):

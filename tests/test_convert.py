@@ -69,6 +69,64 @@ def test_convert_with_extra_source_custom_align_columns(tmp_path: Path):
     assert list(result["REF_RESULT0"]) == [100, 101]
 
 
+def test_extra_source_pattern_skips_source_file_and_checks_required_columns(tmp_path: Path):
+    source_file = tmp_path / "raw.csv"
+    source_file.write_text("time,value\n15:06:01,1\n", encoding="utf-8")
+
+    bad_extra = tmp_path / "bad_gold.csv"
+    bad_extra.write_text("foo,bar\n15:06:01,99\n", encoding="utf-8")
+
+    good_extra = tmp_path / "guest_6_27_26.csv"
+    good_extra.write_text("时间, SpO2\n中国标准时间 15:06:01,97\n", encoding="utf-8")
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "value": "VALUE", "gold_spo2": "REF"})
+    rule.extra_source = {
+        "pattern": "*.csv",
+        "required_columns": ["时间"],
+        "any_required_columns": ["SpO2", "O2 饱和度"],
+        "csv": {"header_row": 1, "data_start_row": 2, "delimiter": ","},
+        "align": {"left_on": "time", "right_on": "时间", "right_extract": r"(\d{2}:\d{2}:\d{2})"},
+        "column_mapping": {"SpO2": "gold_spo2", "O2 饱和度": "gold_spo2"},
+    }
+
+    converter = DataConverter(rule)
+    import pandas as pd
+
+    df = pd.read_csv(source_file)
+    result = converter.convert(df, source_file=source_file)
+
+    assert list(result["REF"]) == [97]
+
+
+def test_extra_source_align_extracts_time_from_chinese_timestamp(tmp_path: Path):
+    source_file = tmp_path / "raw.csv"
+    source_file.write_text("time,value\n15:06:01,1\n15:06:02,2\n", encoding="utf-8")
+
+    extra_file = tmp_path / "guest_gold.csv"
+    extra_file.write_text(
+        "时间,O2 饱和度\n中国标准时间 15:06:01,97\n中国标准时间 15:06:02,98\n",
+        encoding="utf-8",
+    )
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "gold_spo2": "REF_RESULT0"})
+    rule.extra_source = {
+        "pattern": "*.csv",
+        "required_columns": ["时间"],
+        "any_required_columns": ["SpO2", "O2 饱和度"],
+        "csv": {"header_row": 1, "data_start_row": 2, "delimiter": ","},
+        "align": {"left_on": "time", "right_on": "时间", "right_extract": r"(\d{2}:\d{2}:\d{2})"},
+        "column_mapping": {"SpO2": "gold_spo2", "O2 饱和度": "gold_spo2"},
+    }
+
+    converter = DataConverter(rule)
+    import pandas as pd
+
+    df = pd.read_csv(source_file)
+    result = converter.convert(df, source_file=source_file)
+
+    assert list(result["REF_RESULT0"]) == [97, 98]
+
+
 def test_converter_returns_no_columns_when_rule_sources_do_not_match():
     import pandas as pd
 
