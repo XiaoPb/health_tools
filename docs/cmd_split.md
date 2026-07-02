@@ -20,6 +20,7 @@ ghealth_tool split -i <input> -o <output_dir> [options]
 | `--by-size` | 按行数分割 |
 | `--by-time` | 按时间分割（秒） |
 | `--time-column` | 时间列名 |
+| `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
 
 ## 分割模式
@@ -29,6 +30,13 @@ ghealth_tool split -i <input> -o <output_dir> [options]
 | `--by-column` | 当指定列值变化时分割（如 FRAME_ID 归零） |
 | `--by-size` | 每 N 行分割为一个文件 |
 | `--by-time` | 按时间列每 N 秒分割 |
+
+## 输出与异常汇总
+
+- 输入为目录时递归处理 CSV，并使用进度条显示进度。
+- 默认输出“分割结果”汇总，成功文件不逐条打印。
+- 空文件、格式错误、列缺失和读取失败会统计到原因表；单个坏文件不会中断目录处理。
+- 使用 `-v/--verbose` 时显示失败/跳过文件明细。
 
 ## 示例
 

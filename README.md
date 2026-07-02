@@ -28,6 +28,10 @@ ghealth_tool --version
 
 ## 命令
 
+批量命令默认使用进度条并在结束时输出汇总统计。成功文件不会逐条刷屏；
+空文件、格式不对、读取失败、列缺失、规则不匹配、无有效数据等会按原因聚合。
+需要查看文件级明细时加 `-v/--verbose`。
+
 ### parse - 日志解析
 
 将原始日志文件解析为CSV格式。
@@ -159,9 +163,21 @@ ghealth_tool chk -i data/ -c gh3036
 
 支持的检查项：`range`（数据范围）、`frame`（帧完整性）、`center`（数据居中）、`ipd`（Ipd转换）、`acc`（ACC异常检测）。
 
-各单项检查输出 `PASS` / `WARNING` / `FAIL` 三态：无异常为 `PASS`，异常比例不超过对应 `--*-ratio` 参数为 `WARNING`，超过则为 `FAIL`。比例参数使用百分数数字，默认均为 `1`。`WARNING` 在总异常判断中归为通过，CSV报告的 `总异常(结果)` 只输出 `PASS` 或 `FAIL`。
+各单项检查输出 `PASS` / `WARNING` / `FAIL` 三态：无异常为 `PASS`，异常比例不超过对应 `--*-ratio` 参数为 `WARNING`，超过则为 `FAIL`。比例参数使用百分数数字，除 `--center-ratio` 默认5%外，其他比例默认1%。`WARNING` 在总异常判断中归为通过，CSV报告的 `总异常(结果)` 只输出 `PASS` 或 `FAIL`。
 
-ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变>3点）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。ACC按异常覆盖帧去重后计算异常比例。`--check-timestamp=列名` 可额外检查时间戳间隔稳定性，`--timestamp-ratio` 使用百分数数字（如 `0.2` 表示0.2%）。`-o` 输出统一CSV报告，包含全部检查项结果、ACC异常详情和文件相对路径。`--sort` 读取报告后移动文件到 `normal/` / `abnormal/` 并生成对应列表CSV，不覆盖目标同名文件。
+ACC异常检测识别三种异常：全零（XYZ同时为0）、静止（连续不变≥5帧，`--static-min`可配置）、循环（固定序列重复≥2周期）。支持规则文件指定ACC列名和帧号列名，或自动检测。ACC按异常覆盖帧去重后计算异常比例。`--check-timestamp=列名` 可额外检查时间戳间隔稳定性，`--timestamp-ratio` 使用百分数数字（如 `0.2` 表示0.2%）。`-o` 输出统一CSV报告，包含全部检查项结果、ACC异常详情和文件相对路径。`--sort` 读取报告后移动文件到 `normal/` / `abnormal/` 并生成对应列表CSV，不覆盖目标同名文件。
+
+### evaluate - 指标评估
+
+批量评估心率或血氧结果，生成文件明细、异常列表和准确度汇总。
+
+```bash
+# 心率评估
+ghealth_tool evaluate -i result/ -o eval_out/ --type hr --chip gh3036
+
+# 血氧评估，按列索引指定参考列和预测列
+ghealth_tool eval -i result/ -o eval_out/ --type spo2 --ref-column-col 3 --pred-column-col 8
+```
 
 ### validate - 规则验证
 

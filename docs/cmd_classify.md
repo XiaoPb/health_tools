@@ -25,11 +25,20 @@ ghealth_tool classify -i <input> -o <output> -r <rule.yaml> [options]
 | `--report` | 生成分类报告 |
 | `--unknown` | 未匹配文件目录名 |
 | `-c/--chip` | 芯片类型 |
+| `--filter` | 仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
 
 ## 分类规则
 
 支持基于文件名模式、数据列值范围、正则匹配等多种分类方式。
+
+## 输出与异常汇总
+
+- 目录模式使用进度条显示分类进度。
+- 默认输出“分类结果”汇总，成功分类文件不逐条打印。
+- 未匹配规则的文件会统计为跳过；指定 `--unknown` 时仍会复制/移动到未知目录。
+- 准确率计算失败会统计为警告，不影响文件分类。
+- 使用 `-v/--verbose` 时显示失败、跳过、警告文件明细，以及规则提取到的调试值。
 
 ## 示例
 
@@ -39,4 +48,7 @@ ghealth_tool classify -i ./data/ -o ./classified/ -r spo2_posture.yaml -v
 
 # 启用准确率计算
 ghealth_tool classify -i ./data/ -o ./classified/ -r rule.yaml --accuracy --report -v
+
+# 未匹配文件放入 unknown 目录
+ghealth_tool classify -i ./data/ -o ./classified/ -r rule.yaml --unknown unknown
 ```

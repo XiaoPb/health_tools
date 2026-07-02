@@ -6,6 +6,7 @@
 
 ```bash
 ghealth_tool info <file_path> [options]
+ghealth_tool i <file_path> [options]
 ```
 
 ## 参数
@@ -16,6 +17,8 @@ ghealth_tool info <file_path> [options]
 | `--stats` | 显示统计信息 |
 | `--schema` | 显示数据结构/列信息 |
 | `--preview` | 预览前 N 行（默认: 10） |
+
+别名：`i`。
 
 ## 支持的文件类型
 

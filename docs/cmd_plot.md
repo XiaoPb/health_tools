@@ -30,6 +30,7 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--freq-range` | 频率范围 BPM（默认: 30-240） |
 | `--ref-column` | 参考曲线列名 |
 | `--no-show` | 仅保存不显示 |
+| `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
 
 ## STFT 时频图模式
@@ -61,6 +62,13 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 4. 逐时间列 0-100 归一化（非 dB）
 5. viridis colormap，BPM Y 轴 30-240
 
+## 输出与异常汇总
+
+- 输入为目录时递归处理 CSV，并使用进度条显示进度。
+- 默认输出“绘图结果”汇总，成功文件不逐条打印。
+- 空文件、格式不对、列缺失、读取失败和绘图失败会按原因统计。
+- 使用 `-v/--verbose` 时显示失败/跳过文件明细，并保留每张图的保存路径提示。
+
 ## 示例
 
 ```bash
@@ -72,4 +80,7 @@ ghealth_tool plot -i data.csv -o ./plots --chip gh3036 --type stft --channels Ip
 
 # 时域 + 频域
 ghealth_tool plot -i data.csv -o ./plots --chip gh3036 --type both --channels Ipd0 --no-show -v
+
+# 目录模式仅绘制文件名包含 valid 的 CSV
+ghealth_tool plot -i ./csv/ -o ./plots --chip gh3036 --filter valid --no-show
 ```

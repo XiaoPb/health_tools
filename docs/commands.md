@@ -1,5 +1,12 @@
 # 命令详细说明
 
+## 批量命令输出约定
+
+`parse`、`plot`、`classify`、`convert`、`split`、`process`、`factory`、`evaluate`
+和 `check` 在目录模式下默认使用进度条，并在结束时输出汇总统计。成功文件默认不逐条打印；
+空文件、格式不对、读取失败、列缺失、规则不匹配、无有效数据等情况会按原因聚合展示。
+需要查看具体文件明细时使用 `-v/--verbose`。
+
 ## parse - 日志解析
 
 将原始日志文件按正则规则解析为CSV格式。
@@ -169,17 +176,24 @@ expand_repeat:
 
 ## split - 数据分割
 
-按行数分割大型CSV文件。
+按列值、行数或时间分割CSV文件。
 
 ```bash
-ghealth_tool split -i <输入> -o <输出目录> -n <行数>
+ghealth_tool split -i <输入> -o <输出目录> [--by-column <列名>] [--by-size <行数>] [--by-time <秒> --time-column <列名>]
 ```
 
 | 参数 | 说明 |
 |---|---|
-| `-i, --input` | 输入CSV文件（必需） |
+| `-i, --input` | 输入CSV文件或目录（必需） |
 | `-o, --output` | 输出目录（必需） |
-| `-n, --rows` | 每个分片的行数 |
+| `-c, --chip` | 芯片类型（决定CSV格式） |
+| `--by-column` | 按指定列值分割（默认 FRAME_ID） |
+| `--column-value` | 分割值（默认 0） |
+| `--by-size` | 每个分片的行数 |
+| `--by-time` | 按时间分割（秒） |
+| `--time-column` | 时间列名 |
+| `--filter` | 目录模式下仅处理文件名包含指定字符的CSV |
+| `-v, --verbose` | 显示失败/跳过明细 |
 
 ---
 
@@ -236,6 +250,49 @@ ghealth_tool validate <规则文件> [--strict]
 ghealth_tool process -i <输入目录> -o <输出目录> [选项]
 ```
 
+| 参数 | 说明 |
+|---|---|
+| `-i, --input` | 输入目录（必需） |
+| `-o, --output` | 输出目录（必需） |
+| `-c, --chip` | 芯片类型 |
+| `--split` | 按FRAME_ID分割数据 |
+| `--frame-column` | 帧ID列名（默认 FRAME_ID） |
+| `--workers` | 并行线程数（默认4） |
+| `--pattern` | 文件匹配模式（默认 *.csv） |
+| `--filter` | 仅处理文件名包含指定字符的CSV |
+| `-v, --verbose` | 显示失败/跳过明细 |
+
+默认输出“处理结果”汇总，失败文件按原因聚合统计。
+
+---
+
+## evaluate - 评估指标
+
+批量评估心率或血氧结果，输出文件明细、异常列表和准确度汇总。别名：`eval`。
+
+```bash
+ghealth_tool evaluate -i <输入目录> -o <输出目录> [--type hr|spo2] [选项]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `-i, --input` | 输入目录（必需） |
+| `-o, --output` | 输出目录（必需） |
+| `--type` | 评估类型：hr 或 spo2，默认 hr |
+| `--ref-column` | 参考列名，覆盖规则配置 |
+| `--pred-column` | 预测列名，覆盖规则配置 |
+| `--ref-column-col` | 参考列索引，1-based，优先于列名 |
+| `--pred-column-col` | 预测列索引，1-based，优先于列名 |
+| `--chip` | 芯片型号 |
+| `--rule` | 评估规则文件 |
+| `--diff-threshold` | 参考值差分异常阈值 |
+| `--stale-minutes` | 参考值长时间不变异常阈值（分钟） |
+| `--filter` | 仅处理文件名包含指定字符的CSV |
+| `-v, --verbose` | 显示失败/跳过明细 |
+
+输出文件包括 `file_details.csv`、`anomaly_list.csv`、`accuracy_summary.csv` 和
+`accuracy_filtered.csv`。默认输出“评估结果”汇总，空文件、缺少参考列/预测列等会进入跳过/失败统计。
+
 ---
 
 ## factory - 产测计算
@@ -268,7 +325,7 @@ ghealth_tool fac -i <输入> -c <芯片> [选项]
 # 单文件计算
 ghealth_tool fac -i data.csv -c gh3036_evk
 
-# 目录批量（不匹配文件自动跳过）
+# 目录批量（无有效通道、读取失败等会进入汇总统计）
 ghealth_tool fac -i data_dir/ -c gh3036_evk -v
 
 # 覆盖时长配置
@@ -305,7 +362,7 @@ ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance
 | `--static-min` | ACC静止检测最小连续帧数（默认5） |
 | `--range-ratio` | 数据范围异常允许比例（%，默认1） |
 | `--frame-ratio` | 帧丢失允许比例（%，默认1） |
-| `--center-ratio` | 数据居中异常允许比例（%，默认1） |
+| `--center-ratio` | 数据居中异常允许比例（%，默认5） |
 | `--ipd-ratio` | Ipd超差允许比例（%，默认1） |
 | `--acc-ratio` | ACC异常帧允许比例（%，默认1） |
 | `-w, --workers` | 并行线程数（默认4） |
@@ -330,7 +387,7 @@ ghealth_tool check -i <路径> [-c <芯片>] [--checks <检查项>] [--tolerance
 - `WARNING`: 有异常，但异常比例不超过该检查项的 `--*-ratio` 阈值。
 - `FAIL`: 异常比例超过阈值，或缺少必要列导致无法检查。
 
-比例参数使用百分数数字，例如 `--frame-ratio 0.5` 表示允许丢包率不超过0.5%。默认各检查项均允许1%。CSV报告额外提供 `总异常(结果)`，只输出 `PASS` 或 `FAIL`；`WARNING` 在总异常判断中归为 `PASS`。
+比例参数使用百分数数字，例如 `--frame-ratio 0.5` 表示允许丢包率不超过0.5%。除 `--center-ratio` 默认5%外，其他比例默认1%。CSV报告额外提供 `总异常(结果)`，只输出 `PASS` 或 `FAIL`；`WARNING` 在总异常判断中归为 `PASS`。
 
 ### 列名解析
 
@@ -435,7 +492,8 @@ ACC静止Y次数, ACC静止Y最长帧, ACC静止Y前10帧,
 ACC静止Z次数, ACC静止Z最长帧, ACC静止Z前10帧,
 ACC循环X次数, ACC循环X最长帧, ACC循环X前10帧,
 ACC循环Y次数, ACC循环Y最长帧, ACC循环Y前10帧,
-ACC循环Z次数, ACC循环Z最长帧, ACC循环Z前10帧
+ACC循环Z次数, ACC循环Z最长帧, ACC循环Z前10帧,
+文件相对路径
 ```
 
 每个检查项结果列为 `PASS` / `WARNING` / `FAIL`。`总异常(结果)` 只输出 `PASS` / `FAIL`，其中 `WARNING` 归为 `PASS`。每种ACC异常每通道三列：次数、最长持续帧数、前10次异常起始帧号（逗号分隔）。XYZ同时的判定取三通道交集（静止）或去重合并（循环）。
@@ -444,7 +502,7 @@ ACC循环Z次数, ACC循环Z最长帧, ACC循环Z前10帧
 
 ## offline - 离线跑库
 
-调用离线算法工具（TEE_Algorithm.exe）进行心率计算，支持准确度统计和PSD时频图。别名：`ol`。
+调用离线算法工具（TEE_Algorithm.exe）进行心率计算，支持准确度统计和PSD时频图。
 
 ```bash
 ghealth_tool offline -i <输入目录> -c <芯片> [选项]

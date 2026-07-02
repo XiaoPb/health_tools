@@ -22,8 +22,10 @@ ghealth_tool fac -i <input> -c <chip> [options]
 | `--snr-cfg` | SNR 配置：skip_head,skip_tail,min_duration（如 10,10,90） |
 | `--ctr-cfg` | CTR 配置：skip_head,skip_tail,min_duration（如 1,0,2） |
 | `--noise-cfg` | Noise 配置：skip_head,skip_tail,min_duration（如 2,0,4） |
+| `--adc-offset` | ADC 偏移量，覆盖芯片规则配置 |
 | `--channels` | 指定计算通道（逗号分隔） |
 | `-o/--output` | 输出结果 CSV 文件或目录 |
+| `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
 
 ## 计算公式
@@ -59,7 +61,8 @@ ghealth_tool fac -i <input> -c <chip> [options]
 
 - 表格显示每个通道的 SNR(dB)、CTR(nA/mA)、Noise(uV)、Mean、Max、Min、Gain、Current、采样率、数据时长
 - 同时输出 chip_info 面板，显示每通道的 Gain 和 Current
-- 目录模式下不匹配的 CSV 文件静默跳过
+- 目录模式输出“产测结果”汇总，读取失败、空文件、无有效通道等按原因统计
+- 使用 `-v/--verbose` 时显示失败/跳过文件明细
 
 ## 输出文件命名
 

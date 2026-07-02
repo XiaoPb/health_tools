@@ -19,7 +19,15 @@ ghealth_tool process -i <input_dir> -o <output_dir> [options]
 | `--frame-column` | 帧 ID 列名（默认: FRAME_ID） |
 | `--workers` | 并行线程数（默认: 4） |
 | `--pattern` | 文件匹配模式（默认: *.csv） |
+| `--filter` | 仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
+
+## 输出与异常汇总
+
+- 批量处理使用进度条显示并行任务进度。
+- 默认输出“处理结果”汇总，统计成功和失败数量。
+- 空文件、读取失败、处理失败等原因会聚合展示。
+- 使用 `-v/--verbose` 时显示失败文件明细。
 
 ## 示例
 

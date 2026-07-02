@@ -22,6 +22,7 @@ ghealth_tool convert --init-rule -c <chip> -i <source.csv> -o <template.yaml>
 | `--merge` | 合并多个文件为一个 |
 | `--split` | 按行数分割输出 |
 | `--init-rule` | 生成转换规则模板 |
+| `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
 
 ## 规则格式
@@ -54,18 +55,19 @@ computed:
 
 # extra_source: 从额外文件读取金标/参考列，并按指定列对齐
 extra_source:
-  suffix: ".txt"        # 自动在当前输入文件同目录查找匹配后缀的文件
-  # path: "划船机.txt"    # 也可直接指定相对/绝对路径，优先级高于 suffix/pattern
-  # pattern: "*.ref.csv" # 或使用 glob 模式
-  csv:
-    header_row: 1
-    data_start_row: 2
-    delimiter: ","
-  align:
-    left_on: time        # 原始数据对齐列
-    right_on: time       # 金标文件对齐列
-  column_mapping:
-    polar: REF_RESULT0   # 金标列映射到输出列
+  - name: hr_ref
+    suffix: ".txt"        # 自动在当前输入文件同目录查找匹配后缀的文件
+    # path: "划船机.txt"    # 也可直接指定相对/绝对路径，优先级高于 suffix/pattern
+    # pattern: "*.ref.csv" # 或使用 glob 模式
+    csv:
+      header_row: 1
+      data_start_row: 2
+      delimiter: ","
+    align:
+      left_on: time        # 原始数据对齐列
+      right_on: time       # 金标文件对齐列
+    column_mapping:
+      polar: REF_RESULT0   # 金标列映射到输出列
 ```
 
 ### 字段说明
@@ -82,7 +84,8 @@ extra_source:
 
 ### extra_source 字段说明
 
-适用于金标数据不在原始 CSV 内，而是在同目录额外文件中的场景。
+适用于金标数据不在原始 CSV 内，而是在同目录额外文件中的场景。`extra_source`
+可以写成单个字典，也可以写成列表以合并多个参考来源。
 
 常用配置：
 
@@ -93,8 +96,21 @@ extra_source:
 - `align.left_on`：原始数据中的对齐列名
 - `align.right_on`：额外文件中的对齐列名
 - `column_mapping`：额外文件列名到输出列名的映射
+- `required_columns`：额外文件必须包含的列，缺少时跳过该候选文件
+- `any_required_columns`：至少命中其中一个列名，适合同一含义有多个列名的金标文件
+- `align.right_extract`：从右侧对齐列中用正则提取实际对齐值，如中文时间戳中的 `HH:MM:SS`
 
 当前“动态心率”这类数据可配置为：原始数据和金标文件都按 `time` 列对齐；如果两边列名不同，也可分别设置 `left_on` 与 `right_on`。
+
+当找到对比文件但按对齐列合并后没有有效数据时，命令会生成
+`extra_source_align_errors.csv`，记录原始文件、对比文件、对比源和失败原因，便于批量排查金标时间不一致的问题。
+
+## 输出与异常汇总
+
+- 目录转换和合并转换都使用进度条显示进度。
+- 默认保留转换结果表，但隐藏成功文件，只展示跳过/失败项。
+- 结束后额外输出“转换汇总”，按 `规则不匹配`、`文件为空`、`格式不对`、`读取失败` 等原因统计。
+- 使用 `-v/--verbose` 时展示成功文件和失败/跳过明细。
 
 ## 生成规则模板
 

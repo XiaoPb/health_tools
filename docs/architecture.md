@@ -40,6 +40,9 @@ models/       数据类定义（规则模型）
 | `csv_handler.py` | 统一CSV读写，支持信息行、自定义表头、编码检测 |
 | `file.py` | 文件编码检测、路径工具 |
 | `parallel.py` | 并行处理封装 |
+| `progress.py` | Rich 进度条封装 |
+| `reporting.py` | 批量命令结果收集和汇总输出 |
+| `errors.py` | 文件处理异常归类为中文原因 |
 | `logger.py` | 日志配置 |
 | `accuracy.py` | 准确率计算工具 |
 
@@ -67,6 +70,10 @@ models/       数据类定义（规则模型）
 | `BatchProcessor` | 批量处理调度 |
 | `DataPlotter` | 时域/频域绘图 |
 | `STFTPlotter` | 短时傅里叶变换时频图 |
+| `FactoryCalculator` | SNR/CTR/Noise 产测指标计算 |
+| `BatchEvaluator` | 心率/血氧准确度批量评估 |
+| `OfflineRunner` | 调用离线算法工具并整理结果 |
+| `DataChecker` | 数据范围、帧完整性、Ipd、ACC 等质量检查 |
 
 ### commands/
 
@@ -80,8 +87,14 @@ Click命令定义，每个文件导出一个 `*_cmd` 函数注册到 `cli.py`：
 | `convert` | `cv` | 格式转换 |
 | `split` | — | 数据分割 |
 | `info` | `i` | 文件信息查看 |
-| `validate` | — | 规则验证 |
+| `validate` | `val` | 规则验证 |
 | `process` | — | 批量处理 |
+| `factory` | `snr`, `fac` | 工厂测试数据分析 |
+| `config` | `cfg` | 配置管理 |
+| `evaluate` | `eval` | 评估指标 |
+| `offline` | — | 离线评估流程 |
+| `check` | `chk` | 数据质量检查 |
+| `ui` | — | 启动图形界面 |
 
 ## 规则系统
 

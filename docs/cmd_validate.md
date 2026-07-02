@@ -6,6 +6,7 @@
 
 ```bash
 ghealth_tool validate <rule_file> [options]
+ghealth_tool val <rule_file> [options]
 ```
 
 ## 参数
@@ -14,6 +15,8 @@ ghealth_tool validate <rule_file> [options]
 |------|------|
 | `rule_file` | YAML 规则文件路径 |
 | `--strict` | 严格模式验证 |
+
+别名：`val`。
 
 ## 验证内容
 
