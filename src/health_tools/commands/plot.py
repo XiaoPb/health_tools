@@ -119,7 +119,7 @@ def plot_cmd(
         )
         print_summary("绘图结果", collector, console=console, verbose=verbose)
     elif input_path_obj.is_dir():
-        files = list(input_path_obj.rglob("*.csv"))
+        files = sorted(input_path_obj.rglob("*.csv"))
         if filter_name:
             files = [f for f in files if filter_name in f.name]
         collector = ResultCollector()
