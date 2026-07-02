@@ -286,19 +286,12 @@ class DataChecker:
 
     def _check_cyclic_frames(self, frame_ids: pd.Series, cycle: int = 256) -> int:
         """检查循环帧号（GH3220: 0-255循环）"""
-        lost = 0
-        prev = int(frame_ids.iloc[0])
-        for i in range(1, len(frame_ids)):
-            curr = int(frame_ids.iloc[i])
-            expected_next = (prev + 1) % cycle
-            if curr != expected_next:
-                if curr > expected_next:
-                    gap = curr - expected_next
-                else:
-                    gap = (cycle - expected_next) + curr
-                lost += gap
-            prev = curr
-        return lost
+        values = frame_ids.to_numpy(dtype=np.int64, copy=False)
+        if len(values) < 2:
+            return 0
+        expected = (values[:-1] + 1) % cycle
+        gaps = (values[1:] - expected) % cycle
+        return int(gaps[gaps > 0].sum())
 
     def _check_incremental_frames(self, frame_ids: pd.Series) -> int:
         """检查递增帧号（GH3036: 从0递增）"""
@@ -767,20 +760,21 @@ class DataChecker:
 
     def _check_acc_static(
         self, acc_df: pd.DataFrame, frame_ids: pd.Series, report: AccAnomalyReport
-    ) -> Dict[str, pd.Series]:
+    ) -> Dict[str, np.ndarray]:
         """检测连续不变段落，三通道都有→归XYZ，否则归单通道"""
-        per_ch_static: Dict[str, pd.Series] = {}
+        per_ch_static: Dict[str, np.ndarray] = {}
         per_ch_segments: Dict[int, List[Tuple[int, int]]] = {}
 
         for idx, col in enumerate(acc_df.columns):
-            ch_mask = pd.Series(False, index=acc_df.index)
-            series = acc_df[col]
-            unchanged = series.diff().eq(0)
-            unchanged.iloc[0] = False
+            values = acc_df[col].to_numpy(copy=False)
+            unchanged = np.zeros(len(values), dtype=bool)
+            if len(values) > 1:
+                unchanged[1:] = values[1:] == values[:-1]
             segments = self._find_consecutive_segments(unchanged, min_length=self.static_min)
+            ch_mask = np.zeros(len(values), dtype=bool)
             if segments:
                 for start, end in segments:
-                    ch_mask.iloc[start : end + 1] = True
+                    ch_mask[start : end + 1] = True
             per_ch_static[col] = ch_mask
             per_ch_segments[idx] = segments
 
@@ -816,7 +810,7 @@ class DataChecker:
     def _check_acc_cyclic(
         self,
         acc_df: pd.DataFrame,
-        per_ch_static: Dict[str, pd.Series],
+        per_ch_static: Dict[str, np.ndarray],
         frame_ids: pd.Series,
         report: AccAnomalyReport,
     ) -> None:
@@ -825,8 +819,8 @@ class DataChecker:
 
         for idx, col in enumerate(acc_df.columns):
             values = acc_df[col].values.copy()
-            ch_static = per_ch_static.get(col, pd.Series(False, index=acc_df.index))
-            mask = ~ch_static.values
+            ch_static = per_ch_static.get(col, np.zeros(len(acc_df), dtype=bool))
+            mask = ~ch_static
             segments = self._find_cyclic_segments(values, mask)
             per_ch_segments[idx] = segments
 
@@ -861,30 +855,21 @@ class DataChecker:
                     targets[idx].frames = [int(frame_ids.iloc[s[0]]) for s in segs]
 
     @staticmethod
-    def _find_consecutive_segments(mask: pd.Series, min_length: int = 1) -> List[Tuple[int, int]]:
+    def _find_consecutive_segments(mask, min_length: int = 1) -> List[Tuple[int, int]]:
         """找到布尔掩码中连续True的段落，返回(start_idx, end_idx)列表"""
-        if mask.sum() == 0:
+        bool_mask = np.asarray(mask, dtype=bool)
+        if len(bool_mask) == 0 or not bool_mask.any():
             return []
 
-        segments: List[Tuple[int, int]] = []
-        in_segment = False
-        start = 0
-
-        for i, val in enumerate(mask.values):
-            if val and not in_segment:
-                in_segment = True
-                start = i
-            elif not val and in_segment:
-                in_segment = False
-                length = i - start
-                if length >= min_length:
-                    segments.append((start, i - 1))
-        if in_segment:
-            length = len(mask) - start
-            if length >= min_length:
-                segments.append((start, len(mask) - 1))
-
-        return segments
+        padded = np.concatenate(([False], bool_mask, [False]))
+        edges = np.flatnonzero(padded[1:] != padded[:-1])
+        starts = edges[0::2]
+        ends = edges[1::2] - 1
+        return [
+            (int(start), int(end))
+            for start, end in zip(starts, ends)
+            if end - start + 1 >= min_length
+        ]
 
     @staticmethod
     def _find_cyclic_segments(
@@ -896,37 +881,34 @@ class DataChecker:
     ) -> List[Tuple[int, int]]:
         """在一维数组中检测固定序列重复(≥2个完整周期)，只在valid_mask为True的区域检测"""
         n = len(values)
-        segments: List[Tuple[int, int]] = []
-        i = 0
+        if n < min_period * 2:
+            return []
 
-        while i < n - min_period * 2:
-            if not valid_mask[i]:
-                i += 1
-                continue
+        values = np.asarray(values)
+        valid_mask = np.asarray(valid_mask, dtype=bool)
+        candidates: List[Tuple[int, int, int]] = []
 
-            found = False
-            for p in range(min_period, min(max_period + 1, (n - i) // 2 + 1)):
-                if not all(valid_mask[i : i + p]):
+        max_candidate_period = min(max_period, n // 2)
+        for period in range(min_period, max_candidate_period + 1):
+            pair_equal = (
+                (values[:-period] == values[period:]) & valid_mask[:-period] & valid_mask[period:]
+            )
+            for start, equal_end in DataChecker._find_consecutive_segments(
+                pair_equal, min_length=period
+            ):
+                pattern = values[start : start + period]
+                if not np.isfinite(pattern).all():
                     continue
-                pattern = values[i : i + p]
-                if np.all(pattern == pattern[0]):
-                    break
                 if pattern.max() - pattern.min() < min_amplitude:
                     continue
+                candidates.append((start, equal_end + period, period))
 
-                repeats = 1
-                j = i + p
-                while j + p <= n and np.array_equal(values[j : j + p], pattern):
-                    repeats += 1
-                    j += p
-
-                if repeats >= 2:
-                    segments.append((i, j - 1))
-                    i = j
-                    found = True
-                    break
-
-            if not found:
-                i += 1
+        segments: List[Tuple[int, int]] = []
+        last_end = -1
+        for start, end, _period in sorted(candidates, key=lambda item: (item[0], item[2])):
+            if start <= last_end:
+                continue
+            segments.append((int(start), int(end)))
+            last_end = end
 
         return segments

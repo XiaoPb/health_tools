@@ -3,6 +3,7 @@
 import csv
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -97,7 +98,53 @@ class TestAccStatic:
         assert report.static_xyz.count == 0
 
 
+class TestFrameCompletenessHelpers:
+    def test_check_cyclic_frames_handles_wrap_and_gap(self, checker):
+        assert checker._check_cyclic_frames(pd.Series([254, 255, 0, 1]), cycle=256) == 0
+        assert checker._check_cyclic_frames(pd.Series([254, 1]), cycle=256) == 2
+
+    def test_check_cyclic_frames_keeps_duplicate_and_backward_semantics(self, checker):
+        assert checker._check_cyclic_frames(pd.Series([5, 5]), cycle=256) == 255
+        assert checker._check_cyclic_frames(pd.Series([5, 4]), cycle=256) == 254
+
+
 class TestAccCyclic:
+    def test_find_consecutive_segments_accepts_numpy_array(self):
+        mask = np.array([False, True, True, False, True, True, True, False])
+
+        segments = DataChecker._find_consecutive_segments(mask, min_length=2)
+
+        assert segments == [(1, 2), (4, 6)]
+
+    def test_find_cyclic_segments_detects_repeated_pattern(self):
+        values = np.array([10, 30, 50] * 4)
+        valid_mask = np.ones(len(values), dtype=bool)
+
+        segments = DataChecker._find_cyclic_segments(values, valid_mask)
+
+        assert segments == [(0, 11)]
+
+    def test_find_cyclic_segments_ignores_static_or_low_amplitude(self):
+        valid_mask = np.ones(12, dtype=bool)
+
+        assert DataChecker._find_cyclic_segments(np.array([5] * 12), valid_mask) == []
+        assert DataChecker._find_cyclic_segments(np.array([10, 12, 10, 12] * 3), valid_mask) == []
+
+    def test_find_cyclic_segments_uses_inclusive_amplitude_threshold(self):
+        valid_mask = np.ones(8, dtype=bool)
+
+        assert DataChecker._find_cyclic_segments(np.array([10, 29, 10, 29] * 2), valid_mask) == []
+        assert DataChecker._find_cyclic_segments(np.array([10, 30, 10, 30] * 2), valid_mask)
+
+    def test_find_cyclic_segments_respects_valid_mask_breaks(self):
+        values = np.array([10, 30, 50, 10, 30, 50, 10, 30, 50, 10, 30, 50])
+        valid_mask = np.ones(len(values), dtype=bool)
+        valid_mask[5] = False
+
+        segments = DataChecker._find_cyclic_segments(values, valid_mask)
+
+        assert segments == [(6, 11)]
+
     def test_no_cyclic(self, checker):
         df = _make_df(
             [1, 2, 3, 4, 5, 6, 7, 8], [8, 7, 6, 5, 4, 3, 2, 1], [10, 20, 30, 40, 50, 60, 70, 80]
@@ -133,6 +180,25 @@ class TestAccCyclic:
         df = _make_df(accx, accy, accz)
         report = checker.check_acc_anomaly(df)
         assert report.cyclic_x.count == 0
+        assert report.cyclic_xyz.count == 0
+
+    def test_large_random_acc_smoke_no_cyclic_false_positive(self, checker):
+        rng = np.random.default_rng(42)
+        rows = 50_000
+        df = pd.DataFrame(
+            {
+                "ACCX": rng.integers(-1000, 1000, rows),
+                "ACCY": rng.integers(-1000, 1000, rows),
+                "ACCZ": rng.integers(-1000, 1000, rows),
+            }
+        )
+
+        report = checker.check_acc_anomaly(df)
+
+        assert report.total_frames == rows
+        assert report.cyclic_x.count == 0
+        assert report.cyclic_y.count == 0
+        assert report.cyclic_z.count == 0
         assert report.cyclic_xyz.count == 0
 
 
