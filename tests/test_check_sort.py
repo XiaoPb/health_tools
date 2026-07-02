@@ -129,3 +129,18 @@ def test_check_skips_csv_when_columns_do_not_match_rule(tmp_path):
     assert "跳过（列结构不符合规则" in result.output
     assert "无可检查的文件" in result.output
     assert not (tmp_path / "check_report.csv").exists()
+
+
+def test_check_help_center_ratio_default_is_five_percent():
+    runner = CliRunner()
+    result = runner.invoke(
+        __import__("health_tools.commands.check", fromlist=["check_cmd"]).check_cmd,
+        ["--help"],
+    )
+
+    assert result.exit_code == 0
+    assert "数据居中异常允许比例 (%, 默认5)" in result.output
+    assert "数据范围异常允许比例 (%, 默认1)" in result.output
+    assert "帧丢失允许比例 (%, 默认1)" in result.output
+    assert "Ipd超差允许比例 (%, 默认1)" in result.output
+    assert "ACC异常帧允许比例 (%, 默认1)" in result.output
