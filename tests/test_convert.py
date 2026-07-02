@@ -332,6 +332,28 @@ def test_convert_writes_extra_source_align_error_report(tmp_path: Path):
     ]
 
 
+def test_convert_results_table_hides_successes_when_not_verbose(capsys):
+    from health_tools.commands.convert import _print_convert_results_table
+
+    _print_convert_results_table(
+        [
+            {"status": "OK", "input": "in.csv", "output": "out.csv", "message": ""},
+            {
+                "status": "SKIP",
+                "input": "bad.csv",
+                "output": "bad_out.csv",
+                "message": "不符合转换规则",
+            },
+        ],
+        verbose=False,
+    )
+
+    output = capsys.readouterr().out
+
+    assert "bad.csv" in output
+    assert "in.csv" not in output
+
+
 def test_merge_and_convert_skips_files_that_do_not_match_rule(tmp_path: Path):
     from health_tools.commands.convert import _merge_and_convert
 

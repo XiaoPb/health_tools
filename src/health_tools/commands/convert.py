@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 import click
 import yaml
 from rich.console import Console
+from rich.progress import track
+from rich.table import Table
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -15,6 +17,8 @@ if TYPE_CHECKING:
     from health_tools.models.rules import ChipRule
 
 console = Console()
+
+ConvertStatus = Dict[str, str]
 
 _ACC_MAP = {"x": "0", "y": "1", "z": "2"}
 _ALIAS_MAP = {
@@ -239,9 +243,17 @@ def convert_cmd(
     output_csv_config = chip_rule.csv if chip_rule else None
 
     if input_path_obj.is_file():
-        _convert_file(
-            input_path_obj, output_path_obj, converter, input_csv_config, output_csv_config, verbose
-        )
+        results = [
+            _convert_file(
+                input_path_obj,
+                output_path_obj,
+                converter,
+                input_csv_config,
+                output_csv_config,
+                verbose,
+            )
+        ]
+        _print_convert_results_table(results, verbose)
         _write_extra_source_align_error_report(converter, output_path_obj.parent)
     elif input_path_obj.is_dir():
         if merge:
@@ -262,13 +274,17 @@ def convert_cmd(
             files = list(input_path_obj.rglob("*.csv"))
             if filter_name:
                 files = [f for f in files if filter_name in f.name]
-            for file in files:
+            results = []
+            for file in track(files, description="转换CSV", console=console):
                 relative = file.relative_to(input_path_obj)
                 out_file = output_path_obj / relative
                 out_file.parent.mkdir(parents=True, exist_ok=True)
-                _convert_file(
-                    file, out_file, converter, input_csv_config, output_csv_config, verbose
+                results.append(
+                    _convert_file(
+                        file, out_file, converter, input_csv_config, output_csv_config, verbose
+                    )
                 )
+            _print_convert_results_table(results, verbose)
             _write_extra_source_align_error_report(converter, output_path_obj)
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
@@ -312,6 +328,31 @@ def _write_output_csv(df: pd.DataFrame, output_file: Path, csv_config: Optional[
         df.to_csv(output_file, index=False)
 
 
+def _print_convert_results_table(results: List[ConvertStatus], verbose: bool) -> None:
+    if not results:
+        return
+    visible_results = results if verbose else [r for r in results if r["status"] != "OK"]
+    if not visible_results:
+        ok_count = sum(1 for r in results if r["status"] == "OK")
+        console.print(f"[green]OK[/green] 转换完成: {ok_count} 个文件")
+        return
+
+    table = Table(title="转换结果")
+    table.add_column("状态", no_wrap=True)
+    table.add_column("输入")
+    table.add_column("输出")
+    table.add_column("说明")
+    for result in visible_results:
+        style = {"OK": "green", "SKIP": "yellow", "FAIL": "red"}.get(result["status"], "")
+        table.add_row(
+            f"[{style}]{result['status']}[/{style}]" if style else result["status"],
+            result["input"],
+            result["output"],
+            result["message"],
+        )
+    console.print(table)
+
+
 def _write_extra_source_align_error_report(
     converter: DataConverter, output_dir: Path, report_name: str = "extra_source_align_errors.csv"
 ) -> None:
@@ -325,12 +366,21 @@ def _write_extra_source_align_error_report(
     report_file = output_dir / report_name
     pd.DataFrame(errors).to_csv(report_file, index=False, encoding="utf-8-sig")
 
-    console.print(f"[yellow]WARN[/yellow] extra_source 对齐异常 {len(errors)} 个:")
+    table = Table(title=f"extra_source 对齐异常 {len(errors)} 个")
+    table.add_column("目录")
+    table.add_column("原始文件")
+    table.add_column("对比文件")
+    table.add_column("对比源")
     for error in errors:
-        console.print(
-            f"  [yellow]-[/yellow] {error['input_file']} <- {error['extra_file']} "
-            f"({error['extra_source']})"
+        input_file = Path(error["input_file"])
+        extra_file = Path(error["extra_file"])
+        table.add_row(
+            str(input_file.parent),
+            input_file.name,
+            extra_file.name,
+            error["extra_source"],
         )
+    console.print(table)
     console.print(f"[yellow]WARN[/yellow] 对齐异常已保存: {report_file}")
 
 
@@ -341,23 +391,38 @@ def _convert_file(
     input_csv_config: Optional[dict],
     output_csv_config: Optional[dict],
     verbose: bool,
-) -> None:
+) -> ConvertStatus:
     try:
         df = _read_input_csv(input_file, input_csv_config)
         if not converter.has_matching_columns(df):
-            if verbose:
-                console.print(f"[yellow]SKIP[/yellow] {input_file.name}: 不符合转换规则")
-            return
+            return {
+                "status": "SKIP",
+                "input": str(input_file),
+                "output": str(output_file),
+                "message": "不符合转换规则",
+            }
         result = converter.convert(df, source_file=input_file)
         if result.empty and len(result.columns) == 0:
-            if verbose:
-                console.print(f"[yellow]SKIP[/yellow] {input_file.name}: 不符合转换规则")
-            return
+            return {
+                "status": "SKIP",
+                "input": str(input_file),
+                "output": str(output_file),
+                "message": "不符合转换规则",
+            }
         _write_output_csv(result, output_file, output_csv_config)
-        if verbose:
-            console.print(f"[green]OK[/green] {input_file.name} -> {output_file}")
+        return {
+            "status": "OK",
+            "input": str(input_file),
+            "output": str(output_file),
+            "message": "",
+        }
     except Exception as e:
-        console.print(f"[red]FAIL[/red] {input_file.name}: {e}")
+        return {
+            "status": "FAIL",
+            "input": str(input_file),
+            "output": str(output_file),
+            "message": str(e),
+        }
 
 
 def _merge_and_convert(
@@ -376,23 +441,51 @@ def _merge_and_convert(
     if filter_name:
         files = [f for f in files if filter_name in f.name]
     dfs = []
-    for file in files:
+    results: List[ConvertStatus] = []
+    for file in track(files, description="读取CSV", console=console):
         try:
             df = _read_input_csv(file, input_csv_config)
             if not converter.has_matching_columns(df):
-                if verbose:
-                    console.print(f"[yellow]SKIP[/yellow] {file.name}: 不符合转换规则")
+                results.append(
+                    {
+                        "status": "SKIP",
+                        "input": str(file),
+                        "output": str(output_file),
+                        "message": "不符合转换规则",
+                    }
+                )
                 continue
             df = converter._merge_extra_source(df, file)
             if not converter.has_matching_columns(df):
-                if verbose:
-                    console.print(f"[yellow]SKIP[/yellow] {file.name}: 不符合转换规则")
+                results.append(
+                    {
+                        "status": "SKIP",
+                        "input": str(file),
+                        "output": str(output_file),
+                        "message": "不符合转换规则",
+                    }
+                )
                 continue
             dfs.append(df)
-            if verbose:
-                console.print(f"[green]OK[/green] 读取: {file.name}")
+            results.append(
+                {
+                    "status": "OK",
+                    "input": str(file),
+                    "output": str(output_file),
+                    "message": "已读取",
+                }
+            )
         except Exception as e:
-            console.print(f"[red]FAIL[/red] {file.name}: {e}")
+            results.append(
+                {
+                    "status": "FAIL",
+                    "input": str(file),
+                    "output": str(output_file),
+                    "message": str(e),
+                }
+            )
+
+    _print_convert_results_table(results, verbose)
 
     if dfs:
         merged = pd.concat(dfs, ignore_index=True)
