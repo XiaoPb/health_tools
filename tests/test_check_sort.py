@@ -113,3 +113,19 @@ def test_sort_report_defaults_to_current_directory_report(tmp_path):
 
         assert result.exit_code == 0
         assert Path("sorted/normal/ok.csv").read_text(encoding="utf-8") == "ok"
+
+
+def test_check_skips_csv_when_columns_do_not_match_rule(tmp_path):
+    csv_file = tmp_path / "bad.csv"
+    csv_file.write_text("Version: GH3036\nfoo,bar\n1,2\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        __import__("health_tools.commands.check", fromlist=["check_cmd"]).check_cmd,
+        ["-i", str(csv_file), "-c", "gh3036", "-v"],
+    )
+
+    assert result.exit_code == 0
+    assert "跳过（列结构不符合规则" in result.output
+    assert "无可检查的文件" in result.output
+    assert not (tmp_path / "check_report.csv").exists()

@@ -133,6 +133,17 @@ def check_cmd(
             return None, None, None, "空文件"
 
         checker = DataChecker(chip_rule, tolerance=tolerance, static_min=static_min)
+        mismatch_reason = _check_rule_mismatch(
+            checker,
+            df,
+            check_set,
+            timestamp_column=timestamp_column,
+            chip=chip,
+            require_acc_columns=checks is not None and "acc" in check_set,
+        )
+        if mismatch_reason:
+            return None, None, None, mismatch_reason
+
         report = FileCheckReport(file_path=csv_file, chip=chip)
 
         if "range" in check_set:
@@ -241,6 +252,42 @@ def _detect_chip(csv_file: Path) -> Optional[str]:
     elif "gh3300" in first_lower:
         return "gh3300"
     return None
+
+
+def _check_rule_mismatch(
+    checker,
+    df,
+    check_set: set,
+    timestamp_column: Optional[str] = None,
+    chip: str = "",
+    require_acc_columns: bool = False,
+) -> str:
+    """检查CSV列结构是否满足本次启用的检查项，不匹配则返回跳过原因。"""
+    missing: List[str] = []
+
+    data_cols = [c for c in checker._get_data_columns() if c in df.columns]
+    frame_col = checker._resolve_frame_column(df)
+
+    if "range" in check_set and not data_cols:
+        missing.append("数据列")
+    if "center" in check_set and not data_cols:
+        missing.append("数据列")
+    if "frame" in check_set and not frame_col:
+        missing.append("帧号列")
+    if "ipd" in check_set and chip.startswith("gh3036"):
+        ipd_cols = [c for c in checker._get_ipd_columns() if c in df.columns]
+        if not ipd_cols or not data_cols:
+            missing.append("Ipd/Rawdata列")
+    if require_acc_columns and not checker._resolve_acc_columns(df):
+        missing.append("ACC列")
+    if timestamp_column and timestamp_column not in df.columns:
+        missing.append(f"时间戳列 {timestamp_column}")
+
+    if not missing:
+        return ""
+
+    missing_text = "、".join(dict.fromkeys(missing))
+    return f"列结构不符合规则，缺少 {missing_text}"
 
 
 def _default_output(target: Path) -> Path:
