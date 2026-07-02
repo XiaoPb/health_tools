@@ -127,6 +127,70 @@ def test_extra_source_align_extracts_time_from_chinese_timestamp(tmp_path: Path)
     assert list(result["REF_RESULT0"]) == [97, 98]
 
 
+def test_extra_source_records_align_error_when_no_values_matched(tmp_path: Path):
+    source_file = tmp_path / "raw.csv"
+    source_file.write_text("time,value\n15:06:01,1\n15:06:02,2\n", encoding="utf-8")
+
+    extra_file = tmp_path / "gold.csv"
+    extra_file.write_text("time,spo2\n16:06:01,97\n16:06:02,98\n", encoding="utf-8")
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "spo2_ref": "REF_SPO2"})
+    rule.extra_source = {
+        "name": "spo2_ref",
+        "pattern": "gold.csv",
+        "required_columns": ["time", "spo2"],
+        "csv": {"header_row": 1, "data_start_row": 2, "delimiter": ","},
+        "align": {"left_on": "time", "right_on": "time"},
+        "column_mapping": {"spo2": "spo2_ref"},
+    }
+
+    converter = DataConverter(rule)
+    import pandas as pd
+
+    df = pd.read_csv(source_file)
+    result = converter.convert(df, source_file=source_file)
+
+    assert list(result["REF_SPO2"]) == [0, 0]
+    assert converter.extra_source_align_errors == [
+        {
+            "input_file": str(source_file),
+            "extra_source": "spo2_ref",
+            "extra_file": str(extra_file),
+            "left_on": "time",
+            "right_on": "time",
+            "mapped_columns": "spo2_ref",
+            "reason": "找到对比文件，但根据对齐列合并后没有有效数据",
+        }
+    ]
+
+
+def test_extra_source_does_not_record_align_error_when_values_matched(tmp_path: Path):
+    source_file = tmp_path / "raw.csv"
+    source_file.write_text("time,value\n15:06:01,1\n15:06:02,2\n", encoding="utf-8")
+
+    extra_file = tmp_path / "gold.csv"
+    extra_file.write_text("time,spo2\n15:06:01,97\n15:06:02,98\n", encoding="utf-8")
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "spo2_ref": "REF_SPO2"})
+    rule.extra_source = {
+        "name": "spo2_ref",
+        "pattern": "gold.csv",
+        "required_columns": ["time", "spo2"],
+        "csv": {"header_row": 1, "data_start_row": 2, "delimiter": ","},
+        "align": {"left_on": "time", "right_on": "time"},
+        "column_mapping": {"spo2": "spo2_ref"},
+    }
+
+    converter = DataConverter(rule)
+    import pandas as pd
+
+    df = pd.read_csv(source_file)
+    result = converter.convert(df, source_file=source_file)
+
+    assert list(result["REF_SPO2"]) == [97, 98]
+    assert converter.extra_source_align_errors == []
+
+
 def test_convert_with_multiple_extra_sources(tmp_path: Path):
     source_file = tmp_path / "raw.csv"
     source_file.write_text(
@@ -224,6 +288,48 @@ def test_convert_file_skips_output_when_rule_sources_do_not_match(tmp_path: Path
     _convert_file(input_file, output_file, converter, None, None, verbose=False)
 
     assert not output_file.exists()
+
+
+def test_convert_writes_extra_source_align_error_report(tmp_path: Path):
+    from health_tools.commands.convert import (
+        _convert_file,
+        _write_extra_source_align_error_report,
+    )
+
+    input_file = tmp_path / "raw.csv"
+    input_file.write_text("time,value\n15:06:01,1\n", encoding="utf-8")
+    extra_file = tmp_path / "gold.csv"
+    extra_file.write_text("time,spo2\n16:06:01,97\n", encoding="utf-8")
+    output_file = tmp_path / "out" / "raw.csv"
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "spo2_ref": "REF_SPO2"})
+    rule.extra_source = {
+        "name": "spo2_ref",
+        "pattern": "gold.csv",
+        "required_columns": ["time", "spo2"],
+        "csv": {"header_row": 1, "data_start_row": 2, "delimiter": ","},
+        "align": {"left_on": "time", "right_on": "time"},
+        "column_mapping": {"spo2": "spo2_ref"},
+    }
+    converter = DataConverter(rule)
+
+    _convert_file(input_file, output_file, converter, None, None, verbose=False)
+    _write_extra_source_align_error_report(converter, output_file.parent)
+
+    import pandas as pd
+
+    report = pd.read_csv(output_file.parent / "extra_source_align_errors.csv")
+    assert report.to_dict("records") == [
+        {
+            "input_file": str(input_file),
+            "extra_source": "spo2_ref",
+            "extra_file": str(extra_file),
+            "left_on": "time",
+            "right_on": "time",
+            "mapped_columns": "spo2_ref",
+            "reason": "找到对比文件，但根据对齐列合并后没有有效数据",
+        }
+    ]
 
 
 def test_merge_and_convert_skips_files_that_do_not_match_rule(tmp_path: Path):

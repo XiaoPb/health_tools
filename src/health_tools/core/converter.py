@@ -15,6 +15,7 @@ class DataConverter:
     def __init__(self, rule: ConvertRule, chip_columns: Optional[List[str]] = None):
         self.rule = rule
         self.chip_columns = chip_columns
+        self.extra_source_align_errors: List[Dict[str, str]] = []
 
     def convert(self, df: pd.DataFrame, source_file: Optional[Path] = None) -> pd.DataFrame:
         df = self._merge_extra_source(df, source_file)
@@ -144,10 +145,65 @@ class DataConverter:
         merged["__extra_align_key__"] = left_keys
         merged = merged.merge(merge_df, on="__extra_align_key__", how="left")
         merged = merged.drop(columns=["__extra_align_key__"])
+        if self._merged_columns_have_no_data(merged, merged_columns):
+            self._record_extra_source_align_error(
+                source_file=source_file,
+                extra_file=extra_file,
+                config=config,
+                left_on=left_on,
+                right_on=right_on,
+                mapped_columns=merged_columns,
+            )
         for col in merged_columns:
             if col in merged.columns:
                 merged[col] = merged[col].fillna(0)
         return merged
+
+    def _merged_columns_have_no_data(self, df: pd.DataFrame, columns: List[str]) -> bool:
+        if not columns:
+            return False
+        for col in columns:
+            if col not in df.columns:
+                continue
+            values = df[col]
+            if isinstance(values, pd.DataFrame):
+                for _, series in values.items():
+                    if self._series_has_data(series):
+                        return False
+            elif self._series_has_data(values):
+                return False
+        return True
+
+    def _series_has_data(self, series: pd.Series) -> bool:
+        cleaned = series.replace("", np.nan).dropna()
+        if cleaned.empty:
+            return False
+        numeric = pd.to_numeric(cleaned, errors="coerce")
+        numeric_values = numeric.dropna()
+        if len(numeric_values) == len(cleaned):
+            return bool(numeric_values.ne(0).any())
+        return True
+
+    def _record_extra_source_align_error(
+        self,
+        source_file: Path,
+        extra_file: Path,
+        config: Dict[str, Any],
+        left_on: str,
+        right_on: str,
+        mapped_columns: List[str],
+    ) -> None:
+        self.extra_source_align_errors.append(
+            {
+                "input_file": str(source_file),
+                "extra_source": str(config.get("name") or config.get("description") or ""),
+                "extra_file": str(extra_file),
+                "left_on": left_on,
+                "right_on": right_on,
+                "mapped_columns": ",".join(mapped_columns),
+                "reason": "找到对比文件，但根据对齐列合并后没有有效数据",
+            }
+        )
 
     def _resolve_extra_source_file(
         self, source_file: Path, config: Dict[str, Any]

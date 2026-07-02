@@ -242,6 +242,7 @@ def convert_cmd(
         _convert_file(
             input_path_obj, output_path_obj, converter, input_csv_config, output_csv_config, verbose
         )
+        _write_extra_source_align_error_report(converter, output_path_obj.parent)
     elif input_path_obj.is_dir():
         if merge:
             output_path_obj.parent.mkdir(parents=True, exist_ok=True)
@@ -255,6 +256,7 @@ def convert_cmd(
                 filter_name,
                 verbose,
             )
+            _write_extra_source_align_error_report(converter, output_path_obj.parent)
         else:
             output_path_obj.mkdir(parents=True, exist_ok=True)
             files = list(input_path_obj.rglob("*.csv"))
@@ -267,6 +269,7 @@ def convert_cmd(
                 _convert_file(
                     file, out_file, converter, input_csv_config, output_csv_config, verbose
                 )
+            _write_extra_source_align_error_report(converter, output_path_obj)
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
@@ -307,6 +310,28 @@ def _write_output_csv(df: pd.DataFrame, output_file: Path, csv_config: Optional[
         handler.write(output_file, df, info=info if info else None)
     else:
         df.to_csv(output_file, index=False)
+
+
+def _write_extra_source_align_error_report(
+    converter: DataConverter, output_dir: Path, report_name: str = "extra_source_align_errors.csv"
+) -> None:
+    errors = getattr(converter, "extra_source_align_errors", [])
+    if not errors:
+        return
+
+    import pandas as pd
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_file = output_dir / report_name
+    pd.DataFrame(errors).to_csv(report_file, index=False, encoding="utf-8-sig")
+
+    console.print(f"[yellow]WARN[/yellow] extra_source 对齐异常 {len(errors)} 个:")
+    for error in errors:
+        console.print(
+            f"  [yellow]-[/yellow] {error['input_file']} <- {error['extra_file']} "
+            f"({error['extra_source']})"
+        )
+    console.print(f"[yellow]WARN[/yellow] 对齐异常已保存: {report_file}")
 
 
 def _convert_file(
