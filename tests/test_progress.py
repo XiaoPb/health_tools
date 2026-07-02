@@ -105,6 +105,80 @@ def test_plot_directory_uses_progress_track(monkeypatch, tmp_path: Path):
     assert plotted == ["a.csv", "b.csv"]
 
 
+def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path: Path):
+    calls = []
+    input_dir = tmp_path / "result"
+    output_dir = tmp_path / "new_output"
+    input_dir.mkdir()
+
+    def fake_plot(self, result_dir, save_dir=None, show_progress=False):
+        calls.append((result_dir, save_dir, show_progress))
+        return [save_dir / "sample.png"]
+
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "--type",
+            "psd",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert output_dir.exists()
+    assert calls == [(input_dir, output_dir, True)]
+
+
+def test_plot_psd_requires_directory(tmp_path: Path):
+    input_file = tmp_path / "result.csv"
+    output_dir = tmp_path / "output"
+    input_file.write_text("x\n1\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_dir),
+            "--type",
+            "psd",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "PSD绘图输入必须是离线结果目录" in result.output
+
+
+def test_plot_rejects_unknown_type(tmp_path: Path):
+    input_file = tmp_path / "data.csv"
+    output_dir = tmp_path / "output"
+    input_file.write_text("x\n1\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_dir),
+            "--type",
+            "unknown",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "不支持的图表类型" in result.output
+
+
 def test_convert_merge_uses_progress_track(monkeypatch, tmp_path: Path):
     import pandas as pd
 

@@ -49,7 +49,7 @@ ghealth_tool parse -i logs/ -o output/ -r parse/default.yaml -v
 
 ### plot - 数据可视化
 
-绘制PPG数据的时域/频域图。
+绘制PPG数据的时域/频域图，也支持 STFT 和离线结果 PSD 时频图。
 
 ```bash
 # 绘制时域和频域图
@@ -60,6 +60,9 @@ ghealth_tool plot -i data.csv -o plots/ --type time --channels red,ir
 
 # 指定窗口和重叠率
 ghealth_tool plot -i data.csv -o plots/ --window 10 --overlap 0.75
+
+# 离线结果目录生成PSD时频图，输出目录不存在时会自动创建
+ghealth_tool plot -i offline_result/reorganized -o psd_plots/ --type psd
 ```
 
 ### classify - 数据分类

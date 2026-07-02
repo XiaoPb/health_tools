@@ -1,6 +1,6 @@
 # plot 命令
 
-绘制 PPG 数据的时域图、频域图、STFT 时频图。
+绘制 PPG 数据的时域图、频域图、STFT 时频图，也可复用离线结果生成 PSD 时频图。
 
 ## 用法
 
@@ -12,11 +12,11 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 
 | 参数 | 说明 |
 |------|------|
-| `-i/--input` | 输入 CSV 文件或目录 |
+| `-i/--input` | 输入 CSV 文件或目录；PSD 模式为离线结果目录 |
 | `-o/--output` | 输出图片目录 |
 | `-c/--chip` | 芯片类型（指定 CSV 格式） |
 | `-r/--rule` | 转换规则文件（指定 CSV 格式） |
-| `--type` | 图表类型: time\|freq\|stft\|both（默认: both） |
+| `--type` | 图表类型: time\|freq\|stft\|psd\|both（默认: both） |
 | `--channels` | 绘制通道（逗号分隔） |
 | `--sample-rate` | 采样率 Hz（默认: 25） |
 | `--window` | STFT 窗口大小秒（默认: 25） |
@@ -54,6 +54,15 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 - 统一处理流程：去基线 → 带通滤波 → STFT → 逐列归一化
 - 支持 `--ref-column` 叠加参考折线
 
+## PSD 时频图模式
+
+指定 `--type psd` 时，输入路径必须是离线跑库整理后的结果目录，目录内包含
+`*_result.vshb` 以及同名 `.prepsd`、`.accxpsd`、`.accypsd`、`.acczpsd` 文件。
+输出目录无需提前创建，命令会自动创建并生成 PNG 图片。
+
+PSD 模式复用 `offline` 命令的 PSD 绘图方式，`--format`、`--dpi`、`--channels`、
+`--sample-rate` 等普通绘图参数不会影响 PSD 输出。
+
 ## 数据处理流程
 
 1. 去基线（mean/median）
@@ -83,4 +92,7 @@ ghealth_tool plot -i data.csv -o ./plots --chip gh3036 --type both --channels Ip
 
 # 目录模式仅绘制文件名包含 valid 的 CSV
 ghealth_tool plot -i ./csv/ -o ./plots --chip gh3036 --filter valid --no-show
+
+# 离线结果目录生成 PSD 时频图
+ghealth_tool plot -i ./offline_result/reorganized -o ./psd_plots --type psd
 ```

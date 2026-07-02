@@ -46,7 +46,7 @@ ghealth_tool p -i raw.log -o output.csv -c gh3220
 
 ## plot - 数据可视化
 
-绘制PPG数据的时域图、频域图或时频图（STFT）。
+绘制PPG数据的时域图、频域图、时频图（STFT）或离线结果 PSD 时频图。
 
 ```bash
 ghealth_tool plot -i <输入> -o <输出目录> [--type <类型>] [--sample-rate <采样率>]
@@ -54,9 +54,9 @@ ghealth_tool plot -i <输入> -o <输出目录> [--type <类型>] [--sample-rate
 
 | 参数 | 说明 |
 |---|---|
-| `-i, --input` | 输入CSV文件（必需） |
+| `-i, --input` | 输入CSV文件；PSD 模式为离线结果目录（必需） |
 | `-o, --output` | 输出目录（必需） |
-| `--type` | 图表类型：time / freq / both / stft |
+| `--type` | 图表类型：time / freq / both / stft / psd |
 | `--sample-rate` | 采样率（Hz） |
 | `--channels` | 指定绘制的通道（逗号分隔） |
 | `--window` | 窗口大小（秒） |
@@ -73,7 +73,14 @@ ghealth_tool plot -i data.csv -o plots/ --type time --channels red,ir
 
 # STFT时频图
 ghealth_tool plot -i data.csv -o plots/ --type stft --sample-rate 100 --window 10
+
+# 离线结果目录生成PSD时频图，输出目录不存在时会自动创建
+ghealth_tool plot -i offline_result/reorganized -o psd_plots/ --type psd
 ```
+
+`--type psd` 复用 `offline` 命令的 PSD 绘图方式，读取离线结果目录中的
+`*_result.vshb`、`.prepsd`、`.accxpsd`、`.accypsd`、`.acczpsd` 文件并生成 PNG。
+普通绘图参数（如 `--channels`、`--sample-rate`、`--format`）不影响 PSD 输出。
 
 ---
 

@@ -14,7 +14,7 @@ console = Console()
 @click.option("-o", "--output", "output_path", required=True, help="输出图片目录")
 @click.option("-c", "--chip", "chip_name", help="芯片类型（指定CSV格式）")
 @click.option("-r", "--rule", "rule_file", help="转换规则文件（指定CSV格式）")
-@click.option("--type", "plot_type", default="both", help="图表类型: time|freq|stft|both")
+@click.option("--type", "plot_type", default="both", help="图表类型: time|freq|stft|psd|both")
 @click.option("--channels", help="指定绘制的通道（如: red,ir,green）")
 @click.option("--sample-rate", type=int, default=25, help="采样率（Hz，默认: 25）")
 @click.option("--window", type=int, default=25, help="STFT窗口大小（秒，默认: 25）")
@@ -55,6 +55,20 @@ def plot_cmd(
     verbose: bool,
 ) -> None:
     """绘制PPG数据的时域/频域/时频图"""
+    valid_types = {"time", "freq", "stft", "psd", "both"}
+    if plot_type not in valid_types:
+        console.print(f"[red]错误: 不支持的图表类型: {plot_type}[/red]")
+        console.print("支持的类型: time, freq, stft, psd, both")
+        raise SystemExit(1)
+
+    input_path_obj = Path(input_path)
+    output_path_obj = Path(output_path)
+    output_path_obj.mkdir(parents=True, exist_ok=True)
+
+    if plot_type == "psd":
+        _plot_psd_dir(input_path_obj, output_path_obj)
+        return
+
     from health_tools.core.plotter import DataPlotter
     from health_tools.rules.loader import RuleLoader
 
@@ -67,10 +81,6 @@ def plot_cmd(
         from health_tools.models.rules import ChipRule as _ChipRule
 
         chip_rule = _ChipRule(chip="", csv=csv_config, columns=[])
-
-    input_path_obj = Path(input_path)
-    output_path_obj = Path(output_path)
-    output_path_obj.mkdir(parents=True, exist_ok=True)
 
     channel_list = channels.split(",") if channels else None
 
@@ -133,6 +143,25 @@ def plot_cmd(
     else:
         console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
         raise SystemExit(1)
+
+
+def _plot_psd_dir(input_dir: Path, output_dir: Path) -> None:
+    """绘制离线结果目录中的PSD时频图"""
+    if not input_dir.exists():
+        console.print(f"[red]错误: 输入路径不存在: {input_dir}[/red]")
+        raise SystemExit(1)
+    if not input_dir.is_dir():
+        console.print("[red]错误: PSD绘图输入必须是离线结果目录[/red]")
+        raise SystemExit(1)
+
+    from health_tools.core.psd_plotter import PsdPlotter
+
+    plotter = PsdPlotter()
+    saved = plotter.plot(input_dir, save_dir=output_dir, show_progress=True)
+    if saved:
+        console.print(f"[green]OK[/green] 生成 {len(saved)} 张PSD时频图: {output_dir}")
+    else:
+        console.print("[yellow]WARN[/yellow] 未找到PSD数据文件")
 
 
 def _plot_file(
