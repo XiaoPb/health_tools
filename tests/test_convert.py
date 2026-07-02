@@ -127,6 +127,40 @@ def test_extra_source_align_extracts_time_from_chinese_timestamp(tmp_path: Path)
     assert list(result["REF_RESULT0"]) == [97, 98]
 
 
+def test_extra_source_align_handles_trailing_empty_csv_field(tmp_path: Path):
+    source_file = tmp_path / "raw.csv"
+    source_file.write_text("time,value\n15:06:01,1\n15:06:02,2\n", encoding="utf-8")
+
+    extra_file = tmp_path / "masimohealth.csv"
+    extra_file.write_text(
+        "会话, 指数, 时间戳, 日期, 时间, SpO2, 脉搏率, RRp, PVI, 血流灌注指数\n"
+        '"1","1","1782464761","2026年6月26日 星期五","中国标准时间 15:06:01",'
+        '"97","85","--","--","1.03",\n'
+        '"1","2","1782464762","2026年6月26日 星期五","中国标准时间 15:06:02",'
+        '"98","84","--","--","1.04",\n',
+        encoding="utf-8",
+    )
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "gold_spo2": "REF_RESULT0"})
+    rule.extra_source = {
+        "pattern": "*.csv",
+        "required_columns": ["时间"],
+        "any_required_columns": ["SpO2", "O2 饱和度"],
+        "csv": {"header_row": 1, "data_start_row": 2, "delimiter": ","},
+        "align": {"left_on": "time", "right_on": "时间", "right_extract": r"(\d{2}:\d{2}:\d{2})"},
+        "column_mapping": {"SpO2": "gold_spo2", "O2 饱和度": "gold_spo2"},
+    }
+
+    converter = DataConverter(rule)
+    import pandas as pd
+
+    df = pd.read_csv(source_file)
+    result = converter.convert(df, source_file=source_file)
+
+    assert list(result["REF_RESULT0"]) == [97, 98]
+    assert converter.extra_source_align_errors == []
+
+
 def test_extra_source_records_align_error_when_no_values_matched(tmp_path: Path):
     source_file = tmp_path / "raw.csv"
     source_file.write_text("time,value\n15:06:01,1\n15:06:02,2\n", encoding="utf-8")

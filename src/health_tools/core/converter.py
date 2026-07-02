@@ -280,6 +280,7 @@ class DataConverter:
                 delimiter=delimiter,
                 encoding=encoding,
                 on_bad_lines="skip",
+                index_col=False,
             )
             df.columns = [str(col).strip() for col in df.columns]
             return df
@@ -290,6 +291,7 @@ class DataConverter:
             delimiter=delimiter,
             encoding=encoding,
             on_bad_lines="skip",
+            index_col=False,
         )
         df.columns = [str(col).strip() for col in df.columns]
         return df
