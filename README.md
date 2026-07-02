@@ -11,7 +11,7 @@ pip install ghealth-tools
 或从源码安装：
 
 ```bash
-git clone https://github.com/yourusername/health_tools.git
+git clone https://github.com/XiaoPb/health_tools.git
 cd health_tools
 pip install -e .
 ```
@@ -352,7 +352,7 @@ column_mapping:
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/health_tools.git
+git clone https://github.com/XiaoPb/health_tools.git
 cd health_tools
 
 # 创建虚拟环境
