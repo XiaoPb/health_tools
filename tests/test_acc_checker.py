@@ -348,6 +348,53 @@ class TestFrameColumnResolution:
 class TestCheckResultStatus:
     """测试检查项三态结果。"""
 
+    def test_gh3220_zero_reserved_channels_are_skipped_for_range_and_center(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["CH0", "CH1", "CH2"],
+            chip_info={"adc_offset": 2**22},
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {
+                "CH0": [2**23 + 1, 2**23 + 2, 2**23 + 3],
+                "CH1": [0, 0, 0],
+                "CH2": [0, 0, 0],
+            }
+        )
+
+        range_result = chk.check_data_range(df)
+        center_result = chk.check_data_centering(df)
+
+        assert range_result.status == "PASS"
+        assert "跳过 2 个全0预留通道" in range_result.summary
+        assert center_result.status == "PASS"
+        assert "跳过 2 个全0预留通道" in center_result.summary
+
+    def test_gh3036_zero_reserved_channel_is_skipped_for_ipd_conversion(self):
+        rule = ChipRule(
+            chip="gh3036",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["Ipd0", "Ipd1", "Rawdata0", "Rawdata1"],
+            check_columns={"ipd": ["Ipd0", "Ipd1"], "data": ["Rawdata0", "Rawdata1"]},
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {
+                "Ipd0": [0, 0, 0],
+                "Rawdata0": [0, 0, 0],
+                "Ipd1": [1_000_000, 1_000_000, 1_000_000],
+                "Rawdata1": [2**22, 2**22, 2**22],
+            }
+        )
+
+        result = chk.check_ipd_conversion(df, threshold_ratio=100)
+
+        assert result.status == "WARNING"
+        assert "跳过 1 个全0预留通道" in result.summary
+        assert "1/1 通道超差" in result.summary
+
     def test_range_pass_warning_fail(self):
         rule = ChipRule(
             chip="gh3036",

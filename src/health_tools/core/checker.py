@@ -210,11 +210,46 @@ class DataChecker:
             return agc_cols
         return expand_columns(["AGC_INFO_CH{0-31}"])
 
+    @staticmethod
+    def _is_all_zero_channel(series: pd.Series) -> bool:
+        """判断通道有效值是否全为0，用于跳过预留数据列。"""
+        numeric = pd.to_numeric(series, errors="coerce").dropna()
+        return not numeric.empty and bool((numeric == 0).all())
+
+    def _filter_reserved_zero_channels(
+        self, df: pd.DataFrame, columns: List[str]
+    ) -> Tuple[List[str], List[str]]:
+        """过滤整列有效值全0的PPG预留数据通道。"""
+        active_cols: List[str] = []
+        skipped_cols: List[str] = []
+        for col in columns:
+            if self._is_all_zero_channel(df[col]):
+                skipped_cols.append(col)
+            else:
+                active_cols.append(col)
+        return active_cols, skipped_cols
+
+    @staticmethod
+    def _append_skipped_summary(summary: str, skipped_count: int) -> str:
+        """在检查摘要中补充跳过全0预留通道的信息。"""
+        if skipped_count <= 0:
+            return summary
+        return f"{summary}；跳过 {skipped_count} 个全0预留通道"
+
     def check_data_range(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查原始数据是否在正常范围内"""
-        data_cols = [c for c in self._get_data_columns() if c in df.columns]
-        if not data_cols:
+        all_data_cols = [c for c in self._get_data_columns() if c in df.columns]
+        if not all_data_cols:
             return CheckResult("数据范围", False, "未找到数据列")
+        data_cols, skipped_cols = self._filter_reserved_zero_channels(df, all_data_cols)
+        if not data_cols:
+            return CheckResult(
+                "数据范围",
+                True,
+                f"全部 {len(skipped_cols)} 个全0预留通道已跳过，未检查有效数据列",
+                status="PASS",
+                threshold_ratio=threshold_ratio,
+            )
 
         range_min, range_max = self.RANGE_MAP.get(
             self.chip_name, self.RANGE_MAP.get("gh3036", (0, 2**23))
@@ -244,10 +279,14 @@ class DataChecker:
             abnormal_count=total_abnormal,
             total_count=total_cells,
             threshold_ratio=threshold_ratio,
-            pass_summary=f"全部 {len(data_cols)} 列数据在正常范围 [{range_min}, {range_max}]",
+            pass_summary=self._append_skipped_summary(
+                f"全部 {len(data_cols)} 列数据在正常范围 [{range_min}, {range_max}]",
+                len(skipped_cols),
+            ),
             abnormal_summary=(
                 f"{len(abnormal_cols)}/{len(data_cols)} 列超范围 [{col_names}], "
                 f"共 {total_abnormal} 个异常值 ({pct:.1f}%)"
+                + (f"；跳过 {len(skipped_cols)} 个全0预留通道" if skipped_cols else "")
             ),
             details=details,
         )
@@ -302,9 +341,18 @@ class DataChecker:
 
     def check_data_centering(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查数据去除基线后是否居中（0.3*2^23 ~ 0.85*2^23）"""
-        data_cols = [c for c in self._get_data_columns() if c in df.columns]
-        if not data_cols:
+        all_data_cols = [c for c in self._get_data_columns() if c in df.columns]
+        if not all_data_cols:
             return CheckResult("数据居中", False, "未找到数据列")
+        data_cols, skipped_cols = self._filter_reserved_zero_channels(df, all_data_cols)
+        if not data_cols:
+            return CheckResult(
+                "数据居中",
+                True,
+                f"全部 {len(skipped_cols)} 个全0预留通道已跳过，未检查有效数据列",
+                status="PASS",
+                threshold_ratio=threshold_ratio,
+            )
 
         chip_info = self.chip_rule.chip_info or {}
         offset = float(chip_info.get("adc_offset", 0))
@@ -340,12 +388,16 @@ class DataChecker:
             total_count=total_cells,
             threshold_ratio=threshold_ratio,
             pass_summary=(
-                f"全部 {len(data_cols)} 列数据居中正常 "
-                f"[{self.CENTER_LOW:.0f}, {self.CENTER_HIGH:.0f}]"
+                self._append_skipped_summary(
+                    f"全部 {len(data_cols)} 列数据居中正常 "
+                    f"[{self.CENTER_LOW:.0f}, {self.CENTER_HIGH:.0f}]",
+                    len(skipped_cols),
+                )
             ),
             abnormal_summary=(
                 f"{len(off_center_cols)}/{len(data_cols)} 列偏离居中 [{col_names}], "
                 f"共 {total_abnormal} 个异常值 ({pct:.1f}%)"
+                + (f"；跳过 {len(skipped_cols)} 个全0预留通道" if skipped_cols else "")
             ),
             details=details,
         )
@@ -511,6 +563,8 @@ class DataChecker:
         mismatch_cols: List[str] = []
         details: List[str] = []
         check_count = min(len(ipd_cols), len(data_cols))
+        skipped_count = 0
+        active_count = 0
         total_points = 0
         total_exceed = 0
 
@@ -522,6 +576,10 @@ class DataChecker:
 
             ipd_data = pd.to_numeric(df[ipd_col], errors="coerce")
             raw_data = pd.to_numeric(df[raw_col], errors="coerce")
+            if self._is_all_zero_channel(ipd_data) or self._is_all_zero_channel(raw_data):
+                skipped_count += 1
+                continue
+            active_count += 1
 
             gain_k = self._extract_gain_k_series(df, agc_cols, i, gain_map)
 
@@ -548,6 +606,15 @@ class DataChecker:
                     f"最大差值={max_diff:.1f} pA"
                 )
 
+        if active_count == 0 and skipped_count > 0:
+            return CheckResult(
+                "Ipd转换",
+                True,
+                f"全部 {skipped_count} 个全0预留通道已跳过，未检查有效通道",
+                status="PASS",
+                threshold_ratio=threshold_ratio,
+            )
+
         col_names = ", ".join(mismatch_cols)
         pct = total_exceed / total_points * 100 if total_points > 0 else 0
         return self._build_result(
@@ -555,12 +622,14 @@ class DataChecker:
             abnormal_count=total_exceed,
             total_count=total_points,
             threshold_ratio=threshold_ratio,
-            pass_summary=(
-                f"全部 {check_count} 通道 Ipd_pA 与 Rawdata 转换误差在 ±{self.tolerance} pA 内"
+            pass_summary=self._append_skipped_summary(
+                f"全部 {active_count} 通道 Ipd_pA 与 Rawdata 转换误差在 ±{self.tolerance} pA 内",
+                skipped_count,
             ),
             abnormal_summary=(
-                f"{len(mismatch_cols)}/{check_count} 通道超差 [{col_names}], "
+                f"{len(mismatch_cols)}/{active_count} 通道超差 [{col_names}], "
                 f"共 {total_exceed} 个超差点 ({pct:.1f}%)"
+                + (f"；跳过 {skipped_count} 个全0预留通道" if skipped_count else "")
             ),
             details=details,
         )
