@@ -100,6 +100,29 @@ class TestAccStatic:
         assert report.static_xyz.count >= 1
         assert report.static_x.count == 0
 
+    def test_xyz_static_requires_combined_static_min_overlap(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["FRAME_ID", "ACCX", "ACCY", "ACCZ"],
+        )
+        chk = DataChecker(rule, static_min=10)
+        df = pd.DataFrame(
+            {
+                "ACCX": [1] * 16 + list(range(16, 32)),
+                "ACCY": list(range(8)) + [2] * 16 + list(range(24, 32)),
+                "ACCZ": list(range(12)) + [3] * 16 + list(range(28, 32)),
+            }
+        )
+
+        report = chk.check_acc_anomaly(df)
+
+        assert report.static_x.count == 0
+        assert report.static_y.count == 0
+        assert report.static_z.count == 0
+        assert report.static_xyz.count == 0
+        assert not report.has_anomaly
+
     def test_short_unchanged_not_anomaly(self, checker):
         accx = [1, 1, 1, 5, 6, 7, 8]
         accy = [1, 2, 3, 4, 5, 6, 7]
@@ -335,7 +358,7 @@ class TestFrameColumnResolution:
             }
         )
         report = chk.check_acc_anomaly(df)
-        assert report.zero.first_frame == 101
+        assert report.zero.first_frame == 1
 
     def test_rule_specified_frame_column(self):
         rule = ChipRule(
@@ -354,7 +377,27 @@ class TestFrameColumnResolution:
             }
         )
         report = chk.check_acc_anomaly(df)
-        assert report.zero.first_frame == 501
+        assert report.zero.first_frame == 1
+
+    def test_gh3036_acc_report_uses_frame_column(self):
+        rule = ChipRule(
+            chip="gh3036",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["FRAME_ID", "ACCX", "ACCY", "ACCZ"],
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame(
+            {
+                "FRAME_ID": [100, 101, 102, 103, 104],
+                "ACCX": [1, 0, 0, 0, 1],
+                "ACCY": [1, 0, 0, 0, 1],
+                "ACCZ": [1, 0, 0, 0, 1],
+            }
+        )
+
+        report = chk.check_acc_anomaly(df)
+
+        assert report.zero.first_frame == 101
 
     def test_fallback_to_row_index(self):
         rule = ChipRule(

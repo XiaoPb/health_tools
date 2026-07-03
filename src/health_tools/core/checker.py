@@ -769,12 +769,18 @@ class DataChecker:
             return pd.to_numeric(df[frame_col], errors="coerce").fillna(0).astype(int)
         return pd.Series(range(len(df)), index=df.index)
 
+    def _get_acc_display_frames(self, df: pd.DataFrame) -> pd.Series:
+        """获取ACC异常报告展示用帧号；GH3220循环帧使用行号便于定位。"""
+        if self.chip_name.startswith("gh3220"):
+            return pd.Series(range(len(df)), index=df.index)
+        return self._get_frame_ids(df)
+
     def check_acc_anomaly(
         self, df: pd.DataFrame, include_single_axis: bool = False
     ) -> AccAnomalyReport:
         """检测ACC数据异常（全零/静止/循环）"""
         acc_cols = self._resolve_acc_columns(df)
-        frame_ids = self._get_frame_ids(df)
+        frame_ids = self._get_acc_display_frames(df)
         report = AccAnomalyReport(file_path=Path(""), total_frames=len(df))
 
         if not acc_cols:
@@ -867,7 +873,7 @@ class DataChecker:
             # 三通道都有静止→找同时静止的帧段（三通道mask交集）
             cols = list(acc_df.columns)
             combined_mask = per_ch_static[cols[0]] & per_ch_static[cols[1]] & per_ch_static[cols[2]]
-            xyz_segs = self._find_consecutive_segments(combined_mask, min_length=1)
+            xyz_segs = self._find_consecutive_segments(combined_mask, min_length=self.static_min)
             if xyz_segs:
                 self._record_anomaly_indices(report, xyz_segs)
                 report.static_xyz = AccChannelAnomaly(
