@@ -216,10 +216,23 @@ class TestAccCyclic:
         n = len(pattern) * 3
         accx = (pattern * 3)[:n]
         accy = ([5, 25, 45, 65] * 3)[:n]
-        accz = ([100, 200] * 6)[:n]
+        accz = ([100, 200, 300, 400] * 3)[:n]
         df = _make_df(accx, accy, accz)
         report = checker.check_acc_anomaly(df)
         assert report.cyclic_xyz.count >= 1
+
+    def test_cyclic_xyz_requires_same_period_overlap(self, checker):
+        n = 12
+        accx = ([10, 30] * 6)[:n]
+        accy = ([20, 40, 60] * 4)[:n]
+        accz = ([100, 200, 300, 400] * 3)[:n]
+        df = _make_df(accx, accy, accz)
+
+        report = checker.check_acc_anomaly(df)
+
+        assert report.cyclic_xyz.count == 0
+        assert report.anomaly_frame_count == 0
+        assert not report.has_anomaly
 
     def test_static_not_counted_as_cyclic(self, checker):
         accx = [5, 5, 5, 5, 5, 5, 5, 5]

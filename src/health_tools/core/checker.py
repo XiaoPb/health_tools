@@ -904,13 +904,13 @@ class DataChecker:
         include_single_axis: bool = False,
     ) -> None:
         """检测固定序列重复，三通道都有→归XYZ，否则归单通道"""
-        per_ch_segments: Dict[int, List[Tuple[int, int]]] = {}
+        per_ch_segments: Dict[int, List[Tuple[int, int, int]]] = {}
 
         for idx, col in enumerate(acc_df.columns):
             values = acc_df[col].values.copy()
             ch_static = per_ch_static.get(col, np.zeros(len(acc_df), dtype=bool))
             mask = ~ch_static
-            segments = self._find_cyclic_segments(values, mask)
+            segments = self._find_cyclic_segments_with_period(values, mask)
             per_ch_segments[idx] = segments
 
         has_x = len(per_ch_segments.get(0, [])) > 0
@@ -918,31 +918,29 @@ class DataChecker:
         has_z = len(per_ch_segments.get(2, [])) > 0
 
         if has_x and has_y and has_z:
-            # 三通道都有循环→合并去重（按起始帧去重）
-            all_segs = per_ch_segments[0] + per_ch_segments[1] + per_ch_segments[2]
-            seen_starts = set()
-            unique_segs = []
-            for s in sorted(all_segs, key=lambda s: s[0]):
-                if s[0] not in seen_starts:
-                    seen_starts.add(s[0])
-                    unique_segs.append(s)
-            report.cyclic_xyz = AccChannelAnomaly(
-                count=len(unique_segs),
-                first_frame=int(frame_ids.iloc[unique_segs[0][0]]),
-                max_duration=max(end - start + 1 for start, end in unique_segs),
-                frames=[int(frame_ids.iloc[s[0]]) for s in unique_segs],
+            xyz_segs = self._find_xyz_cyclic_segments(
+                per_ch_segments[0], per_ch_segments[1], per_ch_segments[2]
             )
-            self._record_anomaly_indices(report, unique_segs)
-        else:
+            if xyz_segs:
+                report.cyclic_xyz = AccChannelAnomaly(
+                    count=len(xyz_segs),
+                    first_frame=int(frame_ids.iloc[xyz_segs[0][0]]),
+                    max_duration=max(end - start + 1 for start, end in xyz_segs),
+                    frames=[int(frame_ids.iloc[s[0]]) for s in xyz_segs],
+                )
+                self._record_anomaly_indices(report, xyz_segs)
+
+        if not report.cyclic_xyz.count:
             targets = [report.cyclic_x, report.cyclic_y, report.cyclic_z]
             for idx, segs in per_ch_segments.items():
                 if idx < 3 and segs:
+                    plain_segs = [(start, end) for start, end, _period in segs]
                     if include_single_axis:
-                        self._record_anomaly_indices(report, segs)
-                    targets[idx].count = len(segs)
-                    targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
-                    targets[idx].max_duration = max(end - start + 1 for start, end in segs)
-                    targets[idx].frames = [int(frame_ids.iloc[s[0]]) for s in segs]
+                        self._record_anomaly_indices(report, plain_segs)
+                    targets[idx].count = len(plain_segs)
+                    targets[idx].first_frame = int(frame_ids.iloc[plain_segs[0][0]])
+                    targets[idx].max_duration = max(end - start + 1 for start, end in plain_segs)
+                    targets[idx].frames = [int(frame_ids.iloc[s[0]]) for s in plain_segs]
 
     @staticmethod
     def _find_consecutive_segments(mask, min_length: int = 1) -> List[Tuple[int, int]]:
@@ -970,6 +968,22 @@ class DataChecker:
         min_amplitude: int = 20,
     ) -> List[Tuple[int, int]]:
         """在一维数组中检测固定序列重复(≥2个完整周期)，只在valid_mask为True的区域检测"""
+        return [
+            (start, end)
+            for start, end, _period in DataChecker._find_cyclic_segments_with_period(
+                values, valid_mask, min_period, max_period, min_amplitude
+            )
+        ]
+
+    @staticmethod
+    def _find_cyclic_segments_with_period(
+        values: np.ndarray,
+        valid_mask: np.ndarray,
+        min_period: int = 2,
+        max_period: int = 50,
+        min_amplitude: int = 20,
+    ) -> List[Tuple[int, int, int]]:
+        """检测固定序列重复，并保留周期用于三轴一致性判断。"""
         n = len(values)
         if n < min_period * 2:
             return []
@@ -993,12 +1007,44 @@ class DataChecker:
                     continue
                 candidates.append((start, equal_end + period, period))
 
-        segments: List[Tuple[int, int]] = []
+        segments: List[Tuple[int, int, int]] = []
         last_end = -1
-        for start, end, _period in sorted(candidates, key=lambda item: (item[0], item[2])):
+        for start, end, period in sorted(candidates, key=lambda item: (item[0], item[2])):
             if start <= last_end:
                 continue
-            segments.append((int(start), int(end)))
+            segments.append((int(start), int(end), int(period)))
             last_end = end
 
         return segments
+
+    @staticmethod
+    def _find_xyz_cyclic_segments(
+        x_segments: List[Tuple[int, int, int]],
+        y_segments: List[Tuple[int, int, int]],
+        z_segments: List[Tuple[int, int, int]],
+    ) -> List[Tuple[int, int]]:
+        """查找三轴周期一致且时间重叠的循环段。"""
+        xyz_segments: List[Tuple[int, int]] = []
+        for x_start, x_end, x_period in x_segments:
+            for y_start, y_end, y_period in y_segments:
+                if y_period != x_period:
+                    continue
+                overlap_start = max(x_start, y_start)
+                overlap_end = min(x_end, y_end)
+                if overlap_end - overlap_start + 1 < x_period * 2:
+                    continue
+                for z_start, z_end, z_period in z_segments:
+                    if z_period != x_period:
+                        continue
+                    start = max(overlap_start, z_start)
+                    end = min(overlap_end, z_end)
+                    if end - start + 1 >= x_period * 2:
+                        xyz_segments.append((int(start), int(end)))
+
+        merged: List[Tuple[int, int]] = []
+        for start, end in sorted(xyz_segments):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return merged
