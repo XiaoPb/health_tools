@@ -426,7 +426,8 @@ def _print_criteria(
             "帧完整性: 帧号连续递增无跳帧 " f"(丢包率≤{ratios.get('frame', 1.0):g}% 为Warning)"
         ),
         "center": (
-            "数据居中: Rawdata 在 0.3*2^23 ~ 0.85*2^23 范围内 "
+            "数据居中: 判断时使用 Rawdata-adc_offset，展示范围为 "
+            "0.3*2^23+adc_offset ~ 0.85*2^23+adc_offset "
             f"(异常比例≤{ratios.get('center', 1.0):g}% 为Warning)"
         ),
         "ipd": (

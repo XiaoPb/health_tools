@@ -411,6 +411,21 @@ class TestCheckResultStatus:
         assert chk.check_data_range(pass_df).status == "PASS"
         assert chk.check_data_range(fail_df).status == "FAIL"
 
+    def test_center_summary_displays_adc_offset_adjusted_raw_range(self):
+        rule = ChipRule(
+            chip="gh3220",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["CH0"],
+            chip_info={"adc_offset": 2**23},
+        )
+        chk = DataChecker(rule)
+        df = pd.DataFrame({"CH0": [2**23 + 3_000_000, 2**23 + 4_000_000]})
+
+        result = chk.check_data_centering(df)
+
+        assert result.status == "PASS"
+        assert "[10905190, 15518925]" in result.summary
+
     def test_range_pass_warning_fail(self):
         rule = ChipRule(
             chip="gh3036",

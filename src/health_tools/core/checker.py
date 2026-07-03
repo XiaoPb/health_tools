@@ -347,6 +347,12 @@ class DataChecker:
         lost = int(gaps.sum() - len(gaps)) if len(gaps) > 0 else 0
         return lost
 
+    def _get_center_raw_range(self) -> Tuple[float, float]:
+        """获取数据居中检查展示用的原始码值范围。"""
+        chip_info = self.chip_rule.chip_info or {}
+        offset = float(chip_info.get("adc_offset", 0))
+        return offset + self.CENTER_LOW, offset + self.CENTER_HIGH
+
     def check_data_centering(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查数据去除基线后是否居中（0.3*2^23 ~ 0.85*2^23）"""
         all_data_cols = [c for c in self._get_data_columns() if c in df.columns]
@@ -364,6 +370,7 @@ class DataChecker:
 
         chip_info = self.chip_rule.chip_info or {}
         offset = float(chip_info.get("adc_offset", 0))
+        center_min, center_max = self._get_center_raw_range()
 
         off_center_cols: List[str] = []
         details: List[str] = []
@@ -398,7 +405,7 @@ class DataChecker:
             pass_summary=(
                 self._append_skipped_summary(
                     f"全部 {len(data_cols)} 列数据居中正常 "
-                    f"[{self.CENTER_LOW:.0f}, {self.CENTER_HIGH:.0f}]",
+                    f"[{center_min:.0f}, {center_max:.0f}]",
                     len(skipped_cols),
                 )
             ),
