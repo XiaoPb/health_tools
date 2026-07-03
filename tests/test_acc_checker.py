@@ -78,6 +78,18 @@ class TestAccStatic:
         report = checker.check_acc_anomaly(df)
         assert report.static_x.count >= 1
         assert report.static_xyz.count == 0
+        assert report.anomaly_frame_count == 0
+        assert not report.has_anomaly
+
+    def test_single_channel_static_counted_when_axis_enabled(self, checker):
+        accx = [1, 1, 1, 1, 1, 1, 5, 6, 7]
+        accy = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        accz = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        df = _make_df(accx, accy, accz)
+        report = checker.check_acc_anomaly(df, include_single_axis=True)
+        assert report.static_x.count >= 1
+        assert report.anomaly_frame_count > 0
+        assert report.has_anomaly
 
     def test_all_channels_static(self, checker):
         accx = [1, 1, 1, 1, 1, 1, 5, 6, 7]
@@ -162,6 +174,19 @@ class TestAccCyclic:
         report = checker.check_acc_anomaly(df)
         assert report.cyclic_x.count >= 1
         assert report.cyclic_xyz.count == 0
+        assert report.anomaly_frame_count == 0
+        assert not report.has_anomaly
+
+    def test_simple_cyclic_pattern_counted_when_axis_enabled(self, checker):
+        pattern = [10, 30, 50]
+        accx = pattern * 4
+        accy = list(range(len(accx)))
+        accz = list(range(len(accx)))
+        df = _make_df(accx, accy, accz)
+        report = checker.check_acc_anomaly(df, include_single_axis=True)
+        assert report.cyclic_x.count >= 1
+        assert report.anomaly_frame_count > 0
+        assert report.has_anomaly
 
     def test_cyclic_all_channels(self, checker):
         pattern = [10, 30, 50, 70]

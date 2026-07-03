@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 @click.option("--center-ratio", type=float, default=5.0, help="数据居中异常允许比例 (%, 默认5)")
 @click.option("--ipd-ratio", type=float, default=1.0, help="Ipd超差允许比例 (%, 默认1)")
 @click.option("--acc-ratio", type=float, default=1.0, help="ACC异常帧允许比例 (%, 默认1)")
+@click.option("--acc-axis", is_flag=True, help="ACC单轴异常也计入结果")
 @click.option("--check-timestamp", "timestamp_column", help="指定时间戳列并检查间隔稳定性")
 @click.option(
     "--timestamp-ratio", type=float, default=20.0, help="时间戳间隔百分比容差 (%, 默认20)"
@@ -66,6 +67,7 @@ def check_cmd(
     center_ratio: float,
     ipd_ratio: float,
     acc_ratio: float,
+    acc_axis: bool,
     timestamp_column: Optional[str],
     timestamp_ratio: float,
     timestamp_ms: Optional[float],
@@ -181,7 +183,7 @@ def check_cmd(
 
         acc_report = None
         if "acc" in check_set:
-            acc_report = checker.check_acc_anomaly(df)
+            acc_report = checker.check_acc_anomaly(df, include_single_axis=acc_axis)
             acc_report.file_path = csv_file
             report.results.append(checker.build_acc_result(acc_report, threshold_ratio=acc_ratio))
 
@@ -229,7 +231,7 @@ def check_cmd(
     _print_reports(reports, verbose)
 
     if acc_reports:
-        _print_acc_table(list(acc_reports.values()))
+        _print_acc_table(list(acc_reports.values()), include_single_axis=acc_axis)
 
     ratios = {
         "range": range_ratio,
@@ -241,12 +243,19 @@ def check_cmd(
     if timestamp_column:
         ratios["timestamp"] = timestamp_fail_ratio
     _print_criteria(
-        check_set, tolerance, static_min, ratios, timestamp_column, timestamp_ratio, timestamp_ms
+        check_set,
+        tolerance,
+        static_min,
+        ratios,
+        timestamp_column,
+        timestamp_ratio,
+        timestamp_ms,
+        acc_axis=acc_axis,
     )
 
     csv_out = Path(output_path) if output_path else _default_output(target)
     base_dir = target.parent if target.is_file() else target
-    _save_report_csv(reports, acc_reports, csv_out, base_dir=base_dir)
+    _save_report_csv(reports, acc_reports, csv_out, base_dir=base_dir, include_acc_axis=acc_axis)
 
     if ipd_details:
         out_dir = csv_out.parent
@@ -358,7 +367,7 @@ def _format_result_status(status: str) -> str:
     return "[red]Fail[/red]"
 
 
-def _print_acc_table(acc_reports: list) -> None:
+def _print_acc_table(acc_reports: list, include_single_axis: bool = False) -> None:
     """打印ACC异常汇总表（按通道拆表，仅展示有异常的）"""
     console.print("\n[bold cyan]ACC异常检测报告[/bold cyan]")
 
@@ -391,13 +400,14 @@ def _print_acc_table(acc_reports: list) -> None:
 
     _print_sub_table("全零检测", acc_reports, lambda r: r.zero, show_total_frames=True)
     _print_sub_table("静止检测-XYZ", acc_reports, lambda r: r.static_xyz)
-    _print_sub_table("静止检测-X", acc_reports, lambda r: r.static_x)
-    _print_sub_table("静止检测-Y", acc_reports, lambda r: r.static_y)
-    _print_sub_table("静止检测-Z", acc_reports, lambda r: r.static_z)
     _print_sub_table("循环检测-XYZ", acc_reports, lambda r: r.cyclic_xyz)
-    _print_sub_table("循环检测-X", acc_reports, lambda r: r.cyclic_x)
-    _print_sub_table("循环检测-Y", acc_reports, lambda r: r.cyclic_y)
-    _print_sub_table("循环检测-Z", acc_reports, lambda r: r.cyclic_z)
+    if include_single_axis:
+        _print_sub_table("静止检测-X", acc_reports, lambda r: r.static_x)
+        _print_sub_table("静止检测-Y", acc_reports, lambda r: r.static_y)
+        _print_sub_table("静止检测-Z", acc_reports, lambda r: r.static_z)
+        _print_sub_table("循环检测-X", acc_reports, lambda r: r.cyclic_x)
+        _print_sub_table("循环检测-Y", acc_reports, lambda r: r.cyclic_y)
+        _print_sub_table("循环检测-Z", acc_reports, lambda r: r.cyclic_z)
 
     console.print(
         f"ACC总计: {len(acc_reports)} 文件, "
@@ -413,6 +423,7 @@ def _print_criteria(
     timestamp_column: Optional[str] = None,
     timestamp_ratio: float = 20.0,
     timestamp_ms: Optional[float] = None,
+    acc_axis: bool = False,
 ) -> None:
     """打印当前检查项及判断标准"""
     console.print("\n[dim]─── 检查标准 ───[/dim]")
@@ -435,7 +446,8 @@ def _print_criteria(
             f"(超差比例≤{ratios.get('ipd', 1.0):g}% 为Warning)"
         ),
         "acc": (
-            f"ACC异常: 全零 / 静止(连续不变≥{static_min}帧) / 循环 "
+            f"ACC异常: 默认仅XYZ同时异常，{'包含' if acc_axis else '不包含'}单轴异常；"
+            f"全零 / 静止(连续不变≥{static_min}帧) / 循环 "
             f"(异常帧比例≤{ratios.get('acc', 1.0):g}% 为Warning)"
         ),
     }
@@ -456,6 +468,7 @@ def _save_report_csv(
     acc_reports: dict,
     output_path: Path,
     base_dir: Optional[Path] = None,
+    include_acc_axis: bool = False,
 ) -> None:
     """将全部检查结果保存到统一CSV文件"""
     header = ["文件名", "芯片", "总异常(结果)"]
@@ -483,26 +496,31 @@ def _save_report_csv(
                 "ACC循环XYZ次数",
                 "ACC循环XYZ最长帧",
                 "ACC循环XYZ前10帧",
-                "ACC静止X次数",
-                "ACC静止X最长帧",
-                "ACC静止X前10帧",
-                "ACC静止Y次数",
-                "ACC静止Y最长帧",
-                "ACC静止Y前10帧",
-                "ACC静止Z次数",
-                "ACC静止Z最长帧",
-                "ACC静止Z前10帧",
-                "ACC循环X次数",
-                "ACC循环X最长帧",
-                "ACC循环X前10帧",
-                "ACC循环Y次数",
-                "ACC循环Y最长帧",
-                "ACC循环Y前10帧",
-                "ACC循环Z次数",
-                "ACC循环Z最长帧",
-                "ACC循环Z前10帧",
             ]
         )
+        if include_acc_axis:
+            header.extend(
+                [
+                    "ACC静止X次数",
+                    "ACC静止X最长帧",
+                    "ACC静止X前10帧",
+                    "ACC静止Y次数",
+                    "ACC静止Y最长帧",
+                    "ACC静止Y前10帧",
+                    "ACC静止Z次数",
+                    "ACC静止Z最长帧",
+                    "ACC静止Z前10帧",
+                    "ACC循环X次数",
+                    "ACC循环X最长帧",
+                    "ACC循环X前10帧",
+                    "ACC循环Y次数",
+                    "ACC循环Y最长帧",
+                    "ACC循环Y前10帧",
+                    "ACC循环Z次数",
+                    "ACC循环Z最长帧",
+                    "ACC循环Z前10帧",
+                ]
+            )
 
     header.append("文件相对路径")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -538,14 +556,16 @@ def _save_report_csv(
                     row.extend(_a(acc.zero))
                     row.extend(_a(acc.static_xyz))
                     row.extend(_a(acc.cyclic_xyz))
-                    row.extend(_a(acc.static_x))
-                    row.extend(_a(acc.static_y))
-                    row.extend(_a(acc.static_z))
-                    row.extend(_a(acc.cyclic_x))
-                    row.extend(_a(acc.cyclic_y))
-                    row.extend(_a(acc.cyclic_z))
+                    if include_acc_axis:
+                        row.extend(_a(acc.static_x))
+                        row.extend(_a(acc.static_y))
+                        row.extend(_a(acc.static_z))
+                        row.extend(_a(acc.cyclic_x))
+                        row.extend(_a(acc.cyclic_y))
+                        row.extend(_a(acc.cyclic_z))
                 else:
-                    row.extend(["-"] * 27)
+                    acc_column_count = 27 if include_acc_axis else 9
+                    row.extend(["-"] * acc_column_count)
 
             row.append(_relative_report_path(report.file_path, base_dir))
             writer.writerow(row)

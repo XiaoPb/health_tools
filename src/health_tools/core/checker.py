@@ -80,20 +80,7 @@ class AccAnomalyReport:
 
     @property
     def has_anomaly(self) -> bool:
-        return any(
-            a.count > 0
-            for a in [
-                self.zero,
-                self.static_x,
-                self.static_y,
-                self.static_z,
-                self.static_xyz,
-                self.cyclic_x,
-                self.cyclic_y,
-                self.cyclic_z,
-                self.cyclic_xyz,
-            ]
-        )
+        return self.anomaly_frame_count > 0
 
     @property
     def anomaly_frame_count(self) -> int:
@@ -782,7 +769,9 @@ class DataChecker:
             return pd.to_numeric(df[frame_col], errors="coerce").fillna(0).astype(int)
         return pd.Series(range(len(df)), index=df.index)
 
-    def check_acc_anomaly(self, df: pd.DataFrame) -> AccAnomalyReport:
+    def check_acc_anomaly(
+        self, df: pd.DataFrame, include_single_axis: bool = False
+    ) -> AccAnomalyReport:
         """检测ACC数据异常（全零/静止/循环）"""
         acc_cols = self._resolve_acc_columns(df)
         frame_ids = self._get_frame_ids(df)
@@ -794,8 +783,12 @@ class DataChecker:
         acc_df = df[acc_cols].apply(pd.to_numeric, errors="coerce")
 
         self._check_acc_all_zero(acc_df, frame_ids, report)
-        per_ch_static = self._check_acc_static(acc_df, frame_ids, report)
-        self._check_acc_cyclic(acc_df, per_ch_static, frame_ids, report)
+        per_ch_static = self._check_acc_static(
+            acc_df, frame_ids, report, include_single_axis=include_single_axis
+        )
+        self._check_acc_cyclic(
+            acc_df, per_ch_static, frame_ids, report, include_single_axis=include_single_axis
+        )
 
         return report
 
@@ -843,7 +836,11 @@ class DataChecker:
             )
 
     def _check_acc_static(
-        self, acc_df: pd.DataFrame, frame_ids: pd.Series, report: AccAnomalyReport
+        self,
+        acc_df: pd.DataFrame,
+        frame_ids: pd.Series,
+        report: AccAnomalyReport,
+        include_single_axis: bool = False,
     ) -> Dict[str, np.ndarray]:
         """检测连续不变段落，三通道都有→归XYZ，否则归单通道"""
         per_ch_static: Dict[str, np.ndarray] = {}
@@ -883,7 +880,8 @@ class DataChecker:
             targets = [report.static_x, report.static_y, report.static_z]
             for idx, segs in per_ch_segments.items():
                 if idx < 3 and segs:
-                    self._record_anomaly_indices(report, segs)
+                    if include_single_axis:
+                        self._record_anomaly_indices(report, segs)
                     targets[idx].count = len(segs)
                     targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
                     targets[idx].max_duration = max(end - start + 1 for start, end in segs)
@@ -897,6 +895,7 @@ class DataChecker:
         per_ch_static: Dict[str, np.ndarray],
         frame_ids: pd.Series,
         report: AccAnomalyReport,
+        include_single_axis: bool = False,
     ) -> None:
         """检测固定序列重复，三通道都有→归XYZ，否则归单通道"""
         per_ch_segments: Dict[int, List[Tuple[int, int]]] = {}
@@ -932,7 +931,8 @@ class DataChecker:
             targets = [report.cyclic_x, report.cyclic_y, report.cyclic_z]
             for idx, segs in per_ch_segments.items():
                 if idx < 3 and segs:
-                    self._record_anomaly_indices(report, segs)
+                    if include_single_axis:
+                        self._record_anomaly_indices(report, segs)
                     targets[idx].count = len(segs)
                     targets[idx].first_frame = int(frame_ids.iloc[segs[0][0]])
                     targets[idx].max_duration = max(end - start + 1 for start, end in segs)

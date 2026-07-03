@@ -144,3 +144,5 @@ def test_check_help_center_ratio_default_is_five_percent():
     assert "帧丢失允许比例 (%, 默认1)" in result.output
     assert "Ipd超差允许比例 (%, 默认1)" in result.output
     assert "ACC异常帧允许比例 (%, 默认1)" in result.output
+    assert "--acc-axis" in result.output
+    assert "ACC单轴异常也计入结果" in result.output
