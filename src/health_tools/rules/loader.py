@@ -118,6 +118,8 @@ class RuleLoader:
             gain_tia_map=data.get("gain_tia_map", {}),
             hr_ref_column=data.get("hr_ref_column", {}),
             spo_ref_column=data.get("spo_ref_column", {}),
+            acc_columns=data.get("acc_columns", {}),
+            frame_column=data.get("frame_column", ""),
             check_columns=data.get("check_columns", {}),
         )
 
