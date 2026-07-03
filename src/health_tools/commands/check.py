@@ -418,7 +418,8 @@ def _print_criteria(
     console.print("\n[dim]─── 检查标准 ───[/dim]")
     criteria = {
         "range": (
-            "数据范围: Rawdata 在芯片ADC范围内 "
+            "数据范围: Rawdata 在规则ADC范围内 "
+            "(优先 adc_offset ~ adc_offset+adc_full_scale) "
             f"(异常比例≤{ratios.get('range', 1.0):g}% 为Warning)"
         ),
         "frame": (

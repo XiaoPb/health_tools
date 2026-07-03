@@ -236,6 +236,16 @@ class DataChecker:
             return summary
         return f"{summary}；跳过 {skipped_count} 个全0预留通道"
 
+    def _get_data_range(self) -> Tuple[float, float]:
+        """获取原始数据范围：优先使用规则中的ADC偏置和满量程。"""
+        chip_info = self.chip_rule.chip_info or {}
+        if "adc_offset" in chip_info and "adc_full_scale" in chip_info:
+            offset = float(chip_info["adc_offset"])
+            full_scale = float(chip_info["adc_full_scale"])
+            return offset, offset + full_scale
+
+        return self.RANGE_MAP.get(self.chip_name, self.RANGE_MAP.get("gh3036", (0, 2**23)))
+
     def check_data_range(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查原始数据是否在正常范围内"""
         all_data_cols = [c for c in self._get_data_columns() if c in df.columns]
@@ -251,9 +261,7 @@ class DataChecker:
                 threshold_ratio=threshold_ratio,
             )
 
-        range_min, range_max = self.RANGE_MAP.get(
-            self.chip_name, self.RANGE_MAP.get("gh3036", (0, 2**23))
-        )
+        range_min, range_max = self._get_data_range()
 
         abnormal_cols: List[str] = []
         details: List[str] = []

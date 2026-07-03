@@ -395,6 +395,22 @@ class TestCheckResultStatus:
         assert "跳过 1 个全0预留通道" in result.summary
         assert "1/1 通道超差" in result.summary
 
+    def test_range_uses_adc_offset_and_full_scale_from_rule(self):
+        rule = ChipRule(
+            chip="gh3220_custom",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["ppg_ch0"],
+            check_columns={"data": ["ppg_ch0"]},
+            chip_info={"adc_offset": 2**23, "adc_full_scale": 2**23},
+        )
+        chk = DataChecker(rule)
+
+        pass_df = pd.DataFrame({"ppg_ch0": [2**23, 2**23 + 1, 2**24]})
+        fail_df = pd.DataFrame({"ppg_ch0": [2**23 - 1, 2**24 + 1]})
+
+        assert chk.check_data_range(pass_df).status == "PASS"
+        assert chk.check_data_range(fail_df).status == "FAIL"
+
     def test_range_pass_warning_fail(self):
         rule = ChipRule(
             chip="gh3036",
