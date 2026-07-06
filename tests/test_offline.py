@@ -304,6 +304,25 @@ def test_vshb_parser_uses_named_header_layout_algo_before_fw(tmp_path):
     }
 
 
+def test_vshb_parser_keeps_header_columns_with_trailing_commas(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    vshb.write_text(
+        "second, polar, algo_hr, cmp_hr, fw_hr, scence,out_flag, valid_level, "
+        "valid_score, rms_std, acc_x_std, acc_y_std, acc_z_std\n"
+        "20,71,75,0,60,0,1,0,0.00,2.49,22.85,9.43,7.31,\n",
+        encoding="utf-8",
+    )
+
+    df = offline.VshbParser().parse(vshb)
+
+    assert df.iloc[0].to_dict() == {
+        "time": 20,
+        "offline": 75,
+        "ref": 71,
+        "online": 60,
+    }
+
+
 def test_vshb_parser_falls_back_to_legacy_positions(tmp_path):
     vshb = tmp_path / "sample_result.vshb"
     row = ["0"] * 31

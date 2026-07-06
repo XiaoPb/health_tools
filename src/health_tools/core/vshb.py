@@ -39,7 +39,7 @@ def _build_numeric_frame(columns: Dict[str, pd.Series]) -> pd.DataFrame:
 
 
 def _read_by_header(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, index_col=False)
     column_map = {_normalize_column(column): column for column in df.columns}
     if not all(alias in column_map for alias in VSHB_HEADER_ALIASES.values()):
         return _empty_result()
