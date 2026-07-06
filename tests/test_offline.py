@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+import numpy as np
+from matplotlib.axes import Axes
+
+from health_tools.core import psd_plotter
 from health_tools.core import offline
 from health_tools.core.vshb import read_vshb_result
 
@@ -331,3 +335,31 @@ def test_vshb_reader_keeps_psd_legacy_online_column(tmp_path):
         "ref": 100,
         "online": 101,
     }
+
+
+def test_psd_plotter_skips_overlay_when_vshb_read_fails(monkeypatch, tmp_path):
+    result_dir = tmp_path / "result"
+    output_dir = tmp_path / "out"
+    result_dir.mkdir()
+    (result_dir / "sample_result.vshb").write_text("bad vshb\n", encoding="utf-8")
+    np.savetxt(result_dir / "sample0.prepsd", np.arange(16).reshape(4, 4), delimiter=",")
+    plot_calls = []
+
+    def fake_read_vshb_result(*args, **kwargs):
+        raise ValueError("读取失败")
+
+    original_plot = Axes.plot
+
+    def record_plot(self, *args, **kwargs):
+        plot_calls.append((args, kwargs))
+        return original_plot(self, *args, **kwargs)
+
+    monkeypatch.setattr(psd_plotter, "read_vshb_result", fake_read_vshb_result)
+    monkeypatch.setattr(Axes, "plot", record_plot)
+
+    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir)
+
+    assert len(saved) == 1
+    assert saved[0].exists()
+    assert saved[0].name == "sample.png"
+    assert plot_calls == []

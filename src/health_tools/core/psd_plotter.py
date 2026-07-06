@@ -15,6 +15,12 @@ plt.rcParams["axes.unicode_minus"] = False
 console = Console()
 
 
+def _empty_overlay() -> Dict[str, np.ndarray]:
+    """返回空折线数据，表示仅绘制PSD图。"""
+    empty = np.array([])
+    return {"time": empty, "offline": empty, "ref": empty, "online": empty}
+
+
 def _load_csv_like_matlab(path: Path) -> np.ndarray:
     """读取CSV数据，兼容行尾逗号和空列"""
     data = np.genfromtxt(str(path), delimiter=",", dtype=float, invalid_raise=False)
@@ -22,6 +28,22 @@ def _load_csv_like_matlab(path: Path) -> np.ndarray:
         data = data.reshape(1, -1)
     mask = ~np.all(np.isnan(data), axis=0)
     return data[:, mask]
+
+
+def _load_vshb_overlay(path: Path) -> Dict[str, np.ndarray]:
+    """读取vshb折线数据，失败时返回空数据。"""
+    try:
+        result = read_vshb_result(path, positional_online_col=-2)
+    except Exception:
+        return _empty_overlay()
+    if result.empty:
+        return _empty_overlay()
+    return {
+        "time": result["time"].to_numpy(),
+        "offline": result["offline"].to_numpy(),
+        "ref": result["ref"].to_numpy(),
+        "online": result["online"].to_numpy(),
+    }
 
 
 def _calc_metrics(ref: np.ndarray, pred: np.ndarray) -> Dict[str, float]:
@@ -93,11 +115,12 @@ class PsdPlotter:
                 base_name = fname.replace("_result", "")
                 console.print(f"  [dim]PSD ({idx}/{len(vshb_files)}) {base_name}[/dim]")
 
-                result = read_vshb_result(vshb_path, positional_online_col=-2)
-                second = result["time"].to_numpy()
-                hba_out = result["offline"].to_numpy()
-                polar_hr = result["ref"].to_numpy()
-                mcu_hr = result["online"].to_numpy()
+                overlay = _load_vshb_overlay(vshb_path)
+                second = overlay["time"]
+                hba_out = overlay["offline"]
+                polar_hr = overlay["ref"]
+                mcu_hr = overlay["online"]
+                has_overlay = len(second) > 0
 
                 psd_all = []
                 psd_dir = vshb_path.parent
@@ -119,7 +142,7 @@ class PsdPlotter:
                         psd = psd.T
                     _imagesc_exact(ax, psd, self.SUBPLOT_TITLES[i])
 
-                    if i == 0:
+                    if i == 0 and has_overlay:
                         ax.plot(second, hba_out, "k-.", linewidth=2)
                         ax.plot(second, polar_hr, "r-.", linewidth=2)
                         ax.plot(second, mcu_hr, "w-.", linewidth=2)
@@ -129,8 +152,6 @@ class PsdPlotter:
                     left=0.03, right=0.995, bottom=0.05, top=0.88, wspace=0.08, hspace=0.25
                 )
 
-                offline_m = _calc_metrics(polar_hr, hba_out)
-                online_m = _calc_metrics(polar_hr, mcu_hr)
                 fig.text(
                     0.5,
                     0.98,
@@ -140,22 +161,25 @@ class PsdPlotter:
                     fontsize=12,
                     fontweight="bold",
                 )
-                fig.text(
-                    0.5,
-                    0.95,
-                    f"Offline: ±10bpm={offline_m['within_10']}%  MAE={offline_m['mae']}",
-                    ha="center",
-                    va="top",
-                    fontsize=10,
-                )
-                fig.text(
-                    0.5,
-                    0.92,
-                    f"Online:  ±10bpm={online_m['within_10']}%  MAE={online_m['mae']}",
-                    ha="center",
-                    va="top",
-                    fontsize=10,
-                )
+                if has_overlay:
+                    offline_m = _calc_metrics(polar_hr, hba_out)
+                    online_m = _calc_metrics(polar_hr, mcu_hr)
+                    fig.text(
+                        0.5,
+                        0.95,
+                        f"Offline: ±10bpm={offline_m['within_10']}%  MAE={offline_m['mae']}",
+                        ha="center",
+                        va="top",
+                        fontsize=10,
+                    )
+                    fig.text(
+                        0.5,
+                        0.92,
+                        f"Online:  ±10bpm={online_m['within_10']}%  MAE={online_m['mae']}",
+                        ha="center",
+                        va="top",
+                        fontsize=10,
+                    )
 
                 save_path = save_dir / f"{base_name}.png"
                 fig.canvas.draw()
