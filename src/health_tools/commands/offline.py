@@ -60,6 +60,7 @@ def offline_cmd(
     if not output_path:
         output_path = str(input_dir.parent / f"{input_dir.name}_offline_result")
     output_dir = Path(output_path)
+    psd_acc_mode = "axis"
 
     if not no_run:
         if not chip_name:
@@ -71,6 +72,7 @@ def offline_cmd(
             console.print(f"[red]错误: 未找到 {chip_name} 的离线工具[/red]")
             console.print("请先配置: ghealth_tool cfg --offline-path <路径>")
             raise SystemExit(1)
+        psd_acc_mode = _default_psd_acc_mode(exe_path)
 
         column_indices = None
         if ref_col is not None:
@@ -106,6 +108,9 @@ def offline_cmd(
         else:
             console.print("[red]FAIL[/red] 离线跑库失败")
             raise SystemExit(1)
+    elif chip_name:
+        exe_path = find_exe(chip_name, ver)
+        psd_acc_mode = _default_psd_acc_mode(exe_path)
 
     console.print("\n[bold]数据整理[/bold]")
     reorg_dir = reorganize_output(input_dir, output_dir, show_progress=True)
@@ -113,19 +118,32 @@ def offline_cmd(
 
     if not no_plot:
         psd_save_dir = output_dir / "psd_bmpfile"
-        _run_psd_plot(reorg_dir, psd_save_dir)
+        _run_psd_plot(reorg_dir, psd_save_dir, acc_mode=psd_acc_mode)
 
     if not no_accuracy:
         _run_accuracy(reorg_dir)
 
 
-def _run_psd_plot(result_dir: Path, save_dir: Path) -> None:
+def _default_psd_acc_mode(exe_path: Optional[Path]) -> str:
+    """根据离线工具等级选择PSD ACC绘图模式。"""
+    if exe_path is None:
+        return "axis"
+
+    from health_tools.core.offline import get_category_label
+
+    category = get_category_label(exe_path.parent.parent.name.lower())
+    if category in {"medium", "basic"}:
+        return "rms"
+    return "axis"
+
+
+def _run_psd_plot(result_dir: Path, save_dir: Path, acc_mode: str = "axis") -> None:
     """生成PSD时频图"""
     console.print("\n[bold]PSD时频图[/bold]")
     from health_tools.core.psd_plotter import PsdPlotter
 
     plotter = PsdPlotter()
-    saved = plotter.plot(result_dir, save_dir=save_dir, show_progress=True)
+    saved = plotter.plot(result_dir, save_dir=save_dir, show_progress=True, acc_mode=acc_mode)
     if saved:
         console.print(f"[green]OK[/green] 生成 {len(saved)} 张时频图: {save_dir}")
     else:

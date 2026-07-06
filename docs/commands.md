@@ -61,6 +61,7 @@ ghealth_tool plot -i <输入> -o <输出目录> [--type <类型>] [--sample-rate
 | `--channels` | 指定绘制的通道（逗号分隔） |
 | `--window` | 窗口大小（秒） |
 | `--overlap` | 窗口重叠率（0-1） |
+| `--psd-acc` | PSD 模式下 ACC 绘图：axis 三轴 / rms 合成，默认 axis |
 
 ### 示例
 
@@ -76,10 +77,14 @@ ghealth_tool plot -i data.csv -o plots/ --type stft --sample-rate 100 --window 1
 
 # 离线结果目录生成PSD时频图，输出目录不存在时会自动创建
 ghealth_tool plot -i offline_result/reorganized -o psd_plots/ --type psd
+
+# 离线结果目录生成 PPG + ACCRMS PSD 时频图
+ghealth_tool plot -i offline_result/reorganized -o psd_plots/ --type psd --psd-acc rms
 ```
 
 `--type psd` 复用 `offline` 命令的 PSD 绘图方式，读取离线结果目录中的
 `*_result.vshb`、`.prepsd`、`.accxpsd`、`.accypsd`、`.acczpsd` 文件并生成 PNG。
+指定 `--psd-acc rms` 时读取 `.accrmspsd`，只绘制 `PPG` 和 `ACCRMS`。
 普通绘图参数（如 `--channels`、`--sample-rate`、`--format`）不影响 PSD 输出。
 
 ---
@@ -531,6 +536,9 @@ ghealth_tool offline -i <输入目录> -c <芯片> [选项]
 | `--list` | 列出可用芯片和版本 |
 | `--timeout` | 超时时间（秒，默认300） |
 | `-v, --verbose` | 详细输出 |
+
+算法等级为 `medium`/`med` 或 `basic` 时，离线跑库后的 PSD 默认绘制 `PPG + ACCRMS`；
+其他等级默认绘制 `PPG + ACCX/ACCY/ACCZ`。
 
 ### 算法版本管理
 

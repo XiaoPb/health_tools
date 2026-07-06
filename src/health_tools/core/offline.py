@@ -24,6 +24,7 @@ CATEGORY_LABELS = {
     "性能版本": "exclusive",
     "exclusive": "exclusive",
     "premium": "premium",
+    "med": "medium",
     "medium": "medium",
     "basic": "basic",
 }

@@ -38,6 +38,8 @@ ghealth_tool offline --list [--chip <chip>]
 4. 准确度：默认生成 `accuracy_report.csv`，使用 `--no-accuracy` 可跳过。
 
 整理、PSD 和准确度统计阶段使用进度条；未找到 PSD 或 `.vshb` 有效结果时输出 WARN，不中断后续流程。
+算法等级为 `medium`/`med` 或 `basic` 时，PSD 默认绘制 `PPG + ACCRMS`；其他等级默认绘制
+`PPG + ACCX/ACCY/ACCZ`。
 
 ## 版本与参数配置
 

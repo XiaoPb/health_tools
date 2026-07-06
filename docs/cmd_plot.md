@@ -29,6 +29,7 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--freq-bpm` | Y 轴显示 BPM（默认: 是） |
 | `--freq-range` | 频率范围 BPM（默认: 30-240） |
 | `--ref-column` | 参考曲线列名 |
+| `--psd-acc` | PSD 模式下 ACC 绘图: `axis` 三轴 / `rms` 合成（默认: axis） |
 | `--no-show` | 仅保存不显示 |
 | `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
@@ -59,6 +60,10 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 指定 `--type psd` 时，输入路径必须是离线跑库整理后的结果目录，目录内包含
 `*_result.vshb` 以及同名 `.prepsd`、`.accxpsd`、`.accypsd`、`.acczpsd` 文件。
 输出目录无需提前创建，命令会自动创建并生成 PNG 图片。
+
+默认 PSD 图包含 `PPG`、`ACCX`、`ACCY`、`ACCZ` 四个子图。指定
+`--psd-acc rms` 时改为读取 `.accrmspsd`，只绘制 `PPG` 和 `ACCRMS`，不绘制
+`ACCX/ACCY/ACCZ`。
 
 PSD 模式复用 `offline` 命令的 PSD 绘图方式，`--format`、`--dpi`、`--channels`、
 `--sample-rate` 等普通绘图参数不会影响 PSD 输出。
@@ -95,4 +100,7 @@ ghealth_tool plot -i ./csv/ -o ./plots --chip gh3036 --filter valid --no-show
 
 # 离线结果目录生成 PSD 时频图
 ghealth_tool plot -i ./offline_result/reorganized -o ./psd_plots --type psd
+
+# 离线结果目录生成 PPG + ACCRMS PSD 时频图
+ghealth_tool plot -i ./offline_result/reorganized -o ./psd_plots --type psd --psd-acc rms
 ```

@@ -27,6 +27,12 @@ console = Console()
 @click.option("--freq-bpm", is_flag=True, default=True, help="Y轴显示BPM（默认: 是）")
 @click.option("--freq-range", default="30-240", help="频率范围（BPM，默认: 30-240）")
 @click.option("--ref-column", help="参考曲线列名")
+@click.option(
+    "--psd-acc",
+    type=click.Choice(["axis", "rms"]),
+    default="axis",
+    help="PSD模式下ACC绘图: axis三轴|rms合成（默认: axis）",
+)
 @click.option("--no-show", is_flag=True, help="不显示图片，仅保存")
 @click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件（目录模式）")
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
@@ -50,6 +56,7 @@ def plot_cmd(
     freq_bpm: bool,
     freq_range: str,
     ref_column: Optional[str],
+    psd_acc: str,
     no_show: bool,
     filter_name: Optional[str],
     verbose: bool,
@@ -66,7 +73,7 @@ def plot_cmd(
     output_path_obj.mkdir(parents=True, exist_ok=True)
 
     if plot_type == "psd":
-        _plot_psd_dir(input_path_obj, output_path_obj)
+        _plot_psd_dir(input_path_obj, output_path_obj, psd_acc)
         return
 
     from health_tools.core.plotter import DataPlotter
@@ -145,7 +152,7 @@ def plot_cmd(
         raise SystemExit(1)
 
 
-def _plot_psd_dir(input_dir: Path, output_dir: Path) -> None:
+def _plot_psd_dir(input_dir: Path, output_dir: Path, acc_mode: str = "axis") -> None:
     """绘制离线结果目录中的PSD时频图"""
     if not input_dir.exists():
         console.print(f"[red]错误: 输入路径不存在: {input_dir}[/red]")
@@ -157,7 +164,7 @@ def _plot_psd_dir(input_dir: Path, output_dir: Path) -> None:
     from health_tools.core.psd_plotter import PsdPlotter
 
     plotter = PsdPlotter()
-    saved = plotter.plot(input_dir, save_dir=output_dir, show_progress=True)
+    saved = plotter.plot(input_dir, save_dir=output_dir, show_progress=True, acc_mode=acc_mode)
     if saved:
         console.print(f"[green]OK[/green] 生成 {len(saved)} 张PSD时频图: {output_dir}")
     else:

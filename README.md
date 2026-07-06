@@ -63,6 +63,9 @@ ghealth_tool plot -i data.csv -o plots/ --window 10 --overlap 0.75
 
 # 离线结果目录生成PSD时频图，输出目录不存在时会自动创建
 ghealth_tool plot -i offline_result/reorganized -o psd_plots/ --type psd
+
+# 离线结果目录生成 PPG + ACCRMS PSD 时频图
+ghealth_tool plot -i offline_result/reorganized -o psd_plots/ --type psd --psd-acc rms
 ```
 
 ### classify - 数据分类

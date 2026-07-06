@@ -111,8 +111,8 @@ def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path:
     output_dir = tmp_path / "new_output"
     input_dir.mkdir()
 
-    def fake_plot(self, result_dir, save_dir=None, show_progress=False):
-        calls.append((result_dir, save_dir, show_progress))
+    def fake_plot(self, result_dir, save_dir=None, show_progress=False, acc_mode="axis"):
+        calls.append((result_dir, save_dir, show_progress, acc_mode))
         return [save_dir / "sample.png"]
 
     monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
@@ -132,7 +132,38 @@ def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path:
 
     assert result.exit_code == 0
     assert output_dir.exists()
-    assert calls == [(input_dir, output_dir, True)]
+    assert calls == [(input_dir, output_dir, True, "axis")]
+
+
+def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
+    calls = []
+    input_dir = tmp_path / "result"
+    output_dir = tmp_path / "new_output"
+    input_dir.mkdir()
+
+    def fake_plot(self, result_dir, save_dir=None, show_progress=False, acc_mode="axis"):
+        calls.append((result_dir, save_dir, show_progress, acc_mode))
+        return [save_dir / "sample.png"]
+
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "--type",
+            "psd",
+            "--psd-acc",
+            "rms",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [(input_dir, output_dir, True, "rms")]
 
 
 def test_plot_psd_requires_directory(tmp_path: Path):
@@ -338,8 +369,8 @@ def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False: calls.append(
-            ("plot", show_progress)
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": calls.append(
+            ("plot", show_progress, acc_mode)
         )
         or [],
     )
@@ -362,4 +393,51 @@ def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [("reorganize", True), ("plot", True), ("accuracy", True)]
+    assert calls == [("reorganize", True), ("plot", True, "axis"), ("accuracy", True)]
+
+
+def test_offline_medium_version_defaults_psd_to_accrms(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    calls = []
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    exe_path = tmp_path / "tools" / "gh3220" / "medium" / "v1" / "TEE_Algorithm.exe"
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr("health_tools.core.offline.find_exe", lambda chip, ver=None: exe_path)
+    monkeypatch.setattr(
+        "health_tools.core.offline.reorganize_output",
+        lambda input_path, output_path, show_progress=False: output_path,
+    )
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": calls.append(
+            acc_mode
+        )
+        or [],
+    )
+    monkeypatch.setattr(
+        "health_tools.core.offline.calculate_offline_accuracy",
+        lambda output_path, show_progress=False: pd.DataFrame({"file": ["TOTAL"]}),
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3220",
+            "--no-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == ["rms"]

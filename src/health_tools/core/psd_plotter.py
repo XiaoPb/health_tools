@@ -79,24 +79,32 @@ def _imagesc_exact(ax, psd: np.ndarray, title: str) -> None:
 class PsdPlotter:
     """PSD时频图绘制器"""
 
-    PSD_EXTENSIONS = ["0.prepsd", ".accxpsd", ".accypsd", ".acczpsd"]
-    SUBPLOT_TITLES = ["PPG", "ACCX", "ACCY", "ACCZ"]
+    PSD_GROUPS = {
+        "axis": (["0.prepsd", ".accxpsd", ".accypsd", ".acczpsd"], ["PPG", "ACCX", "ACCY", "ACCZ"]),
+        "rms": (["0.prepsd", ".accrmspsd"], ["PPG", "ACCRMS"]),
+    }
 
     def plot(
         self,
         result_dir: Path,
         save_dir: Optional[Path] = None,
         show_progress: bool = False,
+        acc_mode: str = "axis",
     ) -> List[Path]:
         """生成PSD时频图
 
         Args:
             result_dir: 离线跑库输出目录（含.vshb和.psd文件）
             save_dir: 图片保存目录，默认 result_dir/bmpfile
+            acc_mode: ACC PSD模式，axis=三轴ACC，rms=合成ACC RMS
 
         Returns:
             保存的图片路径列表
         """
+        if acc_mode not in self.PSD_GROUPS:
+            raise ValueError(f"不支持的PSD ACC模式: {acc_mode}")
+
+        psd_extensions, subplot_titles = self.PSD_GROUPS[acc_mode]
         if save_dir is None:
             save_dir = result_dir / "bmpfile"
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -124,15 +132,15 @@ class PsdPlotter:
 
                 psd_all = []
                 psd_dir = vshb_path.parent
-                for ext in self.PSD_EXTENSIONS:
+                for ext in psd_extensions:
                     psd_path = psd_dir / (base_name + ext)
                     if psd_path.exists():
                         psd_all.append(_load_csv_like_matlab(psd_path))
                     else:
                         psd_all.append(np.zeros((128, max(len(second), 1))))
 
-                fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
-                axes = fig.subplots(4, 1)
+                fig = plt.figure(figsize=(19.2, 2.7 * len(subplot_titles)), dpi=100)
+                axes = np.atleast_1d(fig.subplots(len(subplot_titles), 1))
 
                 for i, ax in enumerate(axes.flat):
                     psd = psd_all[i]
@@ -140,7 +148,7 @@ class PsdPlotter:
                         psd = psd[:, :128].T
                     else:
                         psd = psd.T
-                    _imagesc_exact(ax, psd, self.SUBPLOT_TITLES[i])
+                    _imagesc_exact(ax, psd, subplot_titles[i])
 
                     if i == 0 and has_overlay:
                         ax.plot(second, hba_out, "k-.", linewidth=2)

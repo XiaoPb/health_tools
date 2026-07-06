@@ -382,3 +382,51 @@ def test_psd_plotter_skips_overlay_when_vshb_read_fails(monkeypatch, tmp_path):
     assert saved[0].exists()
     assert saved[0].name == "sample.png"
     assert plot_calls == []
+
+
+def test_psd_plotter_axis_mode_reads_acc_xyz(monkeypatch, tmp_path):
+    result_dir = tmp_path / "result"
+    output_dir = tmp_path / "out"
+    result_dir.mkdir()
+    (result_dir / "sample_result.vshb").write_text("bad vshb\n", encoding="utf-8")
+    for name in ["sample0.prepsd", "sample.accxpsd", "sample.accypsd", "sample.acczpsd"]:
+        (result_dir / name).write_text("1,2\n3,4\n", encoding="utf-8")
+    loaded = []
+
+    def fake_load_csv(path):
+        loaded.append(path.name)
+        return np.arange(16).reshape(4, 4)
+
+    monkeypatch.setattr(psd_plotter, "_load_csv_like_matlab", fake_load_csv)
+    monkeypatch.setattr(
+        psd_plotter, "_load_vshb_overlay", lambda path: psd_plotter._empty_overlay()
+    )
+
+    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir)
+
+    assert len(saved) == 1
+    assert loaded == ["sample0.prepsd", "sample.accxpsd", "sample.accypsd", "sample.acczpsd"]
+
+
+def test_psd_plotter_rms_mode_reads_accrms(monkeypatch, tmp_path):
+    result_dir = tmp_path / "result"
+    output_dir = tmp_path / "out"
+    result_dir.mkdir()
+    (result_dir / "sample_result.vshb").write_text("bad vshb\n", encoding="utf-8")
+    for name in ["sample0.prepsd", "sample.accrmspsd", "sample.accxpsd"]:
+        (result_dir / name).write_text("1,2\n3,4\n", encoding="utf-8")
+    loaded = []
+
+    def fake_load_csv(path):
+        loaded.append(path.name)
+        return np.arange(16).reshape(4, 4)
+
+    monkeypatch.setattr(psd_plotter, "_load_csv_like_matlab", fake_load_csv)
+    monkeypatch.setattr(
+        psd_plotter, "_load_vshb_overlay", lambda path: psd_plotter._empty_overlay()
+    )
+
+    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir, acc_mode="rms")
+
+    assert len(saved) == 1
+    assert loaded == ["sample0.prepsd", "sample.accrmspsd"]
