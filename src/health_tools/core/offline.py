@@ -14,6 +14,7 @@ from health_tools.config import CONFIG_DIR, load_config, save_config
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.accuracy import calculate_accuracy, format_metric_name
 from health_tools.utils.progress import progress_track
+from health_tools.core.vshb import read_vshb_result
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"
@@ -530,18 +531,7 @@ class VshbParser:
 
     def parse(self, vshb_path: Path) -> pd.DataFrame:
         """解析vshb为DataFrame，列名: time, offline, ref, online"""
-        df = pd.read_csv(vshb_path, header=None)
-        if df.shape[1] <= self.COL_ONLINE:
-            return pd.DataFrame(columns=["time", "offline", "ref", "online"])
-        result = pd.DataFrame(
-            {
-                "time": pd.to_numeric(df.iloc[:, self.COL_TIME], errors="coerce"),
-                "offline": pd.to_numeric(df.iloc[:, self.COL_OFFLINE], errors="coerce"),
-                "ref": pd.to_numeric(df.iloc[:, self.COL_REF], errors="coerce"),
-                "online": pd.to_numeric(df.iloc[:, self.COL_ONLINE], errors="coerce"),
-            }
-        )
-        return result[result["ref"] > 0].reset_index(drop=True)
+        return read_vshb_result(vshb_path, positional_online_col=self.COL_ONLINE, filter_ref=True)
 
 
 ACCURACY_METHODS = ["mae", "within_5", "within_10", "rmse", "correlation"]

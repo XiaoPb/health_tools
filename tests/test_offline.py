@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from health_tools.core import offline
+from health_tools.core.vshb import read_vshb_result
 
 
 def _make_runner(
@@ -259,3 +260,74 @@ def test_merge_scanned_versions_replaces_missing_default():
     merged = offline.merge_scanned_versions(scanned, existing)
 
     assert merged["gh3220"]["default"] == "v2"
+
+
+def test_vshb_parser_uses_named_header_layout_fw_before_algo(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    vshb.write_text(
+        "second, polar, fw_hr, comp_hr, algo_hr, algo_validscore, "
+        "acc_x_std, acc_y_std, acc_z_std\n"
+        "1,70,71,72,73,90,0.1,0.2,0.3\n",
+        encoding="utf-8",
+    )
+
+    df = offline.VshbParser().parse(vshb)
+
+    assert df.iloc[0].to_dict() == {
+        "time": 1,
+        "offline": 73,
+        "ref": 70,
+        "online": 71,
+    }
+
+
+def test_vshb_parser_uses_named_header_layout_algo_before_fw(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    vshb.write_text(
+        "second, polar, algo_hr, cmp_hr, fw_hr, scence,out_flag, valid_level, "
+        "valid_score, rms_std, acc_x_std, acc_y_std, acc_z_std\n"
+        "2,80,83,82,81,0,1,3,95,0.4,0.1,0.2,0.3\n",
+        encoding="utf-8",
+    )
+
+    df = offline.VshbParser().parse(vshb)
+
+    assert df.iloc[0].to_dict() == {
+        "time": 2,
+        "offline": 83,
+        "ref": 80,
+        "online": 81,
+    }
+
+
+def test_vshb_parser_falls_back_to_legacy_positions(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    row = ["0"] * 31
+    row[0] = "3"
+    row[1] = "93"
+    row[2] = "90"
+    row[30] = "91"
+    vshb.write_text(",".join(row) + "\n", encoding="utf-8")
+
+    df = offline.VshbParser().parse(vshb)
+
+    assert df.iloc[0].to_dict() == {
+        "time": 3,
+        "offline": 93,
+        "ref": 90,
+        "online": 91,
+    }
+
+
+def test_vshb_reader_keeps_psd_legacy_online_column(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    vshb.write_text("4,103,100,101,999\n", encoding="utf-8")
+
+    df = read_vshb_result(vshb, positional_online_col=-2)
+
+    assert df.iloc[0].to_dict() == {
+        "time": 4,
+        "offline": 103,
+        "ref": 100,
+        "online": 101,
+    }

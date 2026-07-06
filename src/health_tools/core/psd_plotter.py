@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from rich.console import Console
 from health_tools.utils.progress import progress_track
+from health_tools.core.vshb import read_vshb_result
 
 plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei"]
 plt.rcParams["axes.unicode_minus"] = False
@@ -92,11 +93,11 @@ class PsdPlotter:
                 base_name = fname.replace("_result", "")
                 console.print(f"  [dim]PSD ({idx}/{len(vshb_files)}) {base_name}[/dim]")
 
-                result = _load_csv_like_matlab(vshb_path)
-                second = result[:, 0]
-                hba_out = result[:, 1]
-                polar_hr = result[:, 2]
-                mcu_hr = result[:, -2] if result.shape[1] >= 2 else np.zeros_like(second)
+                result = read_vshb_result(vshb_path, positional_online_col=-2)
+                second = result["time"].to_numpy()
+                hba_out = result["offline"].to_numpy()
+                polar_hr = result["ref"].to_numpy()
+                mcu_hr = result["online"].to_numpy()
 
                 psd_all = []
                 psd_dir = vshb_path.parent
