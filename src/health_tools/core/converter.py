@@ -86,11 +86,15 @@ class DataConverter:
             configs = []
             for item in config:
                 if isinstance(item, dict):
+                    if not item:
+                        continue
                     configs.append(item)
                 else:
                     logger.warning("extra_source 列表项必须是字典，已跳过: %s", item)
             return configs
         if isinstance(config, dict):
+            if not config:
+                return []
             return [config]
         logger.warning("extra_source 必须是字典或列表，已跳过")
         return []

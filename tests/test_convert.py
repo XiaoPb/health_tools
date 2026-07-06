@@ -283,6 +283,24 @@ def test_convert_with_multiple_extra_sources(tmp_path: Path):
     assert list(result["REF_HR"]) == [80, 81]
 
 
+def test_convert_without_extra_source_does_not_search_or_warn(tmp_path: Path, caplog):
+    import pandas as pd
+
+    source_file = tmp_path / "raw.csv"
+    source_file.write_text("time,value\n15:06:01,1\n", encoding="utf-8")
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "value": "VALUE"})
+    converter = DataConverter(rule)
+    df = pd.read_csv(source_file)
+
+    result = converter.convert(df, source_file=source_file)
+
+    assert list(result["TimeStamp"]) == ["15:06:01"]
+    assert list(result["VALUE"]) == [1]
+    assert converter.extra_source_align_errors == []
+    assert "未找到 extra_source 文件" not in caplog.text
+
+
 def test_converter_returns_no_columns_when_rule_sources_do_not_match():
     import pandas as pd
 
