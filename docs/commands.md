@@ -542,10 +542,11 @@ ghealth_tool offline -i <输入目录> -c <芯片> [选项]
 算法等级为 `medium`/`med` 或 `basic` 时，离线跑库后的 PSD 默认绘制 `PPG + ACCRMS`；
 其他等级默认绘制 `PPG + ACCX/ACCY/ACCZ`。
 
-多版本跑库可使用 `--versions v1,v2` 或 `--all-versions`。单版本时输出结构不变；
-多版本时每个版本写入 `<output>/<version>/`，并额外生成
+多版本跑库可使用 `--versions v1,v2` 或 `--all-versions`。只要命令能解析出算法版本，
+单版本和多版本都会写入 `<output>/<version>/`。多版本会额外生成
 `<output>/accuracy_report_all_versions.csv`。汇总表插入 `version` 列，仅拼接各版本自己的
-明细、分类平均和 `TOTAL` 行，不额外计算跨版本平均。
+明细、分类平均和 `TOTAL` 行，不额外计算跨版本平均。未指定芯片的单版本 `--no-run` 无法解析
+算法版本，仍直接使用 `-o/--output` 目录。
 
 ### 算法版本管理
 

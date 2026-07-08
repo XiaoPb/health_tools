@@ -45,9 +45,9 @@ ghealth_tool offline --list [--chip <chip>]
 
 ## 多版本跑库
 
-单版本时输出结构保持不变，`-o/--output` 就是该版本的结果目录。多版本时，每个版本写入
-`<output>/<version>/` 子目录，避免不同算法结果互相覆盖。每个版本子目录内仍会生成自己的
-`数据整理/`、`psd_bmpfile/` 和 `accuracy_report.csv`。
+只要命令能解析出算法版本，结果都会写入 `<output>/<version>/` 子目录；单版本和多版本使用
+相同目录格式，避免不同算法结果互相覆盖。每个版本子目录内仍会生成自己的 `数据整理/`、
+`psd_bmpfile/` 和 `accuracy_report.csv`。
 
 多版本准确度会额外汇总到：
 
@@ -59,7 +59,8 @@ ghealth_tool offline --list [--chip <chip>]
 行，不额外计算跨版本平均。
 
 `--version`、`--versions`、`--all-versions` 互斥。多版本 `--no-run` 会要求
-`<output>/<version>/` 已存在，然后分别整理、绘图和统计已有结果。
+`<output>/<version>/` 已存在，然后分别整理、绘图和统计已有结果。未指定芯片的单版本
+`--no-run` 无法解析算法版本，仍直接使用 `-o/--output` 目录。
 
 ## 版本与参数配置
 

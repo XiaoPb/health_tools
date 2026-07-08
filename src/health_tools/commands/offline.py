@@ -88,7 +88,7 @@ def offline_cmd(
 
     reports = []
     for version in target_versions:
-        version_output_dir = output_dir / str(version) if is_multi_version else output_dir
+        version_output_dir = _version_output_dir(output_dir, version, version_exes.get(version))
         report_df = _run_single_offline_version(
             input_dir=input_dir,
             output_dir=version_output_dir,
@@ -109,6 +109,12 @@ def offline_cmd(
 
     if is_multi_version and not no_accuracy:
         _save_combined_accuracy(output_dir, reports)
+
+
+def _version_output_dir(output_dir: Path, version: Optional[str], exe_path: Optional[Path]) -> Path:
+    """根据已解析版本返回离线结果目录。"""
+    version_name = str(version or exe_path.parent.name) if exe_path else None
+    return output_dir / version_name if version_name else output_dir
 
 
 def _resolve_versions(
