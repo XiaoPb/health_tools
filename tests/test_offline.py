@@ -374,6 +374,22 @@ def test_psd_overlay_uses_column_30_for_headerless_online(tmp_path):
     assert overlay["online"].tolist() == [117]
 
 
+def test_psd_metrics_include_5_10_15_bpm_and_mae():
+    ref = np.array([100, 100, 100, 100], dtype=float)
+    pred = np.array([103, 107, 112, 120], dtype=float)
+
+    metrics = psd_plotter._calc_metrics(ref, pred)
+    line = psd_plotter._format_metric_line("Online", metrics)
+
+    assert metrics == {
+        "within_5": 25.0,
+        "within_10": 50.0,
+        "within_15": 75.0,
+        "mae": 10.5,
+    }
+    assert line == "Online: ±5bpm=25.0%  ±10bpm=50.0%  ±15bpm=75.0%  MAE=10.5"
+
+
 def test_psd_plotter_skips_overlay_when_vshb_read_fails(monkeypatch, tmp_path):
     result_dir = tmp_path / "result"
     output_dir = tmp_path / "out"

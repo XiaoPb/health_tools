@@ -47,15 +47,32 @@ def _load_vshb_overlay(path: Path) -> Dict[str, np.ndarray]:
 
 
 def _calc_metrics(ref: np.ndarray, pred: np.ndarray) -> Dict[str, float]:
-    """计算±10bpm准确度和MAE"""
+    """计算±5/±10/±15bpm准确度和MAE"""
     valid = ~(np.isnan(ref) | np.isnan(pred)) & (ref > 0)
     r, p = ref[valid], pred[valid]
     if len(r) == 0:
-        return {"within_10": 0.0, "mae": 0.0}
+        return {"within_5": 0.0, "within_10": 0.0, "within_15": 0.0, "mae": 0.0}
     diff = np.abs(r - p)
+    within_5 = float(np.mean(diff <= 5) * 100)
     within_10 = float(np.mean(diff <= 10) * 100)
+    within_15 = float(np.mean(diff <= 15) * 100)
     mae = float(np.mean(diff))
-    return {"within_10": round(within_10, 1), "mae": round(mae, 2)}
+    return {
+        "within_5": round(within_5, 1),
+        "within_10": round(within_10, 1),
+        "within_15": round(within_15, 1),
+        "mae": round(mae, 2),
+    }
+
+
+def _format_metric_line(label: str, metrics: Dict[str, float]) -> str:
+    """格式化PSD图顶部准确度摘要。"""
+    return (
+        f"{label}: ±5bpm={metrics['within_5']}%  "
+        f"±10bpm={metrics['within_10']}%  "
+        f"±15bpm={metrics['within_15']}%  "
+        f"MAE={metrics['mae']}"
+    )
 
 
 def _imagesc_exact(ax, psd: np.ndarray, title: str) -> None:
@@ -175,7 +192,7 @@ class PsdPlotter:
                     fig.text(
                         0.5,
                         0.95,
-                        f"Offline: ±10bpm={offline_m['within_10']}%  MAE={offline_m['mae']}",
+                        _format_metric_line("Offline", offline_m),
                         ha="center",
                         va="top",
                         fontsize=10,
@@ -183,7 +200,7 @@ class PsdPlotter:
                     fig.text(
                         0.5,
                         0.92,
-                        f"Online:  ±10bpm={online_m['within_10']}%  MAE={online_m['mae']}",
+                        _format_metric_line("Online", online_m),
                         ha="center",
                         va="top",
                         fontsize=10,
