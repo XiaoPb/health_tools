@@ -356,6 +356,24 @@ def test_vshb_reader_keeps_psd_legacy_online_column(tmp_path):
     }
 
 
+def test_psd_overlay_uses_column_30_for_headerless_online(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    row = ["0"] * 33
+    row[0] = "8"
+    row[1] = "116"
+    row[2] = "115"
+    row[30] = "117"
+    row[-2] = "0"
+    vshb.write_text(",".join(row) + "\n", encoding="utf-8")
+
+    overlay = psd_plotter._load_vshb_overlay(vshb)
+
+    assert overlay["time"].tolist() == [8]
+    assert overlay["offline"].tolist() == [116]
+    assert overlay["ref"].tolist() == [115]
+    assert overlay["online"].tolist() == [117]
+
+
 def test_psd_plotter_skips_overlay_when_vshb_read_fails(monkeypatch, tmp_path):
     result_dir = tmp_path / "result"
     output_dir = tmp_path / "out"

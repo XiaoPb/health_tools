@@ -33,7 +33,7 @@ def _load_csv_like_matlab(path: Path) -> np.ndarray:
 def _load_vshb_overlay(path: Path) -> Dict[str, np.ndarray]:
     """读取vshb折线数据，失败时返回空数据。"""
     try:
-        result = read_vshb_result(path, positional_online_col=-2)
+        result = read_vshb_result(path, positional_online_col=30)
     except Exception:
         return _empty_overlay()
     if result.empty:
