@@ -526,6 +526,8 @@ ghealth_tool offline -i <输入目录> -c <芯片> [选项]
 | `-o, --output` | 输出结果目录（默认: `<input>_offline_result`） |
 | `-c, --chip` | 芯片型号（如 gh3036, gh3220） |
 | `--version` | 算法版本（覆盖默认版本） |
+| `--versions` | 多个算法版本，逗号分隔 |
+| `--all-versions` | 运行当前芯片已配置的全部版本 |
 | `--hba-fs` | 采样率（默认25） |
 | `--scene-en` | 场景适配 0=关 1=开（默认0） |
 | `--ch-num` | 有效PPG通道数（默认2） |
@@ -539,6 +541,11 @@ ghealth_tool offline -i <输入目录> -c <芯片> [选项]
 
 算法等级为 `medium`/`med` 或 `basic` 时，离线跑库后的 PSD 默认绘制 `PPG + ACCRMS`；
 其他等级默认绘制 `PPG + ACCX/ACCY/ACCZ`。
+
+多版本跑库可使用 `--versions v1,v2` 或 `--all-versions`。单版本时输出结构不变；
+多版本时每个版本写入 `<output>/<version>/`，并额外生成
+`<output>/accuracy_report_all_versions.csv`。汇总表插入 `version` 列，仅拼接各版本自己的
+明细、分类平均和 `TOTAL` 行，不额外计算跨版本平均。
 
 ### 算法版本管理
 
@@ -608,6 +615,12 @@ ghealth_tool offline -i data/ -c gh3220
 
 # 指定版本
 ghealth_tool offline -i data/ -c gh3220 --version V4200_GH_HR_exc_pv_v1.0.1.0
+
+# 指定多个版本
+ghealth_tool offline -i data/ -c gh3300 --versions GH_HR_exc_pv_v1.1.4.0,GH_HR_med_pv_v1.0.2.0_final
+
+# 运行当前芯片全部已配置版本
+ghealth_tool offline -i data/ -c gh3300 --all-versions
 
 # 仅整理已有结果（跳过跑库）
 ghealth_tool offline -i data/ -c gh3220 --no-run

@@ -441,3 +441,192 @@ def test_offline_medium_version_defaults_psd_to_accrms(monkeypatch, tmp_path: Pa
 
     assert result.exit_code == 0
     assert calls == ["rms"]
+
+
+def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
+    monkeypatch, tmp_path: Path
+):
+    import pandas as pd
+
+    calls = []
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    exe_root = tmp_path / "tools" / "gh3300" / "exclusive"
+    for version in ["v1", "v2"]:
+        exe_path = exe_root / version / "TEE_Algorithm.exe"
+        exe_path.parent.mkdir(parents=True)
+        exe_path.write_text("", encoding="utf-8")
+
+    def fake_find_exe(chip, ver=None):
+        return exe_root / ver / "TEE_Algorithm.exe"
+
+    class FakeRunner:
+        def __init__(self, chip, version=None, **kwargs):
+            self.version = version
+
+        def run(self, input_path, output_path, timeout=300):
+            calls.append(("run", self.version, output_path))
+            output_path.mkdir(parents=True, exist_ok=True)
+            return True
+
+    def fake_reorganize(input_path, output_path, show_progress=False):
+        calls.append(("reorganize", output_path.name, show_progress))
+        reorg_dir = output_path / "数据整理"
+        reorg_dir.mkdir(parents=True, exist_ok=True)
+        return reorg_dir
+
+    def fake_accuracy(output_path, show_progress=False):
+        calls.append(("accuracy", output_path.parent.name, show_progress))
+        return pd.DataFrame({"file": ["TOTAL"], "samples": [10]})
+
+    monkeypatch.setattr("health_tools.core.offline.find_exe", fake_find_exe)
+    monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
+    monkeypatch.setattr("health_tools.core.offline.reorganize_output", fake_reorganize)
+    monkeypatch.setattr("health_tools.core.offline.calculate_offline_accuracy", fake_accuracy)
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3300",
+            "--versions",
+            "v1, v2, v1",
+            "--no-plot",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert ("run", "v1", output_dir / "v1") in calls
+    assert ("run", "v2", output_dir / "v2") in calls
+    combined = pd.read_csv(output_dir / "accuracy_report_all_versions.csv")
+    assert list(combined["version"]) == ["v1", "v2"]
+    assert list(combined["file"]) == ["TOTAL", "TOTAL"]
+
+
+def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    calls = []
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    exe_root = tmp_path / "tools" / "gh3300"
+
+    def fake_find_exe(chip, ver=None):
+        category = "exclusive" if ver == "v1" else "medium"
+        exe_path = exe_root / category / ver / "TEE_Algorithm.exe"
+        exe_path.parent.mkdir(parents=True, exist_ok=True)
+        exe_path.write_text("", encoding="utf-8")
+        return exe_path
+
+    class FakeRunner:
+        def __init__(self, chip, version=None, **kwargs):
+            self.version = version
+
+        def run(self, input_path, output_path, timeout=300):
+            calls.append(self.version)
+            output_path.mkdir(parents=True, exist_ok=True)
+            return True
+
+    monkeypatch.setattr("health_tools.core.offline.find_exe", fake_find_exe)
+    monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
+    monkeypatch.setattr(
+        "health_tools.core.offline.get_offline_config",
+        lambda: type(
+            "Cfg",
+            (),
+            {
+                "versions": {
+                    "gh3300": {
+                        "versions": {"exclusive": ["v1"], "medium": ["v2"]},
+                        "default": "v1",
+                    }
+                }
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "health_tools.core.offline.reorganize_output",
+        lambda input_path, output_path, show_progress=False: output_path,
+    )
+    monkeypatch.setattr(
+        "health_tools.core.offline.calculate_offline_accuracy",
+        lambda output_path, show_progress=False: pd.DataFrame({"file": ["TOTAL"]}),
+    )
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3300",
+            "--all-versions",
+            "--no-plot",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == ["v1", "v2"]
+
+
+def test_offline_version_options_are_mutually_exclusive(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-c",
+            "gh3300",
+            "--version",
+            "v1",
+            "--versions",
+            "v2",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--version 不能与 --versions" in result.output
+
+
+def test_offline_all_versions_rejects_explicit_version(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-c",
+            "gh3300",
+            "--version",
+            "v1",
+            "--all-versions",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--all-versions 不能与 --version/--versions" in result.output
