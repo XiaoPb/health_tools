@@ -75,6 +75,11 @@ def _format_metric_line(label: str, metrics: Dict[str, float]) -> str:
     )
 
 
+def _has_valid_ref(ref: np.ndarray) -> bool:
+    """判断PSD叠线是否有有效polar金标。"""
+    return bool(np.any((~np.isnan(ref)) & (ref > 0)))
+
+
 def _imagesc_exact(ax, psd: np.ndarray, title: str) -> None:
     """像素级对齐渲染PSD矩阵"""
     vmin = np.nanmin(psd)
@@ -98,6 +103,20 @@ def _subplot_top(plot_count: int, has_overlay: bool) -> float:
     if has_overlay and plot_count <= 2:
         return 0.80
     return 0.88
+
+
+def _metric_text_rows(polar_hr: np.ndarray, hba_out: np.ndarray, mcu_hr: np.ndarray) -> List[str]:
+    """生成PSD图顶部准确度说明。"""
+    if _has_valid_ref(polar_hr):
+        offline_m = _calc_metrics(polar_hr, hba_out)
+        online_m = _calc_metrics(polar_hr, mcu_hr)
+        return [
+            _format_metric_line("Offline vs Polar", offline_m),
+            _format_metric_line("Online vs Polar", online_m),
+        ]
+
+    online_m = _calc_metrics(hba_out, mcu_hr)
+    return [_format_metric_line("Online vs Offline", online_m)]
 
 
 class PsdPlotter:
@@ -153,6 +172,7 @@ class PsdPlotter:
                 polar_hr = overlay["ref"]
                 mcu_hr = overlay["online"]
                 has_overlay = len(second) > 0
+                has_ref = _has_valid_ref(polar_hr)
 
                 psd_all = []
                 psd_dir = vshb_path.parent
@@ -176,9 +196,12 @@ class PsdPlotter:
 
                     if i == 0 and has_overlay:
                         ax.plot(second, hba_out, "k-.", linewidth=2)
-                        ax.plot(second, polar_hr, "r-.", linewidth=2)
                         ax.plot(second, mcu_hr, "w-.", linewidth=2)
-                        ax.legend(["pred(offline)", "polar(ref)", "mcu(online)"])
+                        if has_ref:
+                            ax.plot(second, polar_hr, "r-.", linewidth=2)
+                            ax.legend(["pred(offline)", "mcu(online)", "polar(ref)"])
+                        else:
+                            ax.legend(["pred(offline)", "mcu(online)"])
 
                 fig.subplots_adjust(
                     left=0.03,
@@ -199,24 +222,17 @@ class PsdPlotter:
                     fontweight="bold",
                 )
                 if has_overlay:
-                    offline_m = _calc_metrics(polar_hr, hba_out)
-                    online_m = _calc_metrics(polar_hr, mcu_hr)
-                    fig.text(
-                        0.5,
-                        0.95,
-                        _format_metric_line("Offline", offline_m),
-                        ha="center",
-                        va="top",
-                        fontsize=10,
-                    )
-                    fig.text(
-                        0.5,
-                        0.92,
-                        _format_metric_line("Online", online_m),
-                        ha="center",
-                        va="top",
-                        fontsize=10,
-                    )
+                    for row_idx, metric_text in enumerate(
+                        _metric_text_rows(polar_hr, hba_out, mcu_hr)
+                    ):
+                        fig.text(
+                            0.5,
+                            0.95 - row_idx * 0.03,
+                            metric_text,
+                            ha="center",
+                            va="top",
+                            fontsize=10,
+                        )
 
                 save_path = save_dir / f"{base_name}.png"
                 fig.canvas.draw()

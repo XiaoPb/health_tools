@@ -536,10 +536,29 @@ class VshbParser:
 
     def parse(self, vshb_path: Path) -> pd.DataFrame:
         """解析vshb为DataFrame，列名: time, offline, ref, online"""
-        return read_vshb_result(vshb_path, positional_online_col=self.COL_ONLINE, filter_ref=True)
+        return read_vshb_result(vshb_path, positional_online_col=self.COL_ONLINE)
 
 
 ACCURACY_METHODS = ["mae", "within_5", "within_10", "rmse", "correlation"]
+
+
+def _has_valid_ref(df: pd.DataFrame) -> bool:
+    """判断是否提供了有效金标心率。"""
+    ref = pd.to_numeric(df["ref"], errors="coerce")
+    return bool((ref > 0).any())
+
+
+def _filter_valid_ref(df: pd.DataFrame) -> pd.DataFrame:
+    """仅保留有效金标行。"""
+    ref = pd.to_numeric(df["ref"], errors="coerce")
+    return df[ref > 0].reset_index(drop=True)
+
+
+def _add_metric_columns(row: Dict, metrics: Dict[str, float], suffix: str) -> None:
+    """将准确度指标写入报告行。"""
+    for key, val in metrics.items():
+        if key != "samples":
+            row[f"{format_metric_name(key)}{suffix}"] = round(val, 2)
 
 
 def calculate_offline_accuracy(
@@ -571,20 +590,30 @@ def calculate_offline_accuracy(
         rel = vshb_path.relative_to(output_dir)
         category = rel.parts[0] if len(rel.parts) > 1 else "default"
 
-        offline_metrics = calculate_accuracy(df, "ref", "offline", ACCURACY_METHODS)
-        online_metrics = calculate_accuracy(df, "ref", "online", ACCURACY_METHODS)
+        has_ref = _has_valid_ref(df)
+        if has_ref:
+            metric_df = _filter_valid_ref(df)
+            offline_metrics = calculate_accuracy(metric_df, "ref", "offline", ACCURACY_METHODS)
+            online_metrics = calculate_accuracy(metric_df, "ref", "online", ACCURACY_METHODS)
+            reference = "polar"
+        else:
+            metric_df = df
+            offline_metrics = {}
+            online_metrics = calculate_accuracy(metric_df, "offline", "online", ACCURACY_METHODS)
+            reference = "offline"
 
         row: Dict = {
             "file": vshb_path.stem.replace("_result", ""),
             "category": category,
+            "reference": reference,
             "samples": offline_metrics.get("samples", 0),
         }
-        for key, val in offline_metrics.items():
-            if key != "samples":
-                row[f"{format_metric_name(key)}(offline)"] = round(val, 2)
-        for key, val in online_metrics.items():
-            if key != "samples":
-                row[f"{format_metric_name(key)}(online)"] = round(val, 2)
+        if has_ref:
+            _add_metric_columns(row, offline_metrics, "(offline)")
+            _add_metric_columns(row, online_metrics, "(online)")
+        else:
+            row["samples"] = online_metrics.get("samples", 0)
+            _add_metric_columns(row, online_metrics, "(online_vs_offline)")
 
         file_rows.append(row)
 
@@ -596,11 +625,19 @@ def calculate_offline_accuracy(
     for row in file_rows:
         category_data.setdefault(row["category"], []).append(row)
 
-    metric_cols = [c for c in file_rows[0] if c not in ("file", "category", "samples")]
+    metric_cols = sorted(
+        {
+            col
+            for row in file_rows
+            for col in row
+            if col not in ("file", "category", "reference", "samples")
+        }
+    )
     summary_rows: List[Dict] = []
 
     total_samples = 0
     total_weighted: Dict[str, float] = {col: 0.0 for col in metric_cols}
+    total_metric_samples: Dict[str, int] = {col: 0 for col in metric_cols}
 
     for category, entries in sorted(category_data.items()):
         cat_samples = sum(e["samples"] for e in entries)
@@ -608,21 +645,27 @@ def calculate_offline_accuracy(
         cat_row: Dict = {
             "file": f"{category}(avg)",
             "category": category,
+            "reference": "",
             "samples": cat_samples,
         }
         for col in metric_cols:
-            weighted = sum(e[col] * e["samples"] for e in entries)
+            col_entries = [e for e in entries if col in e]
+            col_samples = sum(e["samples"] for e in col_entries)
+            weighted = sum(e[col] * e["samples"] for e in col_entries)
             total_weighted[col] += weighted
-            cat_row[col] = round(weighted / cat_samples, 2) if cat_samples > 0 else 0.0
+            total_metric_samples[col] += col_samples
+            cat_row[col] = round(weighted / col_samples, 2) if col_samples > 0 else 0.0
         summary_rows.append(cat_row)
 
     total_row: Dict = {
         "file": "TOTAL",
         "category": "",
+        "reference": "",
         "samples": total_samples,
     }
     for col in metric_cols:
-        total_row[col] = round(total_weighted[col] / total_samples, 2) if total_samples > 0 else 0.0
+        samples = total_metric_samples[col]
+        total_row[col] = round(total_weighted[col] / samples, 2) if samples > 0 else 0.0
     summary_rows.append(total_row)
 
     all_rows = file_rows + summary_rows

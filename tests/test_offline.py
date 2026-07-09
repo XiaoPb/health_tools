@@ -382,6 +382,56 @@ def test_vshb_parser_falls_back_to_legacy_positions(tmp_path):
     }
 
 
+def test_offline_accuracy_uses_online_vs_offline_when_polar_missing(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    rows = []
+    for time, offline_hr, online_hr in [(1, 100, 103), (2, 101, 108), (3, 102, 114)]:
+        row = ["0"] * 31
+        row[0] = str(time)
+        row[1] = str(offline_hr)
+        row[2] = "0"
+        row[30] = str(online_hr)
+        rows.append(",".join(row))
+    (result_dir / "sample_result.vshb").write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    report = offline.calculate_offline_accuracy(result_dir)
+
+    assert report is not None
+    first = report.iloc[0].to_dict()
+    assert first["reference"] == "offline"
+    assert first["samples"] == 3
+    assert first["MAE(online_vs_offline)"] == 7.33
+    assert "MAE(offline)" not in report.columns
+    assert "MAE(online)" not in report.columns
+
+
+def test_offline_accuracy_summarizes_mixed_reference_metrics_separately(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+
+    with_ref = ["1,100,100,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,100,1,99,0,0,0,102"]
+    no_ref_rows = []
+    for time, offline_hr, online_hr in [(1, 100, 104), (2, 101, 107)]:
+        row = ["0"] * 31
+        row[0] = str(time)
+        row[1] = str(offline_hr)
+        row[2] = "0"
+        row[30] = str(online_hr)
+        no_ref_rows.append(",".join(row))
+
+    (result_dir / "with_ref_result.vshb").write_text("\n".join(with_ref) + "\n", encoding="utf-8")
+    (result_dir / "no_ref_result.vshb").write_text("\n".join(no_ref_rows) + "\n", encoding="utf-8")
+
+    report = offline.calculate_offline_accuracy(result_dir)
+
+    assert report is not None
+    total = report[report["file"] == "TOTAL"].iloc[0]
+    assert total["samples"] == 3
+    assert total["MAE(online)"] == 2.0
+    assert total["MAE(online_vs_offline)"] == 5.0
+
+
 def test_vshb_reader_keeps_psd_legacy_online_column(tmp_path):
     vshb = tmp_path / "sample_result.vshb"
     vshb.write_text("4,103,100,101,999\n", encoding="utf-8")
@@ -428,6 +478,27 @@ def test_psd_metrics_include_5_10_15_bpm_and_mae():
         "mae": 10.5,
     }
     assert line == "Online: ±5bpm=25.0%  ±10bpm=50.0%  ±15bpm=75.0%  MAE=10.5"
+
+
+def test_psd_metric_text_uses_online_vs_offline_when_polar_missing():
+    polar = np.array([0, 0, 0], dtype=float)
+    offline_hr = np.array([100, 100, 100], dtype=float)
+    online_hr = np.array([103, 107, 112], dtype=float)
+
+    rows = psd_plotter._metric_text_rows(polar, offline_hr, online_hr)
+
+    assert rows == ["Online vs Offline: ±5bpm=33.3%  ±10bpm=66.7%  ±15bpm=100.0%  MAE=7.33"]
+
+
+def test_psd_metric_text_uses_polar_when_available():
+    polar = np.array([100, 100, 100], dtype=float)
+    offline_hr = np.array([101, 102, 103], dtype=float)
+    online_hr = np.array([103, 107, 112], dtype=float)
+
+    rows = psd_plotter._metric_text_rows(polar, offline_hr, online_hr)
+
+    assert rows[0].startswith("Offline vs Polar:")
+    assert rows[1].startswith("Online vs Polar:")
 
 
 def test_psd_subplot_top_reserves_space_for_rms_metrics():

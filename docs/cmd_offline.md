@@ -43,6 +43,11 @@ ghealth_tool offline --list [--chip <chip>]
 算法等级为 `medium`/`med` 或 `basic` 时，PSD 默认绘制 `PPG + ACCRMS`；其他等级默认绘制
 `PPG + ACCX/ACCY/ACCZ`。
 
+准确度默认以 `polar` 金标为参考，报告中 `reference=polar`，同时统计离线和在线相对金标的
+指标。如果 `.vshb` 中 `polar` 列全为 `0`，表示未提供金标；此时报告改为
+`reference=offline`，只统计 `online_vs_offline` 指标。PSD 图顶部也只显示
+`Online vs Offline` 的准确度说明。
+
 ## 多版本跑库
 
 只要命令能解析出算法版本，结果都会写入 `<output>/<version>/` 子目录；单版本和多版本使用

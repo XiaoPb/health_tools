@@ -548,6 +548,10 @@ ghealth_tool offline -i <输入目录> -c <芯片> [选项]
 明细、分类平均和 `TOTAL` 行，不额外计算跨版本平均。未指定芯片的单版本 `--no-run` 无法解析
 算法版本，仍直接使用 `-o/--output` 目录。
 
+准确度默认以 `polar` 金标为参考，报告中 `reference=polar`。如果 `.vshb` 的 `polar`
+列全为 `0`，则视为未提供金标，报告改为 `reference=offline`，只统计
+`online_vs_offline` 指标；PSD 顶部也只显示 `Online vs Offline` 准确度。
+
 ### 算法版本管理
 
 离线工具按芯片和等级分类存放，等级包括：exclusive、premium、medium、basic。
