@@ -693,6 +693,61 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
     assert calls == ["v1", "v2"]
 
 
+def test_offline_no_run_versions_collects_existing_reorganized_vshb(
+    monkeypatch, tmp_path: Path
+):
+    import pandas as pd
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "GH3036_RES"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    row = (
+        "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"
+        "80,1,99,0,0,0,81\n"
+    )
+    for version in ["v1", "v2"]:
+        reorg_dir = output_dir / version / "数据整理"
+        reorg_dir.mkdir(parents=True)
+        (reorg_dir / "000000_sample_result.vshb").write_text(row, encoding="utf-8")
+
+    exe_root = tmp_path / "tools" / "gh3036" / "exclusive"
+
+    def fake_find_exe(chip, ver=None):
+        exe_path = exe_root / ver / "TEE_Algorithm.exe"
+        exe_path.parent.mkdir(parents=True, exist_ok=True)
+        exe_path.write_text("", encoding="utf-8")
+        return exe_path
+
+    monkeypatch.setattr("health_tools.core.offline.find_exe", fake_find_exe)
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3036",
+            "--versions",
+            "v1,v2",
+            "--no-run",
+            "--no-plot",
+        ],
+    )
+
+    assert result.exit_code == 0
+    combined = pd.read_csv(output_dir / "accuracy_report_all_versions.csv")
+    assert list(combined["version"]) == ["v1", "v1", "v1", "v2", "v2", "v2"]
+    assert combined["file"].tolist().count("TOTAL") == 2
+
+
 def test_offline_version_options_are_mutually_exclusive(tmp_path: Path):
     input_dir = tmp_path / "input"
     input_dir.mkdir()

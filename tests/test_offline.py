@@ -266,6 +266,46 @@ def test_merge_scanned_versions_replaces_missing_default():
     assert merged["gh3220"]["default"] == "v2"
 
 
+def test_reorganize_output_recurses_nested_result_files(tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    nested_dir = output_dir / "raw" / "nested"
+    input_dir.mkdir()
+    nested_dir.mkdir(parents=True)
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    result_file = nested_dir / "000000_sample_result.vshb"
+    result_file.write_text(
+        "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,80,1,99,0,0,0,81\n",
+        encoding="utf-8",
+    )
+
+    reorg_dir = offline.reorganize_output(input_dir, output_dir)
+
+    moved = reorg_dir / "000000_sample_result.vshb"
+    assert moved.exists()
+    assert not result_file.exists()
+    assert offline.calculate_offline_accuracy(reorg_dir) is not None
+
+
+def test_reorganize_output_skips_existing_reorganized_files(tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    reorg_dir = output_dir / "数据整理"
+    input_dir.mkdir()
+    reorg_dir.mkdir(parents=True)
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    existing = reorg_dir / "000000_sample_result.vshb"
+    existing.write_text(
+        "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,80,1,99,0,0,0,81\n",
+        encoding="utf-8",
+    )
+
+    returned = offline.reorganize_output(input_dir, output_dir)
+
+    assert returned == reorg_dir
+    assert existing.exists()
+
+
 def test_vshb_parser_uses_named_header_layout_fw_before_algo(tmp_path):
     vshb = tmp_path / "sample_result.vshb"
     vshb.write_text(
@@ -388,6 +428,12 @@ def test_psd_metrics_include_5_10_15_bpm_and_mae():
         "mae": 10.5,
     }
     assert line == "Online: ±5bpm=25.0%  ±10bpm=50.0%  ±15bpm=75.0%  MAE=10.5"
+
+
+def test_psd_subplot_top_reserves_space_for_rms_metrics():
+    assert psd_plotter._subplot_top(plot_count=2, has_overlay=True) == 0.80
+    assert psd_plotter._subplot_top(plot_count=2, has_overlay=False) == 0.88
+    assert psd_plotter._subplot_top(plot_count=4, has_overlay=True) == 0.88
 
 
 def test_psd_plotter_skips_overlay_when_vshb_read_fails(monkeypatch, tmp_path):

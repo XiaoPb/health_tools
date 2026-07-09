@@ -81,3 +81,6 @@ ReferenceDocumentation/
 test_data/
 debug/
 .claude/
+docs/superpowers
+memory/
+AGENTS.md

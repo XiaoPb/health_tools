@@ -490,7 +490,11 @@ def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = F
         subdir = str(rel.parent) if len(rel.parts) > 1 else ""
         source_map[csv_file.stem] = subdir
 
-    result_files = list(output_dir.iterdir())
+    result_files = [
+        path
+        for path in output_dir.rglob("*")
+        if path.is_file() and reorg_dir not in path.parents and path != reorg_dir
+    ]
     for result_file in progress_track(result_files, "整理输出文件...", enabled=show_progress):
         if not result_file.is_file():
             continue

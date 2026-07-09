@@ -93,6 +93,13 @@ def _imagesc_exact(ax, psd: np.ndarray, title: str) -> None:
     ax.margins(0)
 
 
+def _subplot_top(plot_count: int, has_overlay: bool) -> float:
+    """根据子图数量和顶部指标行数预留标题空间。"""
+    if has_overlay and plot_count <= 2:
+        return 0.80
+    return 0.88
+
+
 class PsdPlotter:
     """PSD时频图绘制器"""
 
@@ -174,7 +181,12 @@ class PsdPlotter:
                         ax.legend(["pred(offline)", "polar(ref)", "mcu(online)"])
 
                 fig.subplots_adjust(
-                    left=0.03, right=0.995, bottom=0.05, top=0.88, wspace=0.08, hspace=0.25
+                    left=0.03,
+                    right=0.995,
+                    bottom=0.05,
+                    top=_subplot_top(len(subplot_titles), has_overlay),
+                    wspace=0.08,
+                    hspace=0.25,
                 )
 
                 fig.text(
