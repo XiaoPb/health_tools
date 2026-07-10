@@ -1,8 +1,57 @@
 from pathlib import Path
 
 from click.testing import CliRunner
+from rich.console import Console
 
 from health_tools.cli import main
+from health_tools.commands.offline import _build_accuracy_tables
+
+
+def test_accuracy_tables_only_print_matching_reference_rows():
+    import pandas as pd
+
+    report_df = pd.DataFrame(
+        [
+            {
+                "file": "polar_file",
+                "category": "7.4",
+                "reference": "polar",
+                "samples": 10,
+                "MAE(offline)": 1.0,
+                "MAE(online)": 2.0,
+            },
+            {
+                "file": "offline_file",
+                "category": "7.4",
+                "reference": "offline",
+                "samples": 10,
+                "MAE(online_vs_offline)": 3.0,
+            },
+            {
+                "file": "TOTAL",
+                "category": "",
+                "reference": "",
+                "samples": 20,
+                "MAE(offline)": 1.0,
+                "MAE(online)": 2.0,
+                "MAE(online_vs_offline)": 3.0,
+            },
+        ]
+    )
+
+    tables = _build_accuracy_tables(report_df)
+
+    assert len(tables) == 2
+    polar_console = Console(record=True, width=160)
+    compare_console = Console(record=True, width=160)
+    polar_console.print(tables[0])
+    compare_console.print(tables[1])
+    polar_text = polar_console.export_text()
+    compare_text = compare_console.export_text()
+    assert "polar_file" in polar_text
+    assert "offline_file" not in polar_text
+    assert "offline_file" in compare_text
+    assert "polar_file" not in compare_text
 
 
 def test_progress_track_uses_default_rich_progress_columns(monkeypatch):

@@ -478,13 +478,39 @@ def _strip_exe_prefix(name: str) -> str:
     return _split_exe_prefix(name)[1]
 
 
-def _result_stem_matches_source(result_stem: str, source_stem: str, ext: str) -> bool:
-    """判断结果文件名主体是否属于指定源CSV。"""
-    if result_stem == source_stem:
+def _is_offline_tool_path_supported(path: Path) -> bool:
+    """判断离线工具是否能处理该路径。"""
+    try:
+        str(path).encode("mbcs")
         return True
-    if ext == ".prepsd" and result_stem.startswith(source_stem):
-        return result_stem[len(source_stem) :].isdigit()
-    return False
+    except LookupError:
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _build_source_index_map(input_dir: Path) -> Dict[int, str]:
+    """构建跑库输出序号到源CSV子目录的映射。"""
+    source_index_map: Dict[int, str] = {}
+    source_files = [
+        csv_file
+        for csv_file in sorted(input_dir.rglob("*.csv"))
+        if _is_offline_tool_path_supported(csv_file)
+    ]
+    for idx, csv_file in enumerate(source_files):
+        rel = csv_file.relative_to(input_dir)
+        source_index_map[idx] = str(rel.parent) if len(rel.parts) > 1 else ""
+    return source_index_map
+
+
+def _build_unique_source_map(input_dir: Path) -> Dict[str, str]:
+    """构建无序号结果可用的唯一文件名映射。"""
+    source_paths: Dict[str, List[str]] = {}
+    for csv_file in sorted(input_dir.rglob("*.csv")):
+        rel = csv_file.relative_to(input_dir)
+        subdir = str(rel.parent) if len(rel.parts) > 1 else ""
+        source_paths.setdefault(csv_file.stem, []).append(subdir)
+    return {stem: paths[0] for stem, paths in source_paths.items() if len(paths) == 1}
 
 
 def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = False) -> Path:
@@ -498,13 +524,8 @@ def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = F
     """
     reorg_dir = output_dir / "数据整理"
 
-    source_map: Dict[str, str] = {}
-    source_index_map: Dict[int, str] = {}
-    for idx, csv_file in enumerate(sorted(input_dir.rglob("*.csv"))):
-        rel = csv_file.relative_to(input_dir)
-        subdir = str(rel.parent) if len(rel.parts) > 1 else ""
-        source_map[csv_file.stem] = subdir
-        source_index_map[idx] = csv_file.stem
+    source_map = _build_unique_source_map(input_dir)
+    source_index_map = _build_source_index_map(input_dir)
 
     result_files = [
         path
@@ -515,27 +536,22 @@ def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = F
         if not result_file.is_file():
             continue
         stem = result_file.stem
-        matched_ext = ""
         for ext in RESULT_EXTENSIONS:
             if result_file.name.endswith(ext):
                 stem = result_file.name[: -len(ext)]
-                matched_ext = ext
                 break
 
         source_index, bare_stem = _split_exe_prefix(stem)
 
-        matched_key = None
+        subdir = None
         if source_index in source_index_map:
-            csv_stem = source_index_map[source_index]
-            if _result_stem_matches_source(bare_stem, csv_stem, matched_ext):
-                matched_key = csv_stem
+            subdir = source_index_map[source_index]
         elif bare_stem in source_map:
-            matched_key = bare_stem
+            subdir = source_map[bare_stem]
 
-        if matched_key is None:
+        if subdir is None:
             continue
 
-        subdir = source_map[matched_key]
         target_dir = reorg_dir / subdir if subdir else reorg_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(result_file), str(target_dir / result_file.name))

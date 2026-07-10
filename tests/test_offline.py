@@ -335,6 +335,33 @@ def test_reorganize_output_keeps_same_index_result_files_together(tmp_path):
     assert not (reorg_dir / "b" / "000000_sample0.prepsd").exists()
 
 
+def test_reorganize_output_skips_paths_unsupported_by_offline_tool(
+    monkeypatch, tmp_path
+):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    skipped = input_dir / "a" / "skip.csv"
+    handled = input_dir / "b" / "handled.csv"
+    skipped.parent.mkdir()
+    handled.parent.mkdir()
+    skipped.write_text("x\n1\n", encoding="utf-8")
+    handled.write_text("x\n1\n", encoding="utf-8")
+    (output_dir / "000000_handled_result.vshb").write_text("1,2,3\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        offline,
+        "_is_offline_tool_path_supported",
+        lambda path: path.name != "skip.csv",
+    )
+
+    reorg_dir = offline.reorganize_output(input_dir, output_dir)
+
+    assert (reorg_dir / "b" / "000000_handled_result.vshb").exists()
+    assert not (reorg_dir / "a" / "000000_handled_result.vshb").exists()
+
+
 def test_vshb_parser_uses_named_header_layout_fw_before_algo(tmp_path):
     vshb = tmp_path / "sample_result.vshb"
     vshb.write_text(

@@ -356,19 +356,25 @@ def _build_accuracy_tables(report_df: pd.DataFrame) -> List[Table]:
     ]
 
     tables: List[Table] = []
-    for title, cols in [
-        ("在线/离线准确度", polar_cols),
-        ("Online vs Offline 准确度", base_cols + compare_cols),
+    for title, cols, reference in [
+        ("在线/离线准确度", polar_cols, "polar"),
+        ("Online vs Offline 准确度", base_cols + compare_cols, "offline"),
     ]:
         visible_cols = [col for col in cols if col in report_df.columns]
         metric_cols = [col for col in visible_cols if col not in base_cols]
         if not metric_cols:
             continue
+        table_df = report_df[
+            (report_df["reference"] == reference)
+            | ((report_df["reference"] == "") & report_df[metric_cols].notna().any(axis=1))
+        ]
+        if table_df.empty:
+            continue
 
         table = Table(title=title)
         for col in visible_cols:
             table.add_column(col)
-        for _, row in report_df.iterrows():
+        for _, row in table_df.iterrows():
             table.add_row(*[str(row[col]) for col in visible_cols])
         tables.append(table)
     return tables
