@@ -306,6 +306,35 @@ def test_reorganize_output_skips_existing_reorganized_files(tmp_path):
     assert existing.exists()
 
 
+def test_reorganize_output_keeps_same_index_result_files_together(tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    sample_dir = input_dir / "a"
+    sample1_dir = input_dir / "b"
+    sample_dir.mkdir(parents=True)
+    sample1_dir.mkdir(parents=True)
+    (sample_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    (sample1_dir / "sample1.csv").write_text("x\n1\n", encoding="utf-8")
+
+    output_dir.mkdir()
+    for name in [
+        "000000_sample0.prepsd",
+        "000000_sample_result.vshb",
+        "000001_sample10.prepsd",
+        "000001_sample1_result.vshb",
+    ]:
+        (output_dir / name).write_text("1,2,3\n", encoding="utf-8")
+
+    reorg_dir = offline.reorganize_output(input_dir, output_dir)
+
+    assert (reorg_dir / "a" / "000000_sample0.prepsd").exists()
+    assert (reorg_dir / "a" / "000000_sample_result.vshb").exists()
+    assert (reorg_dir / "b" / "000001_sample10.prepsd").exists()
+    assert (reorg_dir / "b" / "000001_sample1_result.vshb").exists()
+    assert not (reorg_dir / "a" / "000001_sample10.prepsd").exists()
+    assert not (reorg_dir / "b" / "000000_sample0.prepsd").exists()
+
+
 def test_vshb_parser_uses_named_header_layout_fw_before_algo(tmp_path):
     vshb = tmp_path / "sample_result.vshb"
     vshb.write_text(

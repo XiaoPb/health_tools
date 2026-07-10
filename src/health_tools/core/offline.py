@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 
@@ -465,12 +465,26 @@ RESULT_EXTENSIONS = [
 _EXE_PREFIX_SEP = "_"
 
 
-def _strip_exe_prefix(name: str) -> str:
-    """去掉exe输出文件名的序号前缀，如 '000000_动态-夏-158' -> '动态-夏-158'"""
+def _split_exe_prefix(name: str) -> Tuple[Optional[int], str]:
+    """拆分exe输出文件名的序号前缀，如 '000000_动态-夏-158'。"""
     idx = name.find(_EXE_PREFIX_SEP)
     if idx > 0 and name[:idx].isdigit():
-        return name[idx + 1 :]
-    return name
+        return int(name[:idx]), name[idx + 1 :]
+    return None, name
+
+
+def _strip_exe_prefix(name: str) -> str:
+    """去掉exe输出文件名的序号前缀，如 '000000_动态-夏-158' -> '动态-夏-158'"""
+    return _split_exe_prefix(name)[1]
+
+
+def _result_stem_matches_source(result_stem: str, source_stem: str, ext: str) -> bool:
+    """判断结果文件名主体是否属于指定源CSV。"""
+    if result_stem == source_stem:
+        return True
+    if ext == ".prepsd" and result_stem.startswith(source_stem):
+        return result_stem[len(source_stem) :].isdigit()
+    return False
 
 
 def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = False) -> Path:
@@ -485,10 +499,12 @@ def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = F
     reorg_dir = output_dir / "数据整理"
 
     source_map: Dict[str, str] = {}
-    for csv_file in input_dir.rglob("*.csv"):
+    source_index_map: Dict[int, str] = {}
+    for idx, csv_file in enumerate(sorted(input_dir.rglob("*.csv"))):
         rel = csv_file.relative_to(input_dir)
         subdir = str(rel.parent) if len(rel.parts) > 1 else ""
         source_map[csv_file.stem] = subdir
+        source_index_map[idx] = csv_file.stem
 
     result_files = [
         path
@@ -499,21 +515,22 @@ def reorganize_output(input_dir: Path, output_dir: Path, show_progress: bool = F
         if not result_file.is_file():
             continue
         stem = result_file.stem
+        matched_ext = ""
         for ext in RESULT_EXTENSIONS:
             if result_file.name.endswith(ext):
                 stem = result_file.name[: -len(ext)]
+                matched_ext = ext
                 break
 
-        bare_stem = _strip_exe_prefix(stem)
+        source_index, bare_stem = _split_exe_prefix(stem)
 
         matched_key = None
-        if bare_stem in source_map:
+        if source_index in source_index_map:
+            csv_stem = source_index_map[source_index]
+            if _result_stem_matches_source(bare_stem, csv_stem, matched_ext):
+                matched_key = csv_stem
+        elif bare_stem in source_map:
             matched_key = bare_stem
-        else:
-            for csv_stem in source_map:
-                if bare_stem.startswith(csv_stem) or csv_stem.startswith(bare_stem):
-                    matched_key = csv_stem
-                    break
 
         if matched_key is None:
             continue

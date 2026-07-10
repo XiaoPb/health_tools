@@ -65,6 +65,10 @@ def offline_cmd(
     output_dir = Path(output_path)
 
     target_versions = _resolve_versions(chip_name, ver, versions, all_versions)
+    if no_run and target_versions == [None]:
+        discovered_versions = _discover_no_run_versions(output_dir)
+        if discovered_versions:
+            target_versions = discovered_versions
     is_multi_version = len(target_versions) > 1
     version_exes: Dict[Optional[str], Optional[Path]] = {}
     should_validate_exes = bool(chip_name) and (not no_run or is_multi_version)
@@ -113,8 +117,20 @@ def offline_cmd(
 
 def _version_output_dir(output_dir: Path, version: Optional[str], exe_path: Optional[Path]) -> Path:
     """根据已解析版本返回离线结果目录。"""
-    version_name = str(version or exe_path.parent.name) if exe_path else None
+    version_name = str(version) if version else (exe_path.parent.name if exe_path else None)
     return output_dir / version_name if version_name else output_dir
+
+
+def _discover_no_run_versions(output_dir: Path) -> List[Optional[str]]:
+    """--no-run 指向版本父目录时，自动发现已有版本目录。"""
+    if not output_dir.exists() or (output_dir / "数据整理").exists():
+        return []
+    versions = [
+        path.name
+        for path in sorted(output_dir.iterdir())
+        if path.is_dir() and (path / "数据整理").exists()
+    ]
+    return versions
 
 
 def _resolve_versions(
@@ -205,7 +221,7 @@ def _run_single_offline_version(
     timeout: int,
 ) -> Optional[pd.DataFrame]:
     """执行单个版本的跑库、整理、PSD和准确度统计。"""
-    from health_tools.core.offline import OfflineRunner, find_exe, reorganize_output
+    from health_tools.core.offline import OfflineRunner, find_exe
 
     psd_acc_mode = _default_psd_acc_mode(exe_path)
     if not no_run:
@@ -256,9 +272,7 @@ def _run_single_offline_version(
             exe_path = find_exe(chip_name, version)
         psd_acc_mode = _default_psd_acc_mode(exe_path)
 
-    console.print("\n[bold]数据整理[/bold]")
-    reorg_dir = reorganize_output(input_dir, output_dir, show_progress=True)
-    console.print(f"[green]OK[/green] 已整理到: {reorg_dir}")
+    reorg_dir = _prepare_reorganized_output(input_dir, output_dir, no_run=no_run)
 
     if not no_plot:
         psd_save_dir = output_dir / "psd_bmpfile"
@@ -267,6 +281,22 @@ def _run_single_offline_version(
     if no_accuracy:
         return None
     return _run_accuracy(reorg_dir)
+
+
+def _prepare_reorganized_output(input_dir: Path, output_dir: Path, no_run: bool) -> Path:
+    """准备数据整理目录；--no-run 时优先复用已有整理结果。"""
+    reorg_dir = output_dir / "数据整理"
+    if no_run and reorg_dir.exists():
+        console.print("\n[bold]数据整理[/bold]")
+        console.print(f"[green]OK[/green] 使用已有整理目录: {reorg_dir}")
+        return reorg_dir
+
+    from health_tools.core.offline import reorganize_output
+
+    console.print("\n[bold]数据整理[/bold]")
+    reorg_dir = reorganize_output(input_dir, output_dir, show_progress=True)
+    console.print(f"[green]OK[/green] 已整理到: {reorg_dir}")
+    return reorg_dir
 
 
 def _default_psd_acc_mode(exe_path: Optional[Path]) -> str:
@@ -310,13 +340,38 @@ def _run_accuracy(output_dir: Path) -> Optional[pd.DataFrame]:
     report_df.to_csv(report_path, index=False, encoding="utf-8-sig")
     console.print(f"[green]OK[/green] 报告已保存: {report_path}")
 
-    table = Table(title="在线/离线准确度")
-    for col in report_df.columns:
-        table.add_column(col)
-    for _, row in report_df.iterrows():
-        table.add_row(*[str(v) for v in row.values])
-    console.print(table)
+    for table in _build_accuracy_tables(report_df):
+        console.print(table)
     return report_df
+
+
+def _build_accuracy_tables(report_df: pd.DataFrame) -> List[Table]:
+    """将在线/离线准确度和 online vs offline 拆成两个表打印。"""
+    base_cols = ["file", "category", "reference", "samples"]
+    compare_cols = [col for col in report_df.columns if "(online_vs_offline)" in col]
+    polar_cols = [
+        col
+        for col in report_df.columns
+        if col in base_cols or "(offline)" in col or "(online)" in col
+    ]
+
+    tables: List[Table] = []
+    for title, cols in [
+        ("在线/离线准确度", polar_cols),
+        ("Online vs Offline 准确度", base_cols + compare_cols),
+    ]:
+        visible_cols = [col for col in cols if col in report_df.columns]
+        metric_cols = [col for col in visible_cols if col not in base_cols]
+        if not metric_cols:
+            continue
+
+        table = Table(title=title)
+        for col in visible_cols:
+            table.add_column(col)
+        for _, row in report_df.iterrows():
+            table.add_row(*[str(row[col]) for col in visible_cols])
+        tables.append(table)
+    return tables
 
 
 def _save_combined_accuracy(output_dir: Path, version_reports: List[tuple]) -> None:
