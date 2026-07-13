@@ -1,5 +1,6 @@
 """offline 命令：离线跑库"""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -27,6 +28,9 @@ console = Console()
 @click.option("--no-run", is_flag=True, help="跳过跑库，直接整理/统计/绘图")
 @click.option("--list", "do_list", is_flag=True, help="列出可用芯片和版本")
 @click.option("--timeout", type=int, default=300, help="超时时间（秒，默认300）")
+@click.option(
+    "--settle-timeout", type=int, default=10, help="异常返回后等待输出稳定的时间（秒，默认10）"
+)
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
 def offline_cmd(
     input_path: Optional[str],
@@ -44,6 +48,7 @@ def offline_cmd(
     no_run: bool,
     do_list: bool,
     timeout: int,
+    settle_timeout: int,
     verbose: bool,
 ) -> None:
     """离线跑库（调用TEE_Algorithm.exe）"""
@@ -107,6 +112,8 @@ def offline_cmd(
             no_plot=no_plot,
             no_accuracy=no_accuracy,
             timeout=timeout,
+            settle_timeout=settle_timeout,
+            verbose=verbose,
         )
         if is_multi_version and report_df is not None and not report_df.empty:
             reports.append((str(version), report_df))
@@ -219,6 +226,8 @@ def _run_single_offline_version(
     no_plot: bool,
     no_accuracy: bool,
     timeout: int,
+    settle_timeout: int,
+    verbose: bool,
 ) -> Optional[pd.DataFrame]:
     """执行单个版本的跑库、整理、PSD和准确度统计。"""
     from health_tools.core.offline import OfflineRunner, find_exe
@@ -261,11 +270,16 @@ def _run_single_offline_version(
             console.print(f"  金标列: {ref_col}")
         console.print("")
 
-        success = runner.run(input_dir, output_dir, timeout=timeout)
-        if success:
+        result = runner.run(input_dir, output_dir, timeout=timeout, settle_timeout=settle_timeout)
+        if verbose:
+            _print_run_diagnostics(result)
+        if result.success:
+            if result.warning:
+                console.print(f"[yellow]WARN[/yellow] {result.warning}")
             console.print(f"[green]OK[/green] 离线跑库完成: {output_dir}")
         else:
             console.print("[red]FAIL[/red] 离线跑库失败")
+            _print_run_failure(result)
             raise SystemExit(1)
     elif chip_name:
         if exe_path is None:
@@ -297,6 +311,40 @@ def _prepare_reorganized_output(input_dir: Path, output_dir: Path, no_run: bool)
     reorg_dir = reorganize_output(input_dir, output_dir, show_progress=True)
     console.print(f"[green]OK[/green] 已整理到: {reorg_dir}")
     return reorg_dir
+
+
+def _format_mtime(timestamp: Optional[float]) -> str:
+    """格式化文件更新时间。"""
+    if timestamp is None:
+        return "无"
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _print_run_diagnostics(result) -> None:
+    """打印离线工具执行诊断信息。"""
+    console.print("  诊断:")
+    console.print(f"    命令: {result.command}")
+    console.print(f"    返回码: {result.returncode if result.returncode is not None else '无'}")
+    console.print(f"    超时: {'是' if result.timed_out else '否'}")
+    console.print(f"    耗时: {result.duration:.1f}s")
+    console.print(f"    输入CSV: {result.input_count}")
+    console.print(f"    结果VSHB: {result.result_count}")
+    console.print(f"    输出文件: {result.output_file_count}")
+    console.print(f"    最后输出时间: {_format_mtime(result.last_output_mtime)}")
+
+
+def _print_run_failure(result) -> None:
+    """打印离线工具失败原因和建议。"""
+    if result.error:
+        console.print(f"  原因: {result.error}")
+    console.print(f"  返回码: {result.returncode if result.returncode is not None else '无'}")
+    console.print(f"  超时: {'是' if result.timed_out else '否'}")
+    console.print(f"  输入CSV: {result.input_count}")
+    console.print(f"  结果VSHB: {result.result_count}")
+    if result.missing_count:
+        console.print(f"  缺少结果: {result.missing_count}")
+    console.print(f"  最后输出时间: {_format_mtime(result.last_output_mtime)}")
+    console.print("  建议: 可增大 --timeout，或检查算法工具日志和失败文件。")
 
 
 def _default_psd_acc_mode(exe_path: Optional[Path]) -> str:

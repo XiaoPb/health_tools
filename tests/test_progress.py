@@ -507,10 +507,10 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
-            return True
+            return type("RunResult", (), {"success": True, "warning": None})()
 
     monkeypatch.setattr("health_tools.core.offline.find_exe", lambda chip, ver=None: exe_path)
     monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
@@ -561,10 +561,10 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
-            return True
+            return type("RunResult", (), {"success": True, "warning": None})()
 
     monkeypatch.setattr("health_tools.core.offline.find_exe", lambda chip, ver=None: exe_path)
     monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
@@ -620,10 +620,10 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
-            return True
+            return type("RunResult", (), {"success": True, "warning": None})()
 
     def fake_reorganize(input_path, output_path, show_progress=False):
         calls.append(("reorganize", output_path.name, show_progress))
@@ -688,10 +688,10 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
             calls.append(self.version)
             output_path.mkdir(parents=True, exist_ok=True)
-            return True
+            return type("RunResult", (), {"success": True, "warning": None})()
 
     monkeypatch.setattr("health_tools.core.offline.find_exe", fake_find_exe)
     monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
@@ -742,19 +742,14 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
     assert calls == ["v1", "v2"]
 
 
-def test_offline_no_run_versions_collects_existing_reorganized_vshb(
-    monkeypatch, tmp_path: Path
-):
+def test_offline_no_run_versions_collects_existing_reorganized_vshb(monkeypatch, tmp_path: Path):
     import pandas as pd
 
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "GH3036_RES"
     input_dir.mkdir()
     (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
-    row = (
-        "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"
-        "80,1,99,0,0,0,81\n"
-    )
+    row = "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0," "80,1,99,0,0,0,81\n"
     for version in ["v1", "v2"]:
         reorg_dir = output_dir / version / "数据整理"
         reorg_dir.mkdir(parents=True)
@@ -797,9 +792,7 @@ def test_offline_no_run_versions_collects_existing_reorganized_vshb(
     assert combined["file"].tolist().count("TOTAL") == 2
 
 
-def test_offline_no_run_versions_reuses_existing_reorganized_dirs(
-    monkeypatch, tmp_path: Path
-):
+def test_offline_no_run_versions_reuses_existing_reorganized_dirs(monkeypatch, tmp_path: Path):
     import pandas as pd
 
     input_dir = tmp_path / "input"
@@ -810,8 +803,7 @@ def test_offline_no_run_versions_reuses_existing_reorganized_dirs(
         reorg_dir = output_dir / version / "数据整理"
         reorg_dir.mkdir(parents=True)
         (reorg_dir / "000000_sample_result.vshb").write_text(
-            "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"
-            "80,1,99,0,0,0,81\n",
+            "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0," "80,1,99,0,0,0,81\n",
             encoding="utf-8",
         )
 
@@ -855,9 +847,7 @@ def test_offline_no_run_versions_reuses_existing_reorganized_dirs(
     assert combined["file"].tolist().count("TOTAL") == 2
 
 
-def test_offline_no_run_discovers_version_dirs_under_output_parent(
-    monkeypatch, tmp_path: Path
-):
+def test_offline_no_run_discovers_version_dirs_under_output_parent(monkeypatch, tmp_path: Path):
     import pandas as pd
 
     input_dir = tmp_path / "input"
@@ -868,8 +858,7 @@ def test_offline_no_run_discovers_version_dirs_under_output_parent(
         reorg_dir = output_dir / version / "数据整理"
         reorg_dir.mkdir(parents=True)
         (reorg_dir / "000000_sample_result.vshb").write_text(
-            "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"
-            "80,1,99,0,0,0,81\n",
+            "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0," "80,1,99,0,0,0,81\n",
             encoding="utf-8",
         )
 

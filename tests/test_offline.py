@@ -1,10 +1,13 @@
 """offline 命令构建测试。"""
 
+import subprocess
 from pathlib import Path
 
 import numpy as np
+from click.testing import CliRunner
 from matplotlib.axes import Axes
 
+from health_tools.cli import main
 from health_tools.core import psd_plotter
 from health_tools.core import offline
 from health_tools.core.vshb import read_vshb_result
@@ -199,6 +202,146 @@ def test_build_command_falls_back_to_builtin_format(monkeypatch, tmp_path):
     assert cmd.endswith(' 0 -1 "input" "output" csv 25 1 2 2 3 4 5 6 7 8 45 61 46')
 
 
+def test_offline_run_result_success_on_zero_return(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+
+    def fake_run(cmd, shell, timeout):
+        (output_dir / "000000_sample_result.vshb").write_text("1,2,3\n", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+
+    result = runner.run(input_dir, output_dir, settle_timeout=0)
+
+    assert result.success is True
+    assert result.returncode == 0
+    assert result.input_count == 1
+    assert result.result_count == 1
+    assert result.warning is None
+
+
+def test_offline_run_result_fails_on_nonzero_without_results(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+
+    monkeypatch.setattr(
+        offline.subprocess,
+        "run",
+        lambda cmd, shell, timeout: subprocess.CompletedProcess(cmd, 7),
+    )
+
+    result = runner.run(input_dir, output_dir, settle_timeout=0)
+
+    assert result.success is False
+    assert result.returncode == 7
+    assert result.input_count == 1
+    assert result.result_count == 0
+    assert result.missing_count == 1
+    assert result.error == "外部工具返回异常，且结果文件不完整"
+
+
+def test_offline_run_result_warns_on_nonzero_with_complete_results(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    for name in ["a.csv", "b.csv"]:
+        (input_dir / name).write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+
+    def fake_run(cmd, shell, timeout):
+        (output_dir / "000000_a_result.vshb").write_text("1,2,3\n", encoding="utf-8")
+        (output_dir / "000001_b_result.vshb").write_text("1,2,3\n", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 9)
+
+    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+
+    result = runner.run(input_dir, output_dir, settle_timeout=0)
+
+    assert result.success is True
+    assert result.returncode == 9
+    assert result.result_count == 2
+    assert result.warning == "外部工具返回异常，但结果文件已生成完整"
+
+
+def test_offline_run_result_reports_timeout(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+
+    def fake_run(cmd, shell, timeout):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+
+    result = runner.run(input_dir, output_dir, timeout=1, settle_timeout=0)
+
+    assert result.success is False
+    assert result.timed_out is True
+    assert result.returncode is None
+    assert result.error == "离线工具执行超时"
+
+
+def test_offline_verbose_prints_run_diagnostics(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip_name, version=None: exe_path)
+    monkeypatch.setattr(
+        offline,
+        "get_offline_config",
+        lambda: offline.OfflineConfig(
+            tools_path=tmp_path,
+            versions={"gh3036": {"versions": {"exclusive": ["v1"]}, "default": "v1"}},
+            commands={},
+        ),
+    )
+
+    def fake_run(cmd, shell, timeout):
+        (output_dir / "v1" / "000000_sample_result.vshb").write_text("1,2,3\n", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3036",
+            "--no-plot",
+            "--no-accuracy",
+            "--verbose",
+            "--settle-timeout",
+            "0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "诊断:" in result.output
+    assert "命令:" in result.output
+    assert "返回码: 0" in result.output
+    assert "输入CSV: 1" in result.output
+    assert "结果VSHB: 1" in result.output
+
+
 def test_build_column_indices_from_chip_rule():
     indices = offline.build_column_indices("gh3036")
 
@@ -335,9 +478,7 @@ def test_reorganize_output_keeps_same_index_result_files_together(tmp_path):
     assert not (reorg_dir / "b" / "000000_sample0.prepsd").exists()
 
 
-def test_reorganize_output_skips_paths_unsupported_by_offline_tool(
-    monkeypatch, tmp_path
-):
+def test_reorganize_output_skips_paths_unsupported_by_offline_tool(monkeypatch, tmp_path):
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()

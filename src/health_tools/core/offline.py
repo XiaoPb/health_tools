@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -69,6 +70,32 @@ class OfflineConfig:
     tools_path: Path = field(default_factory=lambda: OFFLINE_TOOLS_DIR)
     versions: Dict[str, dict] = field(default_factory=dict)
     commands: Dict[str, dict] = field(default_factory=dict)
+
+
+@dataclass
+class OfflineRunResult:
+    """离线工具执行结果。"""
+
+    success: bool
+    command: str = ""
+    returncode: Optional[int] = None
+    timed_out: bool = False
+    started_at: float = 0.0
+    ended_at: float = 0.0
+    input_count: int = 0
+    result_count: int = 0
+    output_file_count: int = 0
+    last_output_mtime: Optional[float] = None
+    warning: Optional[str] = None
+    error: Optional[str] = None
+
+    @property
+    def duration(self) -> float:
+        return max(0.0, self.ended_at - self.started_at)
+
+    @property
+    def missing_count(self) -> int:
+        return max(0, self.input_count - self.result_count)
 
 
 def get_offline_config() -> OfflineConfig:
@@ -419,22 +446,30 @@ class OfflineRunner:
         values.update(self.column_indices)
         return values
 
-    def run(self, input_dir: Path, output_dir: Path, timeout: int = 300) -> bool:
+    def run(
+        self,
+        input_dir: Path,
+        output_dir: Path,
+        timeout: int = 300,
+        settle_timeout: int = 10,
+    ) -> OfflineRunResult:
         """执行离线跑库
 
         Args:
             input_dir: 输入数据目录（GH格式CSV）
             output_dir: 输出结果目录
             timeout: 超时时间（秒）
+            settle_timeout: 异常返回后等待输出稳定的时间（秒）
 
         Returns:
-            是否成功
+            跑库执行结果
         """
         if not self.exe_path or not self.tool_dir:
-            return False
+            return OfflineRunResult(success=False, error="未找到离线工具")
 
         input_str = str(input_dir.resolve())
         output_str = str(output_dir.resolve())
+        input_count = _count_supported_csv_files(input_dir)
 
         if output_dir.exists():
             shutil.rmtree(output_dir)
@@ -443,13 +478,57 @@ class OfflineRunner:
         cmd = self._build_command(input_str, output_str)
         old_cwd = os.getcwd()
         os.chdir(str(self.tool_dir))
+        started_at = time.time()
+        returncode = None
+        timed_out = False
         try:
             result = subprocess.run(cmd, shell=True, timeout=timeout)
-            return result.returncode == 0
+            returncode = result.returncode
         except subprocess.TimeoutExpired:
-            return False
+            timed_out = True
         finally:
             os.chdir(old_cwd)
+
+        if returncode == 0:
+            output_file_count, result_count, last_mtime = _snapshot_output(output_dir)
+        else:
+            output_file_count, result_count, last_mtime = _wait_for_output_settle(
+                output_dir, settle_timeout
+            )
+
+        ended_at = time.time()
+        has_complete_results = input_count > 0 and result_count >= input_count
+        if returncode == 0:
+            success = True
+            warning = None
+            error = None
+        elif timed_out:
+            success = False
+            warning = None
+            error = "离线工具执行超时"
+        elif has_complete_results:
+            success = True
+            warning = "外部工具返回异常，但结果文件已生成完整"
+            error = None
+        else:
+            success = False
+            warning = None
+            error = "外部工具返回异常，且结果文件不完整"
+
+        return OfflineRunResult(
+            success=success,
+            command=cmd,
+            returncode=returncode,
+            timed_out=timed_out,
+            started_at=started_at,
+            ended_at=ended_at,
+            input_count=input_count,
+            result_count=result_count,
+            output_file_count=output_file_count,
+            last_output_mtime=last_mtime,
+            warning=warning,
+            error=error,
+        )
 
 
 RESULT_EXTENSIONS = [
@@ -487,6 +566,52 @@ def _is_offline_tool_path_supported(path: Path) -> bool:
         return True
     except UnicodeEncodeError:
         return False
+
+
+def _count_supported_csv_files(input_dir: Path) -> int:
+    """统计离线工具可处理的源CSV数量。"""
+    return sum(
+        1
+        for csv_file in input_dir.rglob("*.csv")
+        if csv_file.is_file() and _is_offline_tool_path_supported(csv_file)
+    )
+
+
+def _snapshot_output(output_dir: Path) -> Tuple[int, int, Optional[float]]:
+    """返回输出文件总数、结果文件数和最后更新时间。"""
+    if not output_dir.exists():
+        return 0, 0, None
+
+    file_count = 0
+    result_count = 0
+    last_mtime = None
+    for path in output_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        file_count += 1
+        if path.name.endswith("_result.vshb"):
+            result_count += 1
+        mtime = path.stat().st_mtime
+        last_mtime = mtime if last_mtime is None else max(last_mtime, mtime)
+    return file_count, result_count, last_mtime
+
+
+def _wait_for_output_settle(
+    output_dir: Path, settle_timeout: int
+) -> Tuple[int, int, Optional[float]]:
+    """等待输出目录停止新增或更新文件。"""
+    file_count, result_count, last_mtime = _snapshot_output(output_dir)
+    if settle_timeout <= 0:
+        return file_count, result_count, last_mtime
+
+    deadline = time.monotonic() + settle_timeout
+    while time.monotonic() < deadline:
+        time.sleep(1)
+        current = _snapshot_output(output_dir)
+        if current == (file_count, result_count, last_mtime):
+            return current
+        file_count, result_count, last_mtime = current
+    return file_count, result_count, last_mtime
 
 
 def _build_source_index_map(input_dir: Path) -> Dict[int, str]:
