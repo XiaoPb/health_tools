@@ -34,10 +34,28 @@ ghealth_tool offline --list [--chip <chip>]
 
 ## 输出流程
 
-1. 跑库：调用配置目录中的 `TEE_Algorithm.exe`。
-2. 整理：将离线输出整理到结果目录。
-3. PSD：默认生成 PSD 时频图，使用 `--no-plot` 可跳过。
-4. 准确度：默认生成 `accuracy_report.csv`，使用 `--no-accuracy` 可跳过。
+1. 输入预检：按芯片规则严格校验 CSV 表头，并备份不合规文件。
+2. 跑库：调用配置目录中的 `TEE_Algorithm.exe`。
+3. 整理：将离线输出整理到结果目录。
+4. PSD：默认生成 PSD 时频图，使用 `--no-plot` 可跳过。
+5. 准确度：默认生成 `accuracy_report.csv`，使用 `--no-accuracy` 可跳过。
+
+### 输入预检
+
+实际跑库前会递归扫描输入目录中的 `.csv` 文件（扩展名不区分大小写），每个文件只读取
+前三行。CSV 表头的列名、数量和顺序必须与 `rules/chip/<chip>.yaml` 展开后的列定义完全
+一致；仅允许首列表头带 UTF-8 BOM，不会忽略大小写或额外空格。
+
+表头不一致、文件行数不足、编码错误或表头无法解析的文件会移动到输入目录同级的
+`<输入目录名>_mv`，并保留原相对目录。例如：
+
+```text
+test1/lzh/sample/sample.csv -> test1_mv/lzh/sample/sample.csv
+```
+
+备份位置已有同名文件时会追加 `_1`、`_2` 等序号，不会覆盖已有文件。移动失败或过滤后
+没有合规 CSV 时不会启动离线工具。多版本跑库只预检一次；`--no-run` 不执行预检，也不会
+改变输入目录。
 
 整理、PSD 和准确度统计阶段使用进度条；未找到 PSD 或 `.vshb` 有效结果时输出 WARN，不中断后续流程。
 算法等级为 `medium`/`med` 或 `basic` 时，PSD 默认绘制 `PPG + ACCRMS`；其他等级默认绘制
@@ -77,7 +95,30 @@ ghealth_tool cfg --offline-scan
 ghealth_tool cfg --offline-default gh3220=V4300_GH_HR_exc_pv_v2.0.3.0
 ```
 
-不同版本的参数顺序可在用户配置 `offline_cmd` 中按 `芯片 + 算法版本` 配置。
+不同版本的参数顺序可在用户配置 `offline_cmd` 中按 `芯片 + 算法版本` 配置，也可在
+`TEE_Algorithm.exe` 同目录放置 `cmd_setting.yaml`：
+
+```yaml
+cmd_arg:
+  - start_idx
+  - end_idx
+  - input_dir
+  - output_dir
+  - csv
+  - hba_fs
+  - scene_en
+  - ch_num
+cmd_default:
+  start_idx: 0
+  end_idx: -1
+  csv: csv
+  scene_en: 0
+```
+
+本地文件存在时会整份替换该版本的全局参数配置，而不是逐字段合并。文件无法解析、
+`cmd_arg` 不是非空列表或 `cmd_default` 不是对象时立即停止跑库。配置优先级为：本地
+`cmd_setting.yaml`、全局版本配置、芯片级配置、内置命令格式；命令行显式参数始终覆盖
+配置中的默认值。
 `accx`、`ppg_ch0`、`polar` 等列号变量会从 `rules/chip/<chip>.yaml` 自动推导。
 
 ## 示例

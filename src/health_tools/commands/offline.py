@@ -71,7 +71,6 @@ def offline_cmd(
     if not output_path:
         output_path = str(input_dir.parent / f"{input_dir.name}_offline_result")
     output_dir = Path(output_path)
-    timeout = _resolve_timeout(input_dir, timeout)
 
     target_versions = _resolve_versions(chip_name, ver, versions, all_versions)
     if no_run and target_versions == [None]:
@@ -80,8 +79,8 @@ def offline_cmd(
             target_versions = discovered_versions
     is_multi_version = len(target_versions) > 1
     version_exes: Dict[Optional[str], Optional[Path]] = {}
-    should_validate_exes = bool(chip_name) and (not no_run or is_multi_version)
-    if should_validate_exes:
+    should_validate_exes = chip_name is not None and (not no_run or is_multi_version)
+    if should_validate_exes and chip_name is not None:
         version_exes = _validate_version_exes(chip_name, target_versions)
     elif not no_run:
         console.print("[red]错误: 需要指定 --chip 参数[/red]")
@@ -98,6 +97,12 @@ def offline_cmd(
             for missing in missing_dirs:
                 console.print(f"  {missing}")
             raise SystemExit(1)
+
+    if not no_run:
+        _validate_local_cmd_configs(version_exes)
+        _filter_input_files(input_dir, chip_name)
+
+    timeout = _resolve_timeout(input_dir, timeout)
 
     reports = []
     for version in target_versions:
@@ -136,7 +141,7 @@ def _discover_no_run_versions(output_dir: Path) -> List[Optional[str]]:
     """--no-run 指向版本父目录时，自动发现已有版本目录。"""
     if not output_dir.exists() or (output_dir / "数据整理").exists():
         return []
-    versions = [
+    versions: List[Optional[str]] = [
         path.name
         for path in sorted(output_dir.iterdir())
         if path.is_dir() and (path / "数据整理").exists()
@@ -184,21 +189,21 @@ def _resolve_versions(
         if not chip_name:
             console.print("[red]错误: --versions 需要指定 --chip[/red]")
             raise SystemExit(1)
-        resolved = []
+        selected_versions: List[Optional[str]] = []
         seen = set()
         for item in versions.split(","):
             version = item.strip()
             if version and version not in seen:
-                resolved.append(version)
+                selected_versions.append(version)
                 seen.add(version)
-        if not resolved:
+        if not selected_versions:
             console.print("[red]错误: --versions 未提供有效版本[/red]")
             raise SystemExit(1)
-        return resolved
+        return selected_versions
     return [ver]
 
 
-def _iter_config_versions(chip_name: str) -> List[str]:
+def _iter_config_versions(chip_name: str) -> List[Optional[str]]:
     """展开当前芯片配置中的全部版本。"""
     from health_tools.core.offline import get_offline_config
 
@@ -228,6 +233,52 @@ def _validate_version_exes(
             raise SystemExit(1)
         result[version] = exe_path
     return result
+
+
+def _validate_local_cmd_configs(
+    version_exes: Dict[Optional[str], Optional[Path]],
+) -> None:
+    """在移动输入文件前校验所有目标版本的本地参数配置。"""
+    from health_tools.core.offline import OfflineConfigError, load_local_cmd_config
+
+    try:
+        for exe_path in version_exes.values():
+            if exe_path is not None:
+                load_local_cmd_config(exe_path.parent)
+    except OfflineConfigError as exc:
+        console.print(f"[red]错误: 离线工具参数配置无效: {exc}[/red]")
+        raise SystemExit(1) from exc
+
+
+def _filter_input_files(input_dir: Path, chip_name: Optional[str]) -> None:
+    """跑库前严格过滤不符合芯片表头规则的CSV。"""
+    from health_tools.core.offline_input_filter import (
+        OfflineInputFilterError,
+        filter_offline_inputs,
+    )
+    from health_tools.rules.loader import RuleLoader
+
+    if not chip_name:
+        return
+    chip_rule = RuleLoader.load_chip_rule(chip_name)
+    console.print("[bold]输入预检[/bold]")
+    try:
+        result = filter_offline_inputs(input_dir, chip_rule)
+    except OfflineInputFilterError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise SystemExit(1) from exc
+
+    console.print(f"  扫描CSV: {result.scanned_count}")
+    console.print(f"  符合规则: {result.accepted_count}")
+    console.print(f"  已移动: {result.moved_count}")
+    if result.moved_count:
+        console.print(f"  备份目录: {result.backup_dir}")
+        for item in result.moved_files:
+            console.print(f"  [yellow]MOVE[/yellow] {item.source}: {item.reason}")
+    if result.accepted_count == 0:
+        console.print("[red]错误: 没有符合芯片规则的CSV文件，已停止跑库[/red]")
+        raise SystemExit(1)
+    console.print("")
 
 
 def _run_single_offline_version(

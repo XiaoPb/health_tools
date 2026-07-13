@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import pandas as pd
+import yaml
 
 from health_tools.config import CONFIG_DIR, load_config, save_config
 from health_tools.rules.loader import RuleLoader
@@ -19,6 +20,35 @@ from health_tools.core.vshb import read_vshb_result
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"
+LOCAL_CMD_CONFIG_NAME = "cmd_setting.yaml"
+
+
+class OfflineConfigError(ValueError):
+    """离线工具参数配置错误。"""
+
+
+def load_local_cmd_config(tool_dir: Path) -> Optional[dict]:
+    """读取exe同目录参数配置；文件存在时整份替换全局配置。"""
+    config_path = tool_dir / LOCAL_CMD_CONFIG_NAME
+    if not config_path.exists():
+        return None
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise OfflineConfigError(f"无法读取 {config_path}: {exc}") from exc
+
+    if not isinstance(config, dict):
+        raise OfflineConfigError(f"{config_path} 根节点必须是对象")
+    cmd_arg = config.get("cmd_arg")
+    if not isinstance(cmd_arg, list) or not cmd_arg:
+        raise OfflineConfigError(f"{config_path} 的 cmd_arg 必须是非空列表")
+    cmd_default = config.get("cmd_default", {})
+    if not isinstance(cmd_default, dict):
+        raise OfflineConfigError(f"{config_path} 的 cmd_default 必须是对象")
+    return {"cmd_arg": cmd_arg, "cmd_default": cmd_default}
+
 
 # 目录名 → 标准算法等级名
 CATEGORY_LABELS = {
@@ -362,6 +392,10 @@ class OfflineRunner:
 
     def _get_cmd_config(self) -> dict:
         """获取当前芯片和算法版本的命令模板配置。"""
+        local_config = self._load_local_cmd_config()
+        if local_config is not None:
+            return local_config
+
         if not self.resolved_version:
             return {}
         cfg = get_offline_config()
@@ -388,6 +422,12 @@ class OfflineRunner:
                 "cmd_default": chip_version_cfg.get("cmd_default", {}),
             }
         return {}
+
+    def _load_local_cmd_config(self) -> Optional[dict]:
+        """读取exe同目录参数配置；文件存在时整份替换全局配置。"""
+        if self.tool_dir is None:
+            return None
+        return load_local_cmd_config(self.tool_dir)
 
     def _build_command(self, input_dir: str, output_dir: str) -> str:
         """构建 exe 命令行"""
@@ -572,8 +612,15 @@ def count_supported_csv_files(input_dir: Path) -> int:
     """统计离线工具可处理的源CSV数量。"""
     return sum(
         1
-        for csv_file in input_dir.rglob("*.csv")
-        if csv_file.is_file() and _is_offline_tool_path_supported(csv_file)
+        for csv_file in _iter_source_csv_files(input_dir)
+        if _is_offline_tool_path_supported(csv_file)
+    )
+
+
+def _iter_source_csv_files(input_dir: Path) -> List[Path]:
+    """返回扩展名大小写不敏感的源CSV。"""
+    return sorted(
+        path for path in input_dir.rglob("*") if path.is_file() and path.suffix.lower() == ".csv"
     )
 
 
@@ -619,7 +666,7 @@ def _build_source_index_map(input_dir: Path) -> Dict[int, str]:
     source_index_map: Dict[int, str] = {}
     source_files = [
         csv_file
-        for csv_file in sorted(input_dir.rglob("*.csv"))
+        for csv_file in _iter_source_csv_files(input_dir)
         if _is_offline_tool_path_supported(csv_file)
     ]
     for idx, csv_file in enumerate(source_files):
@@ -631,7 +678,7 @@ def _build_source_index_map(input_dir: Path) -> Dict[int, str]:
 def _build_unique_source_map(input_dir: Path) -> Dict[str, str]:
     """构建无序号结果可用的唯一文件名映射。"""
     source_paths: Dict[str, List[str]] = {}
-    for csv_file in sorted(input_dir.rglob("*.csv")):
+    for csv_file in _iter_source_csv_files(input_dir):
         rel = csv_file.relative_to(input_dir)
         subdir = str(rel.parent) if len(rel.parts) > 1 else ""
         source_paths.setdefault(csv_file.stem, []).append(subdir)

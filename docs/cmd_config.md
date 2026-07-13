@@ -32,6 +32,21 @@ ghealth_tool cfg [options]
 `accx`、`ppg_ch0`、`polar` 等列号不写在 `config.yaml` 中，会从 `rules/chip/<chip>.yaml`
 自动推导，规则缺失时使用内置默认值。
 
+也可以在每个 `TEE_Algorithm.exe` 同目录放置 `cmd_setting.yaml`，文件根节点直接包含
+`cmd_arg` 和可选的 `cmd_default`：
+
+```yaml
+cmd_arg: [input_dir, output_dir, csv, hba_fs, scene_en, ch_num]
+cmd_default:
+  csv: csv
+  scene_en: 0
+```
+
+本地配置存在时整份替换该版本的全局配置；不存在时才回退到 `config.yaml`。本地文件
+损坏、`cmd_arg` 不是非空列表或 `cmd_default` 不是对象时，离线跑库会直接停止。完整
+优先级为：本地 `cmd_setting.yaml`、全局 `offline_cmd` 版本配置、`offline_versions` 中的
+版本/芯片配置、内置命令格式。命令行显式参数仍优先于所选配置的默认值。
+
 按当前 GH3036 默认顺序，可配置为：
 
 ```yaml

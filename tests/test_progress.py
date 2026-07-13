@@ -496,6 +496,7 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
     import pandas as pd
 
     calls = []
+    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"
@@ -550,6 +551,7 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
     import pandas as pd
 
     calls = []
+    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     for idx in range(51):
@@ -606,6 +608,7 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
     import pandas as pd
 
     calls = []
+    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     for idx in range(60):
@@ -664,6 +667,7 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
     import pandas as pd
 
     calls = []
+    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"
@@ -718,6 +722,7 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
     import pandas as pd
 
     calls = []
+    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"
@@ -786,6 +791,7 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
     import pandas as pd
 
     calls = []
+    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"

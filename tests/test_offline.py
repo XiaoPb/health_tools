@@ -4,13 +4,16 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
+import pytest
 from click.testing import CliRunner
 from matplotlib.axes import Axes
 
 from health_tools.cli import main
+from health_tools.commands import offline as offline_command
 from health_tools.core import psd_plotter
 from health_tools.core import offline
 from health_tools.core.vshb import read_vshb_result
+from health_tools.rules.loader import RuleLoader
 
 
 def _make_runner(
@@ -38,6 +41,16 @@ def _make_runner(
         hba_fs=hba_fs,
         scene_en=scene_en,
         ch_num=ch_num,
+    )
+
+
+def _write_valid_chip_csv(path: Path, chip: str = "gh3036") -> None:
+    rule = RuleLoader.load_chip_rule(chip)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"Version: {chip.upper()}\n{rule.delimiter.join(rule.columns)}\n"
+        f"{rule.delimiter.join(['0'] * len(rule.columns))}\n",
+        encoding=rule.encoding,
     )
 
 
@@ -194,6 +207,48 @@ def test_cli_option_overrides_cmd_default(monkeypatch, tmp_path):
     assert cmd.endswith("25 1 2")
 
 
+def test_local_cmd_setting_replaces_global_config(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["input_dir", "output_dir"],
+                    "cmd_default": {"scene_en": 9},
+                }
+            }
+        },
+    )
+    (runner.tool_dir / "cmd_setting.yaml").write_text(
+        "cmd_arg: [scene_en, input_dir]\ncmd_default:\n  scene_en: 3\n",
+        encoding="utf-8",
+    )
+
+    cmd = runner._build_command("in dir", "out dir")
+
+    assert cmd.endswith('3 "in dir"')
+    assert "out dir" not in cmd
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "cmd_arg: [input_dir\n",
+        "- input_dir\n",
+        "cmd_default: {}\n",
+        "cmd_arg: input_dir\n",
+        "cmd_arg: [input_dir]\ncmd_default: []\n",
+    ],
+)
+def test_invalid_local_cmd_setting_is_rejected(monkeypatch, tmp_path, content):
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    (runner.tool_dir / "cmd_setting.yaml").write_text(content, encoding="utf-8")
+
+    with pytest.raises(offline.OfflineConfigError, match="cmd_setting.yaml"):
+        runner._build_command("input", "output")
+
+
 def test_build_command_falls_back_to_builtin_format(monkeypatch, tmp_path):
     runner = _make_runner(monkeypatch, tmp_path, {}, hba_fs=25, scene_en=1, ch_num=2)
 
@@ -294,7 +349,7 @@ def test_offline_verbose_prints_run_diagnostics(monkeypatch, tmp_path):
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()
-    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    _write_valid_chip_csv(input_dir / "sample.csv")
     exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
     exe_path.parent.mkdir(parents=True)
     exe_path.write_text("", encoding="utf-8")
@@ -340,6 +395,129 @@ def test_offline_verbose_prints_run_diagnostics(monkeypatch, tmp_path):
     assert "返回码: 0" in result.output
     assert "输入CSV: 1" in result.output
     assert "结果VSHB: 1" in result.output
+
+
+def test_offline_filters_once_before_multi_version_run(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _write_valid_chip_csv(input_dir / "sample.csv")
+    exe_paths = {}
+    for version in ["v1", "v2"]:
+        exe_path = tmp_path / "gh3036" / "exclusive" / version / offline.EXE_NAME
+        exe_path.parent.mkdir(parents=True)
+        exe_path.write_text("", encoding="utf-8")
+        exe_paths[version] = exe_path
+
+    monkeypatch.setattr(
+        offline_command,
+        "_resolve_versions",
+        lambda *args: ["v1", "v2"],
+    )
+    monkeypatch.setattr(
+        offline_command,
+        "_validate_version_exes",
+        lambda *args: exe_paths,
+    )
+    filter_calls = []
+    monkeypatch.setattr(
+        offline_command,
+        "_filter_input_files",
+        lambda input_path, chip: filter_calls.append((input_path, chip)),
+    )
+    monkeypatch.setattr(offline_command, "_validate_local_cmd_configs", lambda exes: None)
+    monkeypatch.setattr(
+        offline_command,
+        "_run_single_offline_version",
+        lambda **kwargs: None,
+    )
+
+    result = CliRunner().invoke(
+        main,
+        ["offline", "-i", str(input_dir), "-c", "gh3036", "--versions", "v1,v2"],
+    )
+
+    assert result.exit_code == 0
+    assert filter_calls == [(input_dir, "gh3036")]
+
+
+def test_offline_no_run_skips_input_filter(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    filter_calls = []
+    monkeypatch.setattr(
+        offline_command,
+        "_filter_input_files",
+        lambda *args: filter_calls.append(args),
+    )
+    monkeypatch.setattr(
+        offline_command,
+        "_run_single_offline_version",
+        lambda **kwargs: None,
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "--no-run",
+            "--no-plot",
+            "--no-accuracy",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert filter_calls == []
+
+
+def test_offline_default_timeout_uses_filtered_file_count(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    for index in range(52):
+        (input_dir / f"sample_{index}.csv").write_text("x\n", encoding="utf-8")
+    exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+    timeouts = []
+
+    monkeypatch.setattr(
+        offline_command,
+        "_validate_version_exes",
+        lambda *args: {None: exe_path},
+    )
+    monkeypatch.setattr(offline_command, "_validate_local_cmd_configs", lambda exes: None)
+
+    def remove_one_file(input_path, chip):
+        (input_path / "sample_51.csv").unlink()
+
+    monkeypatch.setattr(offline_command, "_filter_input_files", remove_one_file)
+    monkeypatch.setattr(
+        offline_command,
+        "_run_single_offline_version",
+        lambda **kwargs: timeouts.append(kwargs["timeout"]),
+    )
+
+    result = CliRunner().invoke(main, ["offline", "-i", str(input_dir), "-c", "gh3036"])
+
+    assert result.exit_code == 0
+    assert timeouts == [320]
+
+
+def test_filter_input_files_stops_when_no_csv_is_accepted(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "bad.csv").write_text("bad\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        offline_command._filter_input_files(input_dir, "gh3036")
+
+    assert not (input_dir / "bad.csv").exists()
+    assert (tmp_path / "input_mv" / "bad.csv").exists()
 
 
 def test_build_column_indices_from_chip_rule():
