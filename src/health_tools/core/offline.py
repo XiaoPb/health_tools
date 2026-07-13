@@ -469,7 +469,7 @@ class OfflineRunner:
 
         input_str = str(input_dir.resolve())
         output_str = str(output_dir.resolve())
-        input_count = _count_supported_csv_files(input_dir)
+        input_count = count_supported_csv_files(input_dir)
 
         if output_dir.exists():
             shutil.rmtree(output_dir)
@@ -568,7 +568,7 @@ def _is_offline_tool_path_supported(path: Path) -> bool:
         return False
 
 
-def _count_supported_csv_files(input_dir: Path) -> int:
+def count_supported_csv_files(input_dir: Path) -> int:
     """统计离线工具可处理的源CSV数量。"""
     return sum(
         1

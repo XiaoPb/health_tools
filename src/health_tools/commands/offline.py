@@ -10,6 +10,9 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
+DEFAULT_TIMEOUT = 300
+TIMEOUT_FILE_THRESHOLD = 50
+TIMEOUT_SECONDS_PER_EXTRA_FILE = 20
 
 
 @click.command("offline")
@@ -27,7 +30,7 @@ console = Console()
 @click.option("--no-plot", is_flag=True, help="跳过PSD时频图绘制")
 @click.option("--no-run", is_flag=True, help="跳过跑库，直接整理/统计/绘图")
 @click.option("--list", "do_list", is_flag=True, help="列出可用芯片和版本")
-@click.option("--timeout", type=int, default=300, help="超时时间（秒，默认300）")
+@click.option("--timeout", type=int, default=DEFAULT_TIMEOUT, help="超时时间（秒，默认300）")
 @click.option(
     "--settle-timeout", type=int, default=10, help="异常返回后等待输出稳定的时间（秒，默认10）"
 )
@@ -68,6 +71,7 @@ def offline_cmd(
     if not output_path:
         output_path = str(input_dir.parent / f"{input_dir.name}_offline_result")
     output_dir = Path(output_path)
+    timeout = _resolve_timeout(input_dir, timeout)
 
     target_versions = _resolve_versions(chip_name, ver, versions, all_versions)
     if no_run and target_versions == [None]:
@@ -138,6 +142,20 @@ def _discover_no_run_versions(output_dir: Path) -> List[Optional[str]]:
         if path.is_dir() and (path / "数据整理").exists()
     ]
     return versions
+
+
+def _resolve_timeout(input_dir: Path, timeout: int) -> int:
+    """按输入CSV数量计算默认超时时间。"""
+    ctx = click.get_current_context(silent=True)
+    source = ctx.get_parameter_source("timeout") if ctx else None
+    if source == click.core.ParameterSource.COMMANDLINE:
+        return timeout
+
+    from health_tools.core.offline import count_supported_csv_files
+
+    file_count = count_supported_csv_files(input_dir)
+    extra_count = max(0, file_count - TIMEOUT_FILE_THRESHOLD)
+    return DEFAULT_TIMEOUT + extra_count * TIMEOUT_SECONDS_PER_EXTRA_FILE
 
 
 def _resolve_versions(

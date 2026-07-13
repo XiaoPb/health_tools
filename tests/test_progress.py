@@ -546,6 +546,120 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
     assert ("run", "v1", output_dir / "v1") in calls
 
 
+def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    calls = []
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    for idx in range(51):
+        (input_dir / f"sample_{idx}.csv").write_text("x\n1\n", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    exe_path = tmp_path / "tools" / "gh3300" / "exclusive" / "v1" / "TEE_Algorithm.exe"
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+
+    class FakeRunner:
+        def __init__(self, chip, version=None, **kwargs):
+            pass
+
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+            calls.append(timeout)
+            output_path.mkdir(parents=True, exist_ok=True)
+            return type("RunResult", (), {"success": True, "warning": None})()
+
+    monkeypatch.setattr("health_tools.core.offline.find_exe", lambda chip, ver=None: exe_path)
+    monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
+    monkeypatch.setattr(
+        "health_tools.core.offline.reorganize_output",
+        lambda input_path, output_path, show_progress=False: output_path,
+    )
+    monkeypatch.setattr(
+        "health_tools.core.offline.calculate_offline_accuracy",
+        lambda output_path, show_progress=False: pd.DataFrame({"file": ["TOTAL"]}),
+    )
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3300",
+            "--version",
+            "v1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [320]
+
+
+def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    calls = []
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    for idx in range(60):
+        (input_dir / f"sample_{idx}.csv").write_text("x\n1\n", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    exe_path = tmp_path / "tools" / "gh3300" / "exclusive" / "v1" / "TEE_Algorithm.exe"
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+
+    class FakeRunner:
+        def __init__(self, chip, version=None, **kwargs):
+            pass
+
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+            calls.append(timeout)
+            output_path.mkdir(parents=True, exist_ok=True)
+            return type("RunResult", (), {"success": True, "warning": None})()
+
+    monkeypatch.setattr("health_tools.core.offline.find_exe", lambda chip, ver=None: exe_path)
+    monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
+    monkeypatch.setattr(
+        "health_tools.core.offline.reorganize_output",
+        lambda input_path, output_path, show_progress=False: output_path,
+    )
+    monkeypatch.setattr(
+        "health_tools.core.offline.calculate_offline_accuracy",
+        lambda output_path, show_progress=False: pd.DataFrame({"file": ["TOTAL"]}),
+    )
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3300",
+            "--version",
+            "v1",
+            "--timeout",
+            "123",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [123]
+
+
 def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, tmp_path: Path):
     import pandas as pd
 
