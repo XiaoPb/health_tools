@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 from click.testing import CliRunner
 from matplotlib.axes import Axes
@@ -697,6 +698,7 @@ def test_vshb_parser_uses_named_header_layout_fw_before_algo(tmp_path):
         "offline": 73,
         "ref": 70,
         "online": 71,
+        "comp": 72,
     }
 
 
@@ -716,7 +718,33 @@ def test_vshb_parser_uses_named_header_layout_algo_before_fw(tmp_path):
         "offline": 83,
         "ref": 80,
         "online": 81,
+        "comp": 82,
     }
+
+
+def test_vshb_parser_accepts_comp_header_alias(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    vshb.write_text(
+        "second,polar,algo_hr,comp,fw_hr\n3,90,93,92,91\n",
+        encoding="utf-8",
+    )
+
+    df = offline.VshbParser().parse(vshb)
+
+    assert df.iloc[0]["comp"] == 92
+
+
+def test_vshb_parser_allows_missing_comp_header(tmp_path):
+    vshb = tmp_path / "sample_result.vshb"
+    vshb.write_text(
+        "second,polar,algo_hr,fw_hr\n4,90,93,91\n",
+        encoding="utf-8",
+    )
+
+    df = offline.VshbParser().parse(vshb)
+
+    assert len(df) == 1
+    assert pd.isna(df.iloc[0]["comp"])
 
 
 def test_vshb_parser_keeps_header_columns_with_trailing_commas(tmp_path):
@@ -735,6 +763,7 @@ def test_vshb_parser_keeps_header_columns_with_trailing_commas(tmp_path):
         "offline": 75,
         "ref": 71,
         "online": 60,
+        "comp": 0,
     }
 
 
@@ -744,6 +773,7 @@ def test_vshb_parser_falls_back_to_legacy_positions(tmp_path):
     row[0] = "3"
     row[1] = "93"
     row[2] = "90"
+    row[3] = "92"
     row[30] = "91"
     vshb.write_text(",".join(row) + "\n", encoding="utf-8")
 
@@ -754,6 +784,7 @@ def test_vshb_parser_falls_back_to_legacy_positions(tmp_path):
         "offline": 93,
         "ref": 90,
         "online": 91,
+        "comp": 92,
     }
 
 
@@ -807,6 +838,30 @@ def test_offline_accuracy_summarizes_mixed_reference_metrics_separately(tmp_path
     assert total["MAE(online_vs_offline)"] == 5.0
 
 
+def test_offline_accuracy_adds_comp_metrics_and_skips_zero_comp(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    header = "second,polar,algo_hr,comp_hr,fw_hr"
+    (result_dir / "valid_comp_result.vshb").write_text(
+        f"{header}\n1,100,101,102,103\n2,100,102,104,105\n",
+        encoding="utf-8",
+    )
+    (result_dir / "zero_comp_result.vshb").write_text(
+        f"{header}\n1,100,101,0,103\n2,100,102,0,105\n",
+        encoding="utf-8",
+    )
+
+    report = offline.calculate_offline_accuracy(result_dir)
+
+    assert report is not None
+    valid_row = report[report["file"] == "valid_comp"].iloc[0]
+    zero_row = report[report["file"] == "zero_comp"].iloc[0]
+    total = report[report["file"] == "TOTAL"].iloc[0]
+    assert valid_row["MAE(comp)"] == 3.0
+    assert pd.isna(zero_row["MAE(comp)"])
+    assert total["MAE(comp)"] == 3.0
+
+
 def test_vshb_reader_keeps_psd_legacy_online_column(tmp_path):
     vshb = tmp_path / "sample_result.vshb"
     vshb.write_text("4,103,100,101,999\n", encoding="utf-8")
@@ -818,6 +873,7 @@ def test_vshb_reader_keeps_psd_legacy_online_column(tmp_path):
         "offline": 103,
         "ref": 100,
         "online": 101,
+        "comp": 101,
     }
 
 
@@ -827,6 +883,7 @@ def test_psd_overlay_uses_column_30_for_headerless_online(tmp_path):
     row[0] = "8"
     row[1] = "116"
     row[2] = "115"
+    row[3] = "118"
     row[30] = "117"
     row[-2] = "0"
     vshb.write_text(",".join(row) + "\n", encoding="utf-8")
@@ -837,6 +894,7 @@ def test_psd_overlay_uses_column_30_for_headerless_online(tmp_path):
     assert overlay["offline"].tolist() == [116]
     assert overlay["ref"].tolist() == [115]
     assert overlay["online"].tolist() == [117]
+    assert overlay["comp"].tolist() == [118]
 
 
 def test_psd_metrics_include_5_10_15_bpm_and_mae():
@@ -859,8 +917,9 @@ def test_psd_metric_text_uses_online_vs_offline_when_polar_missing():
     polar = np.array([0, 0, 0], dtype=float)
     offline_hr = np.array([100, 100, 100], dtype=float)
     online_hr = np.array([103, 107, 112], dtype=float)
+    comp_hr = np.array([101, 102, 103], dtype=float)
 
-    rows = psd_plotter._metric_text_rows(polar, offline_hr, online_hr)
+    rows = psd_plotter._metric_text_rows(polar, offline_hr, online_hr, comp_hr)
 
     assert rows == ["Online vs Offline: ±5bpm=33.3%  ±10bpm=66.7%  ±15bpm=100.0%  MAE=7.33"]
 
@@ -869,11 +928,25 @@ def test_psd_metric_text_uses_polar_when_available():
     polar = np.array([100, 100, 100], dtype=float)
     offline_hr = np.array([101, 102, 103], dtype=float)
     online_hr = np.array([103, 107, 112], dtype=float)
+    comp_hr = np.array([102, 104, 106], dtype=float)
 
-    rows = psd_plotter._metric_text_rows(polar, offline_hr, online_hr)
+    rows = psd_plotter._metric_text_rows(polar, offline_hr, online_hr, comp_hr)
 
     assert rows[0].startswith("Offline vs Polar:")
     assert rows[1].startswith("Online vs Polar:")
+    assert rows[2].startswith("Comp vs Polar:")
+
+
+def test_psd_metric_text_skips_zero_comp():
+    polar = np.array([100, 100, 100], dtype=float)
+    offline_hr = np.array([101, 102, 103], dtype=float)
+    online_hr = np.array([103, 107, 112], dtype=float)
+    comp_hr = np.array([0, 0, 0], dtype=float)
+
+    rows = psd_plotter._metric_text_rows(polar, offline_hr, online_hr, comp_hr)
+
+    assert len(rows) == 2
+    assert all(not row.startswith("Comp vs Polar:") for row in rows)
 
 
 def test_psd_subplot_top_reserves_space_for_rms_metrics():

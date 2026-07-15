@@ -740,7 +740,7 @@ class VshbParser:
     COL_ONLINE = 30
 
     def parse(self, vshb_path: Path) -> pd.DataFrame:
-        """解析vshb为DataFrame，列名: time, offline, ref, online"""
+        """解析vshb为DataFrame，列名: time, offline, ref, online, comp"""
         return read_vshb_result(vshb_path, positional_online_col=self.COL_ONLINE)
 
 
@@ -751,6 +751,12 @@ def _has_valid_ref(df: pd.DataFrame) -> bool:
     """判断是否提供了有效金标心率。"""
     ref = pd.to_numeric(df["ref"], errors="coerce")
     return bool((ref > 0).any())
+
+
+def _has_valid_comp(df: pd.DataFrame) -> bool:
+    """判断comp是否包含非零有效心率。"""
+    comp = pd.to_numeric(df["comp"], errors="coerce")
+    return bool((comp > 0).any())
 
 
 def _filter_valid_ref(df: pd.DataFrame) -> pd.DataFrame:
@@ -800,11 +806,17 @@ def calculate_offline_accuracy(
             metric_df = _filter_valid_ref(df)
             offline_metrics = calculate_accuracy(metric_df, "ref", "offline", ACCURACY_METHODS)
             online_metrics = calculate_accuracy(metric_df, "ref", "online", ACCURACY_METHODS)
+            comp_metrics = (
+                calculate_accuracy(metric_df, "ref", "comp", ACCURACY_METHODS)
+                if _has_valid_comp(df)
+                else {}
+            )
             reference = "polar"
         else:
             metric_df = df
             offline_metrics = {}
             online_metrics = calculate_accuracy(metric_df, "offline", "online", ACCURACY_METHODS)
+            comp_metrics = {}
             reference = "offline"
 
         row: Dict = {
@@ -816,6 +828,7 @@ def calculate_offline_accuracy(
         if has_ref:
             _add_metric_columns(row, offline_metrics, "(offline)")
             _add_metric_columns(row, online_metrics, "(online)")
+            _add_metric_columns(row, comp_metrics, "(comp)")
         else:
             row["samples"] = online_metrics.get("samples", 0)
             _add_metric_columns(row, online_metrics, "(online_vs_offline)")

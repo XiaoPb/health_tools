@@ -19,6 +19,7 @@ def test_accuracy_tables_only_print_matching_reference_rows():
                 "samples": 10,
                 "MAE(offline)": 1.0,
                 "MAE(online)": 2.0,
+                "MAE(comp)": 1.5,
             },
             {
                 "file": "offline_file",
@@ -34,6 +35,7 @@ def test_accuracy_tables_only_print_matching_reference_rows():
                 "samples": 20,
                 "MAE(offline)": 1.0,
                 "MAE(online)": 2.0,
+                "MAE(comp)": 1.5,
                 "MAE(online_vs_offline)": 3.0,
             },
         ]
@@ -52,6 +54,7 @@ def test_accuracy_tables_only_print_matching_reference_rows():
     assert "offline_file" not in polar_text
     assert "offline_file" in compare_text
     assert "polar_file" not in compare_text
+    assert "MAE(comp)" in polar_text
 
 
 def test_progress_track_uses_default_rich_progress_columns(monkeypatch):

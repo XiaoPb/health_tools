@@ -463,13 +463,13 @@ def _run_accuracy(output_dir: Path) -> Optional[pd.DataFrame]:
 
 
 def _build_accuracy_tables(report_df: pd.DataFrame) -> List[Table]:
-    """将在线/离线准确度和 online vs offline 拆成两个表打印。"""
+    """将polar准确度和 online vs offline 拆成两个表打印。"""
     base_cols = ["file", "category", "reference", "samples"]
     compare_cols = [col for col in report_df.columns if "(online_vs_offline)" in col]
     polar_cols = [
         col
         for col in report_df.columns
-        if col in base_cols or "(offline)" in col or "(online)" in col
+        if col in base_cols or "(offline)" in col or "(online)" in col or "(comp)" in col
     ]
 
     tables: List[Table] = []

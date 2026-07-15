@@ -65,8 +65,13 @@ test1/lzh/sample/sample.csv -> test1_mv/lzh/sample/sample.csv
 算法等级为 `medium`/`med` 或 `basic` 时，PSD 默认绘制 `PPG + ACCRMS`；其他等级默认绘制
 `PPG + ACCX/ACCY/ACCZ`。
 
-准确度默认以 `polar` 金标为参考，报告中 `reference=polar`，同时统计离线和在线相对金标的
-指标。如果 `.vshb` 中 `polar` 列全为 `0`，表示未提供金标；此时报告改为
+准确度默认以 `polar` 金标为参考，报告中 `reference=polar`，同时统计离线、在线和 comp
+相对金标的指标，comp 指标使用 `(comp)` 后缀。带表头的 `.vshb` 依次识别 `comp_hr`、
+`cmp_hr`、`comp` 列；无表头旧格式使用 `polar` 后一列。如果单个文件的 comp 列全为 `0`
+或缺失，该文件跳过 `comp vs polar`，分类平均和 `TOTAL` 也不会把它作为零值纳入 comp
+指标。PSD 图顶部按相同条件显示 `Comp vs Polar`。
+
+如果 `.vshb` 中 `polar` 列全为 `0`，表示未提供金标；此时报告改为
 `reference=offline`，只统计 `online_vs_offline` 指标。PSD 图顶部也只显示
 `Online vs Offline` 的准确度说明。
 

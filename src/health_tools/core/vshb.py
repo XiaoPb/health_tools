@@ -6,18 +6,20 @@ from typing import Dict
 import pandas as pd
 
 
-VSHB_COLUMNS = ["time", "offline", "ref", "online"]
+VSHB_COLUMNS = ["time", "offline", "ref", "online", "comp"]
 VSHB_HEADER_ALIASES = {
     "time": "second",
     "offline": "algo_hr",
     "ref": "polar",
     "online": "fw_hr",
 }
+VSHB_COMP_HEADER_ALIASES = ("comp_hr", "cmp_hr", "comp")
 VSHB_POSITIONAL_COLUMNS = {
     "time": 0,
     "offline": 1,
     "ref": 2,
 }
+VSHB_POSITIONAL_COMP_COLUMN = VSHB_POSITIONAL_COLUMNS["ref"] + 1
 
 
 def _empty_result() -> pd.DataFrame:
@@ -44,9 +46,15 @@ def _read_by_header(path: Path) -> pd.DataFrame:
     if not all(alias in column_map for alias in VSHB_HEADER_ALIASES.values()):
         return _empty_result()
 
-    return _build_numeric_frame(
-        {target: df[column_map[source]] for target, source in VSHB_HEADER_ALIASES.items()}
+    columns = {target: df[column_map[source]] for target, source in VSHB_HEADER_ALIASES.items()}
+    comp_column = next(
+        (column_map[alias] for alias in VSHB_COMP_HEADER_ALIASES if alias in column_map),
+        None,
     )
+    columns["comp"] = (
+        df[comp_column] if comp_column is not None else pd.Series(float("nan"), index=df.index)
+    )
+    return _build_numeric_frame(columns)
 
 
 def _read_by_position(path: Path, online_col: int) -> pd.DataFrame:
@@ -55,12 +63,18 @@ def _read_by_position(path: Path, online_col: int) -> pd.DataFrame:
     if not all(_column_exists(df, index) for index in required):
         return _empty_result()
 
+    comp = (
+        df.iloc[:, VSHB_POSITIONAL_COMP_COLUMN]
+        if _column_exists(df, VSHB_POSITIONAL_COMP_COLUMN)
+        else pd.Series(float("nan"), index=df.index)
+    )
     return _build_numeric_frame(
         {
             "time": df.iloc[:, VSHB_POSITIONAL_COLUMNS["time"]],
             "offline": df.iloc[:, VSHB_POSITIONAL_COLUMNS["offline"]],
             "ref": df.iloc[:, VSHB_POSITIONAL_COLUMNS["ref"]],
             "online": df.iloc[:, online_col],
+            "comp": comp,
         }
     )
 

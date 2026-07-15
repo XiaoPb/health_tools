@@ -18,7 +18,7 @@ console = Console()
 def _empty_overlay() -> Dict[str, np.ndarray]:
     """返回空折线数据，表示仅绘制PSD图。"""
     empty = np.array([])
-    return {"time": empty, "offline": empty, "ref": empty, "online": empty}
+    return {"time": empty, "offline": empty, "ref": empty, "online": empty, "comp": empty}
 
 
 def _load_csv_like_matlab(path: Path) -> np.ndarray:
@@ -43,6 +43,7 @@ def _load_vshb_overlay(path: Path) -> Dict[str, np.ndarray]:
         "offline": result["offline"].to_numpy(),
         "ref": result["ref"].to_numpy(),
         "online": result["online"].to_numpy(),
+        "comp": result["comp"].to_numpy(),
     }
 
 
@@ -105,15 +106,23 @@ def _subplot_top(plot_count: int, has_overlay: bool) -> float:
     return 0.88
 
 
-def _metric_text_rows(polar_hr: np.ndarray, hba_out: np.ndarray, mcu_hr: np.ndarray) -> List[str]:
+def _metric_text_rows(
+    polar_hr: np.ndarray,
+    hba_out: np.ndarray,
+    mcu_hr: np.ndarray,
+    comp_hr: np.ndarray,
+) -> List[str]:
     """生成PSD图顶部准确度说明。"""
     if _has_valid_ref(polar_hr):
         offline_m = _calc_metrics(polar_hr, hba_out)
         online_m = _calc_metrics(polar_hr, mcu_hr)
-        return [
+        rows = [
             _format_metric_line("Offline vs Polar", offline_m),
             _format_metric_line("Online vs Polar", online_m),
         ]
+        if _has_valid_ref(comp_hr):
+            rows.append(_format_metric_line("Comp vs Polar", _calc_metrics(polar_hr, comp_hr)))
+        return rows
 
     online_m = _calc_metrics(hba_out, mcu_hr)
     return [_format_metric_line("Online vs Offline", online_m)]
@@ -171,6 +180,7 @@ class PsdPlotter:
                 hba_out = overlay["offline"]
                 polar_hr = overlay["ref"]
                 mcu_hr = overlay["online"]
+                comp_hr = overlay["comp"]
                 has_overlay = len(second) > 0
                 has_ref = _has_valid_ref(polar_hr)
 
@@ -223,7 +233,7 @@ class PsdPlotter:
                 )
                 if has_overlay:
                     for row_idx, metric_text in enumerate(
-                        _metric_text_rows(polar_hr, hba_out, mcu_hr)
+                        _metric_text_rows(polar_hr, hba_out, mcu_hr, comp_hr)
                     ):
                         fig.text(
                             0.5,
