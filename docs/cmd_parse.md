@@ -6,7 +6,6 @@ log 文件解析为 CSV 格式。
 
 ```bash
 ghealth_tool parse -i <input> -o <output> -r <rule.yaml> [options]
-ghealth_tool parse -i <input> -o <output> -c <chip> [options]
 ```
 
 ## 参数
@@ -16,12 +15,12 @@ ghealth_tool parse -i <input> -o <output> -c <chip> [options]
 | `-i/--input` | 输入文件（.log/.txt）或目录 |
 | `-o/--output` | 输出 CSV 文件或目录 |
 | `-r/--rule` | 解析规则 YAML 文件 |
-| `-c/--chip` | 芯片类型（如 gh3036） |
+| `-c/--chip` | 旧兼容选项；当前不能替代解析规则，正常使用应在规则中设置 `chip/target_chip` |
 | `--delimiter` | 字段分隔符（默认: 逗号） |
 | `--encoding` | 输入文件编码（默认: utf-8） |
 | `--filter` | 目录模式下仅处理文件名包含指定字符的文件 |
 | `-v/--verbose` | 详细输出 |
-| `--dry-run` | 仅验证规则，不生成文件 |
+| `--dry-run` | 仅加载并打印规则，不读取输入、不验证日志是否能匹配 |
 
 ## 规则格式
 
@@ -68,6 +67,8 @@ patterns:
 - 单捕获组 + 多列时自动按 separator 拆分
 - 指定 `target_chip` 时输出完整芯片列格式（未匹配列填 0）
 - 输出 CSV 包含 info 行 + header 行（与 chip 规则一致）
+- `--rule` 与 `--chip` 同时出现时，输出芯片取自 parse 规则的 `chip/target_chip`；命令行
+  `--chip` 不覆盖规则。因此不要依靠 `--chip` 选择解析格式。
 
 ## 输出与异常汇总
 
@@ -89,5 +90,5 @@ ghealth_tool parse -i ./logs/ -o ./csv_output/ -r parse_rule.yaml -v
 ghealth_tool parse -i data.log -o ./output/ -r multi_rule.yaml -v
 
 # 目录模式仅处理文件名包含 ppg 的日志
-ghealth_tool parse -i ./logs/ -o ./csv_output/ -c gh3220 --filter ppg
+ghealth_tool parse -i ./logs/ -o ./csv_output/ -r parse_rule.yaml --filter ppg
 ```

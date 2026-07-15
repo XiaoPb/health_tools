@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- 新增仓库级 `use-ghealth-tool` AI Skill，包含端到端工作流、规则编写、故障排查和环境诊断
+- 新增 CLI 与命令文档一致性测试
+
+### Changed
+- 重整 README、命令、规则、架构和维护者文档，覆盖全部主命令与现有规则能力
+
 ## [0.4.27] - 2026-06-22
 
 ### Fixed

@@ -118,10 +118,10 @@ extra_source:
 
 ```bash
 # 从源 CSV 推测映射关系
-ghealth_tool convert --init-rule -c gh3036 -i source.csv -o convert_rule.yaml
+ghealth_tool convert --init-rule -c gh3036 -i source.csv -o custom_rules/convert/vendor.yaml
 
 # 不指定源文件时生成空模板
-ghealth_tool convert --init-rule -c gh3036 -o convert_rule.yaml
+ghealth_tool convert --init-rule -c gh3036 -o custom_rules/convert/template.yaml
 ```
 
 生成的模板包含：
@@ -133,10 +133,10 @@ ghealth_tool convert --init-rule -c gh3036 -o convert_rule.yaml
 
 ```bash
 # 按规则转换
-ghealth_tool convert -i input.csv -o output.csv -r convert_rule.yaml -v
+ghealth_tool convert -i input.csv -o output.csv -r custom_rules/convert/vendor.yaml -v
 
 # 目录批量转换
-ghealth_tool convert -i ./input/ -o ./output/ -r convert_rule.yaml -v
+ghealth_tool convert -i ./input/ -o ./output/ -r custom_rules/convert/vendor.yaml -v
 
 # 合并多文件
 ghealth_tool convert -i ./input/ -o merged.csv -r rule.yaml --merge -v

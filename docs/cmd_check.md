@@ -24,6 +24,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--center-ratio` | 数据居中异常允许比例，默认 5% |
 | `--ipd-ratio` | Ipd 超差允许比例，默认 1% |
 | `--acc-ratio` | ACC 异常帧允许比例，默认 1% |
+| `--acc-axis` | 将 ACC 单轴静止或循环异常也计入检查结果；默认只统计 XYZ 联合异常 |
 | `--check-timestamp` | 指定时间戳列并检查相邻间隔稳定性 |
 | `--timestamp-ratio` | 时间戳间隔百分比容差，默认 20% |
 | `--timestamp-ms` | 时间戳间隔固定毫秒容差 |
@@ -75,7 +76,10 @@ ghealth_tool chk -i data/ -c gh3036 --checks acc,frame
 ghealth_tool check -i data/ --frame-ratio 0.5 --acc-ratio 2 --center-ratio 5
 
 # 检查时间戳间隔稳定性
-ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-ratio 0.2 --timestamp-ms 5
+ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-ratio 20 --timestamp-ms 5
+
+# 把 ACC 单轴异常也计入结果
+ghealth_tool check -i data/ --checks acc --acc-axis
 
 # 按检查报告分拣
 ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/

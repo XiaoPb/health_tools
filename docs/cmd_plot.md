@@ -24,7 +24,7 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--format` | 图片格式: png\|svg\|pdf（默认: png） |
 | `--dpi` | 图片 DPI（默认: 150） |
 | `--bandpass` | 带通滤波范围 Hz（默认: 0.5-4.0） |
-| `--remove-baseline` | 去除基线（默认: 是） |
+| `--remove-baseline/--no-remove-baseline` | 启用或关闭基线去除（默认: 启用） |
 | `--baseline-method` | 基线方法: mean\|median（默认: mean） |
 | `--freq-bpm` | Y 轴显示 BPM（默认: 是） |
 | `--freq-range` | 频率范围 BPM（默认: 30-240） |

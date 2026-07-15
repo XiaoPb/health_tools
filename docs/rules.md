@@ -1,23 +1,52 @@
-# 规则文件格式说明
+# 规则文件格式
 
-所有规则文件使用YAML格式，存放在 `rules/` 目录下。
+GHealth Tools 使用 YAML 描述 CSV、日志解析、转换、分类和评估行为。规则把设备差异和
+项目配置从 Python 代码中分离出来，便于复用和审查。
 
-## 芯片规则 (chip)
+## 规则目录与查找顺序
 
-路径：`rules/chip/<chip_name>.yaml`
+内置规则随 Python 包安装：
 
-定义特定芯片的CSV文件格式，包括列名、编码、分隔符等。
+```text
+src/health_tools/rules/
+├── chip/
+├── parse/
+├── classify/
+├── convert/
+└── evaluate/
+```
+
+运行 `ghealth_tool config --init` 后，可在 `~/.ghealth_tools/rules/` 中放置同样的目录。
+相对规则名按用户目录、内置目录、当前工作目录顺序解析；用户规则可覆盖同名内置规则。
+绝对路径直接使用。
+
+芯片通过 `--chip gh3220` 加载时会自动查找 `chip/gh3220.yaml`。其他规则通常通过
+`--rule` 指定文件名或路径。
+
+## 通用约定
+
+- YAML 使用 UTF-8 编码。
+- 行号从 1 开始；`info_row: 0` 表示没有信息行。
+- `{start-end}` 展开数字范围，例如 `CH{0-3}` -> `CH0`、`CH1`、`CH2`、`CH3`。
+- `rawdata[{0-1}]` 只展开花括号，结果为字面列名 `rawdata[0]`、`rawdata[1]`。
+- 旧规则中的 `CH[0-3]` 仍可由通用列展开函数兼容，但新规则应使用花括号。
+- 修改规则后先运行 `validate`（适用时），再用一个小文件执行目标命令。
+
+## chip 规则
+
+路径：`rules/chip/<chip>.yaml`。chip 规则定义标准 CSV 的读取方式、完整列顺序，以及
+检查、产测和离线算法所需的芯片信息。
 
 ```yaml
 version: "1.0"
 chip: gh3220
 
 csv:
-  info_row: 1            # 信息行位置（0=无信息行）
-  header_row: 2          # 列名所在行
-  data_start_row: 3      # 数据开始行
-  delimiter: ","         # 分隔符
-  encoding: "utf-8"      # 文件编码
+  info_row: 1
+  header_row: 2
+  data_start_row: 3
+  delimiter: ","
+  encoding: utf-8
 
 columns:
   - TimeStamp
@@ -25,293 +54,305 @@ columns:
   - ACCX
   - ACCY
   - ACCZ
-  - CH{0-15}             # 展开为 CH0, CH1, ..., CH15
+  - CH{0-15}
 
-# ACC列名指定（可选，不指定则自动检测含acc+xyz或纯xyz的列名）
+frame_column: FRAME_ID
 acc_columns:
   x: ACCX
   y: ACCY
   z: ACCZ
 
-# 帧号列名指定（可选，不指定则自动检测frame_id/frame/fid）
-frame_column: FRAME_ID
+check_columns:
+  data:
+    - CH{0-15}
+  agc:
+    - AGC_INFO_CH{0-15}
 
-factory_columns:         # 产测计算列（自动过滤全零列）
+factory_columns:
   - CH{0-15}
 
-factory_config:          # 产测计算参数（各指标独立配置）
+factory_config:
   sample_rate: 100
-  snr:
-    skip_head_seconds: 10
-    skip_tail_seconds: 10
-    min_duration_seconds: 90
-  ctr:
-    skip_head_seconds: 1
-    skip_tail_seconds: 0
-    min_duration_seconds: 2
-  noise:
-    skip_head_seconds: 2
-    skip_tail_seconds: 0
-    min_duration_seconds: 4
+  snr: {skip_head_seconds: 10, skip_tail_seconds: 10, min_duration_seconds: 90}
+  ctr: {skip_head_seconds: 1, skip_tail_seconds: 0, min_duration_seconds: 2}
+  noise: {skip_head_seconds: 2, skip_tail_seconds: 0, min_duration_seconds: 4}
 
-gain_tia_map:            # 增益等级 → TIA电阻映射
-  unit: "KΩ"
-  map:
-    0: 10
-    1: 25
-    2: 50
-    3: 100
-    4: 250
-    5: 500
-    6: 1000
-
-chip_info:               # 芯片参数（用于 CTR/Noise 计算）
+chip_info:
   adc_full_scale: 8388608
   adc_offset: 8388608
   adc_vref: 1.8
   tia_ratio: 2
 
-  gain:
-    source: "AGC_INFO_CH{0-15}"
-    bits: "[3:0]"
-    type: "int"
-    desc: "增益等级"
-
-  led_current_sum:
-    source: "AGC_INFO_CH{0-15}"
-    bits: "[29:16]"
-    type: "int"
-    unit: "0.1mA"
-    desc: "LED总电流"
+hr_ref_column:
+  default: 18
+spo_ref_column:
+  default: 18
 ```
-
-### 字段说明
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `version` | string | 规则版本 |
-| `chip` | string | 芯片标识名 |
-| `csv.info_row` | int | 信息行位置，0表示无信息行 |
-| `csv.header_row` | int | 列名行位置 |
-| `csv.data_start_row` | int | 数据起始行 |
-| `csv.delimiter` | string | 字段分隔符 |
-| `csv.encoding` | string | 文件编码 |
-| `columns` | list | 列名列表，支持 `{start-end}` 展开 |
-| `factory_columns` | list | 产测计算列，支持 `{start-end}` 展开 |
-| `factory_config` | dict | 产测参数：顶层 sample_rate，子级 snr/ctr/noise 各有独立 skip/duration |
-| `gain_tia_map` | dict | 增益等级到 TIA 电阻（KΩ）的映射 |
-| `chip_info` | dict | 芯片参数（adc_full_scale, adc_offset, adc_vref, tia_ratio, gain, led_current 等） |
-| `acc_columns` | dict | ACC列名指定：`{x: "列名", y: "列名", z: "列名"}`，不指定则自动检测 |
-| `frame_column` | string | 帧号列名指定，不指定则自动检测（匹配frame_id/frame/fid） |
+| `version` | string | 规则版本，`validate` 要求存在 |
+| `chip` | string | 芯片标识 |
+| `csv` | object | CSV 行号、分隔符和编码 |
+| `columns` | list | 完整列顺序；转换输出和离线预检会使用 |
+| `frame_column` | string | 帧号列；未配置时检查器尝试自动识别 |
+| `acc_columns` | object | X/Y/Z 三轴列；未配置时检查器尝试自动识别 |
+| `check_columns` | object | `data`、`agc` 等检查专用列组 |
+| `factory_columns` | list | 参与 SNR/CTR/Noise 计算的列 |
+| `factory_config` | object | 采样率和三个指标的截取时长 |
+| `chip_info` | object | ADC、TIA、增益和 LED 电流解释参数 |
+| `gain_tia_map` | object | 增益等级到 TIA 电阻的映射 |
+| `hr_ref_column` | object | 心率离线跑库参考列索引配置 |
+| `spo_ref_column` | object | 血氧离线跑库参考列索引配置 |
 
-### chip_info 字段
+`check_columns.data` 会覆盖基于常见列名的自动识别。离线输入预检要求文件表头与展开后的
+`columns` 数量、名称和顺序完全相同。
 
-| 字段 | 说明 |
-|---|---|
-| `adc_full_scale` | ADC 满量程值 |
-| `adc_offset` | ADC 偏移量 |
-| `adc_vref` | ADC 参考电压（V） |
-| `tia_ratio` | TIA 比率系数 |
-| `gain` | 增益配置：source（数据来源列）、bits（位段）、type |
-| `led_current_sum` | LED 总电流配置，设 `optional: true` 时自动累加各 drv 通道 |
-| `led_current_drv*` | 各 LED 驱动通道电流，支持 `mA/LSB` 单位 |
+## parse 规则
 
----
-
-## 解析规则 (parse)
-
-路径：`rules/parse/<name>.yaml`
-
-定义如何从日志文件中提取数据。
+路径：`rules/parse/<name>.yaml`。单 pattern 规则用一个正则把日志行转换为一组列：
 
 ```yaml
 version: "1.0"
-description: "GH3220日志解析规则"
-
+description: GH3220 日志
+chip: gh3220
 regex: '^\[(.+?)\]\s+GH3220:\s*(\d+),(\d+),(\d+),(\d+)$'
-
-columns:
-  - timestamp
-  - red
-  - ir
-  - green
-  - aux
+columns: [timestamp, red, ir, green, aux]
+separator: ','
 ```
 
-### 字段说明
+`regex` 的捕获组数量必须等于展开后的 `columns` 数量。`chip` 或兼容字段 `target_chip`
+可给解析命令提供默认目标芯片。
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `version` | string | 规则版本 |
-| `description` | string | 规则描述 |
-| `regex` | string | 匹配日志行的正则表达式，每个捕获组对应一列 |
-| `columns` | list | 列名列表，与正则捕获组一一对应 |
-
----
-
-## 分类规则 (classify)
-
-路径：`rules/classify/<name>.yaml`
-
-定义如何根据文件名模式将文件分类到目录结构。
+多 pattern 规则可从同一日志分别生成多组 CSV：
 
 ```yaml
 version: "1.0"
+description: 同时解析 PPG 和算法输出
+patterns:
+  ppg:
+    regex: '^PPG:(\d+),(\d+)$'
+    columns: [red, ir]
+    separator: ','
+  result:
+    regex: '^RESULT:(\d+),(\d+)$'
+    columns: [ref, pred]
+    separator: ','
+```
 
+多 pattern 模式以 pattern 名区分输出。每个 pattern 的捕获组仍须与自己的列一一对应。
+
+## classify 规则
+
+路径：`rules/classify/<name>.yaml`。分类支持两套兼容结构：简单的
+`filename/data_columns/structure/rules`，以及功能更完整的 `extract/classify` 流程。
+
+### 简单分类
+
+```yaml
+version: "1.0"
 filename:
   regex: '(\d{8})_(\w+)_(\w+)\.csv'
-  fields:
-    - date
-    - subject
-    - motion
+  fields: [date, subject, motion]
 
 data_columns:
   - name: motion
     source: filename
+    type: string
     match:
-      supine: ["supine", "lie", "lying"]
-      sit: ["sit", "sitting"]
-      walk: ["walk", "walking"]
+      sit: [sit, sitting]
+      walk: [walk, walking]
 
 structure:
-  supine: ""
-  sit: ""
-  walk: ""
+  sit: ''
+  walk: ''
 
 rules:
-  - target: "{motion}"
+  - target: '{motion}'
     use_filename: true
+
+default: unclassified
 ```
 
-### 字段说明
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `filename.regex` | string | 匹配文件名的正则 |
-| `filename.fields` | list | 正则捕获组对应的字段名 |
-| `data_columns` | list | 数据列定义（用于分类判断） |
-| `structure` | dict | 输出目录结构 |
-| `rules` | list | 分类规则列表 |
-
----
-
-## 转换规则 (convert)
-
-路径：`rules/convert/<name>.yaml`
-
-定义CSV格式转换的完整流程。
+### 提取与条件分类
 
 ```yaml
 version: "1.0"
-description: "转换规则说明"
+extends: posture_patterns.yaml
+target_chip: gh3036
 
+extract:
+  - name: spo2_median
+    function: calculate_median
+    params:
+      column: REF_RESULT5
+      column_col: 51
+      samples: 50
+  - name: posture
+    function: extract_from_path
+    params:
+      patterns:
+        sit: [静坐]
+        supine: [平躺]
+
+classify:
+  - target: '{posture}/normalSpO2'
+    condition: 'spo2_median >= 95'
+  - target: '{posture}/lowspo2'
+    condition: 'spo2_median < 95'
+
+accuracy:
+  ref_column: REF_RESULT5
+  pred_column: ALGO_RESULT0
+  methods: [rmse, mae, correlation]
+
+default: unclassified
+```
+
+`extends` 递归合并基础规则；命令行可多次使用 `--extend` 扩展 patterns。分类目标是相对于
+输出目录的路径。`--copy`、`--move`、`--symlink` 决定文件落盘方式。
+
+## convert 规则
+
+路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入、合并 `extra_source`、映射列、
+计算列、频率扩展、前值填充、补齐并按目标芯片列排序。
+
+```yaml
+version: "1.0"
+description: 第三方 CSV 转 GH3036
 target_chip: gh3036
 
 csv:
-  info_row: 0            # 输入文件信息行（0=无）
-  header_row: 1          # 输入文件列名行
-  data_start_row: 2      # 输入文件数据起始行
-  delimiter: ","         # 输入文件分隔符
+  info_row: 0
+  header_row: 1
+  data_start_row: 2
+  delimiter: ','
+  encoding: utf-8
 
 column_mapping:
   time: TimeStamp
-  frame_cnt: FRAME_ID
+  frame: FRAME_ID
   acc[0]: ACCX
   acc[1]: ACCY
   acc[2]: ACCZ
   rawdata[{0-1}]: Rawdata{0-1}
-  ipd_pa[{0-1}]: Ipd{0-1}
-  polar_HR: REF_RESULT0
-  hba_out: ALGO_RESULT0
-  agc_info[{0-1}]: AGC_INFO_CH{0-1}
+  polar_hr: REF_RESULT0
 
-forward_fill:
-  - hba_out
+computed:
+  FLAG0: 'status * 1'
+  TEMP: 'raw_temp / 100'
 
 expand_repeat:
-  polar_HR: 25
+  polar_hr: 25
 
-computed:
-  FLAG0: "status * 1"
-  TEMP: "raw_temp / 100"
+forward_fill:
+  - polar_hr
 ```
 
-### 字段说明
+也可使用等长的 `source_columns` 和 `target_columns` 代替 `column_mapping`。公式只支持按
+空白/运算符拆分的列、数字与 `+ - * /`；无法解析的 token 按 0 处理。映射后缺失的目标
+芯片列补 0，多余列被丢弃。
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `version` | string | 规则版本 |
-| `description` | string | 规则描述 |
-| `target_chip` | string | 目标芯片名（对应 chip 规则） |
-| `csv` | dict | 输入文件CSV格式配置 |
-| `column_mapping` | dict | 源列名 → 目标列名映射 |
-| `forward_fill` | list | 需要前值填充的列（使用源列名） |
-| `expand_repeat` | dict | 需要频率扩展的列及重复次数 |
-| `computed` | dict | 计算列（列名 → 公式） |
+### extra_source
 
-### csv 配置
-
-控制如何读取输入文件：
-
-| 字段 | 默认值 | 说明 |
-|---|---|---|
-| `info_row` | 0 | 信息行位置，0表示无信息行 |
-| `header_row` | 1 | 列名行位置，0表示无列名 |
-| `data_start_row` | 2 | 数据起始行 |
-| `delimiter` | "," | 字段分隔符 |
-| `encoding` | "utf-8" | 文件编码 |
-
-### 列名展开语法
-
-所有规则文件统一使用 `{}` 进行范围展开，`[]` 保留为字面量：
-
-| 写法 | 展开结果 |
-|---|---|
-| `rawdata{0-15}` | rawdata0, rawdata1, ..., rawdata15 |
-| `CH{0-15}` | CH0, CH1, ..., CH15 |
-| `acc[0]` | acc[0]（字面量，不展开） |
-| `rawdata[{0-1}]` | rawdata[0], rawdata[1] |
-| `Rawdata{0-1}` | Rawdata0, Rawdata1 |
-
-`column_mapping` 中源和目标同时展开时，按位置一一对应：
-- `rawdata{0-15}: CH{0-15}` → rawdata0→CH0, rawdata1→CH1, ..., rawdata15→CH15
-
-### forward_fill 说明
-
-在首个非0值出现后，将后续的0值替换为前一个非0值。适用于低频信号（如心率）在高频数据中的稀疏表示。
-
-```
-原始: [0, 0, 3, 0, 0, 4, 0, 0, 5]
-填充: [0, 0, 3, 3, 3, 4, 4, 4, 5]
-```
-
-列名使用源列名（映射前），系统会自动解析到目标列名。
-
-### expand_repeat 说明
-
-将低采样率列的每个值重复N次，对齐到高采样率列的行数。
-
-例如主数据25Hz（每秒25行），心率1Hz（每秒1行），设置 `polar_HR: 25` 后每个心率值重复25次。
-
-### computed 说明
-
-通过简单公式生成新列，支持 `+`, `-`, `*`, `/` 运算：
+`extra_source` 可为一个对象或对象列表，用于把同目录下的金标等外部 CSV 按键左连接到
+主文件：
 
 ```yaml
-computed:
-  FLAG0: "status * 1"       # 引用源DataFrame中的列
-  TEMP: "raw_temp / 100"    # 除以常数
-  DIFF: "ch0 - ch1"        # 列间运算
+extra_source:
+  - name: spo2_ref
+    pattern: '*.csv'
+    required_columns: [时间]
+    any_required_columns: [SpO2, O2 饱和度]
+    csv:
+      header_row: 1
+      data_start_row: 2
+      delimiter: ','
+      encoding: utf-8
+    align:
+      left_on: time
+      right_on: 时间
+      right_extract: '(\d{2}:\d{2}:\d{2})'
+    column_mapping:
+      SpO2: ref_spo2
+      O2 饱和度: ref_spo2
 ```
 
----
+| 字段 | 说明 |
+|---|---|
+| `path` | 固定文件；相对路径以主文件目录为基准 |
+| `suffix` | 在主文件同目录匹配文件名后缀 |
+| `pattern` | 在主文件同目录使用 glob 匹配 |
+| `required_columns` | 候选文件必须包含全部列 |
+| `any_required_columns` | 候选文件至少包含其中一列 |
+| `csv` | 外部文件的表头、数据行、分隔符和编码 |
+| `align.left_on/right_on` | 主文件与外部文件的对齐列 |
+| `align.left_extract/right_extract` | 可选正则；用第一个捕获组归一化键 |
+| `column_mapping` | 外部列到合并后中间列的映射 |
 
-## 规则查找顺序
+解析时排除主文件自身，按排序后的第一个合规候选文件合并；外部键重复时保留最后一行。
+没有匹配的数据补 0。如果找到外部文件但所有映射列均无有效数据，`convert` 会写出
+`extra_source_align_errors.csv`。
 
-`RuleLoader` 按以下顺序查找规则文件：
+## evaluate 规则
 
-1. 内置路径：`<package>/rules/<type>/<name>.yaml`
-2. 绝对路径：直接使用指定路径
-3. 相对路径：相对于当前工作目录
+路径：`rules/evaluate/<name>.yaml`。评估规则定义参考列、预测列、异常阈值、场景分类和
+准确度方法。
 
-芯片规则通过 `--chip <name>` 参数加载时，自动查找 `rules/chip/<name>.yaml`。
+```yaml
+description: 心率准确度评估
+type: hr
+ref_column: REF_RESULT0
+pred_column: ALGO_RESULT0
+
+anomaly:
+  diff_threshold: 30
+  stale_minutes: 2
+  sample_rate: 25
+
+classify:
+  by_directory:
+    walk: [walk, walking, 步行]
+    sit: [sit, sitting, 静坐]
+  by_filename:
+    run: [run, 跑步]
+
+methods: [mae, within_5, within_10, std, rmse, correlation]
+first_output_time: true
+default_category: other
+```
+
+| 字段 | 说明 |
+|---|---|
+| `type` | `hr` 或 `spo2` |
+| `ref_column` / `pred_column` | 默认参考列和预测列；CLI 可覆盖 |
+| `anomaly.diff_threshold` | 相邻结果差分异常阈值 |
+| `anomaly.stale_minutes` | 结果长时间不变的判定时长 |
+| `anomaly.sample_rate` | 异常时长换算使用的采样率 |
+| `classify` | 按目录和文件名关键词分类 |
+| `classify_rule` | 可选的 classify 规则名 |
+| `methods` | 输出的准确度方法 |
+| `thresholds` | 自定义固定值或百分比阈值 |
+| `first_output_time` | 是否统计首次有效输出时间 |
+| `default_category` | 未匹配场景分类 |
+
+## 验证能力与限制
+
+```bash
+ghealth_tool validate path/to/rules/convert/custom.yaml
+ghealth_tool validate path/to/rules/parse/custom.yaml --strict
+```
+
+当前验证器根据路径中是否包含 `chip`、`parse`、`classify`、`convert` 判断类型，因此建议
+自定义文件也保留类型目录。它执行基础结构检查，但不会证明表达式在真实数据上有结果。
+
+已知限制：
+
+- `evaluate` 尚无专用结构验证；使用 `ghealth_tool evaluate --rule ...` 对小样本验证。
+- 多 pattern parse 的旧验证路径仍期待顶层 `regex` 和 `columns`；使用
+  `ghealth_tool parse --dry-run` 并用小日志验证各 pattern。
+- `classify` 的条件表达式、提取函数和扩展 patterns 需要实际分类运行验证。
+- `computed` 公式和 `extra_source` 对齐是否正确只能通过实际转换与输出报告确认。
+- `--strict` 当前只额外要求单 pattern parse 规则包含 `description`。
+
+验证通过后仍应检查输出列顺序、文件数量、报告中的跳过原因和少量数据值。

@@ -92,7 +92,8 @@ offline_cmd:
 │   ├── chip/                      # 芯片定义（优先于内置规则）
 │   ├── parse/                     # 解析规则
 │   ├── classify/                  # 分类规则
-│   └── convert/                   # 转换规则
+│   ├── convert/                   # 转换规则
+│   └── evaluate/                  # 评估规则
 └── offline_algorithm_tools/       # 离线算法工具目录
     ├── gh3036/
     │   └── <category>/            # exclusive/premium/medium/basic
@@ -109,6 +110,14 @@ offline_cmd:
 1. 绝对路径 → 直接使用
 2. 用户规则目录 `~/.ghealth_tools/rules/<type>/` → 存在则优先
 3. 内置规则目录 → 兜底
+
+## 输出与失败条件
+
+- 不带修改选项时等同于 `--show`，只在终端显示当前规则目录和离线版本配置。
+- `--init` 创建 `~/.ghealth_tools/`；已有规则默认不覆盖，配合 `--force` 才更新。
+- `--offline-path` 必须指向可访问目录，设置后立即扫描芯片、等级和版本。
+- `--offline-default` 使用 `chip=version` 格式，芯片或版本未扫描到时返回错误。
+- 配置以 UTF-8 YAML 保存；无效 YAML 或本地 `cmd_setting.yaml` 会由使用它的命令报告。
 
 ## 示例
 
@@ -132,7 +141,7 @@ ghealth_tool cfg --offline-scan
 ghealth_tool cfg --offline-default gh3220=V4300_GH_HR_exc_pv_v2.0.3.0
 
 # 添加自定义芯片支持（初始化后复制模板修改即可）
-cp rules/chip/gh3036.yaml ~/.ghealth_tools/rules/chip/my_chip.yaml
+cp src/health_tools/rules/chip/gh3036.yaml ~/.ghealth_tools/rules/chip/my_chip.yaml
 # 编辑 my_chip.yaml 后即可使用:
-ghealth_tool parse -i log.txt -o output/ --chip my_chip
+ghealth_tool check -i data.csv --chip my_chip
 ```

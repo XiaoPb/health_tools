@@ -25,6 +25,11 @@ ghealth_tool i <file_path> [options]
 - **CSV 文件**：显示行数、列数、列名、数据类型、预览
 - **YAML 规则文件**：显示规则类型、配置内容
 
+## 输出与失败条件
+
+结果只输出到终端，不修改输入文件。目标不存在、CSV 无法读取或 YAML 无法解析时命令
+返回错误；`--stats` 对非数值列只显示 Pandas 可计算的统计信息。
+
 ## 示例
 
 ```bash
@@ -35,5 +40,7 @@ ghealth_tool info data.csv
 ghealth_tool info data.csv --stats
 
 # 查看规则文件
-ghealth_tool info rules/chip/gh3036.yaml
+ghealth_tool info src/health_tools/rules/chip/gh3036.yaml
 ```
+
+相关规则字段见 [规则文件格式](rules.md)。

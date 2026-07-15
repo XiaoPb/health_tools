@@ -1,79 +1,55 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件说明 Claude Code 在本仓库中的长期约定。
 
-## Build & Development
-
-```bash
-pip install -e ".[dev]"       # Install with dev dependencies
-ghealth_tool --help            # Run the CLI
-```
-
-## Testing & Quality
+## 开发与验证
 
 ```bash
-pytest                              # Run all tests
-pytest --cov=health_tools           # With coverage
-pytest tests/test_foo.py            # Single test file
-pytest tests/test_foo.py::test_bar  # Single test function
-
-black src/                          # Format code
-black --check src/                  # Check formatting
-ruff check src/                     # Lint
-mypy src/                           # Type check
+pip install -e ".[dev]"
+ghealth_tool --help
+pytest
+pytest --cov=health_tools
+black --check src/ tests/
+ruff check src/ tests/
+mypy src/
 ```
 
-Line length is 100 (configured in pyproject.toml for both black and ruff). Python 3.9+.
-
-## Git Workflow
-
-**IMPORTANT**: After any code changes, always commit with a descriptive message:
+Python 3.9+，Black 与 Ruff 行宽为 100。测试前确认当前导入来自本工作区：
 
 ```bash
-git add <files>
-git commit -m "feat: description" -m "Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+python -c "import health_tools; print(health_tools.__file__)"
 ```
 
-Commit message format:
-- `feat:` — new feature
-- `fix:` — bug fix
-- `refactor:` — code restructuring
-- `docs:` — documentation changes
-- `test:` — test additions/changes
-- `chore:` — maintenance tasks
+## Git 工作流
 
-Always include the Co-Authored-By line. Never skip committing changes.
+任何代码或文档改动完成并验证后都必须提交：
 
-## Architecture
+```bash
+git add <明确的文件列表>
+git commit -m "docs: description" -m "Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```
 
-CLI tool for PPG (photoplethysmography) sensor data: parsing logs, plotting, classifying, converting, splitting CSV files, and checking data quality. Entry point: `ghealth_tool` -> `src/health_tools/cli.py` (Click group).
+提交类型使用 `feat:`、`fix:`、`refactor:`、`docs:`、`test:`、`chore:`。不要使用
+`git add .` 混入无关文件。
 
-### Layers
+## 项目结构
 
-Dependency direction: `models/ <- utils/ <- rules/ <- core/ <- commands/`
+入口为 `ghealth_tool` -> `src/health_tools/cli.py`：
 
-- `src/health_tools/models/` — Rule dataclasses (ChipRule, ParseRule, ConvertRule, ClassifyRule). No external dependencies except utils/columns.py.
-- `src/health_tools/utils/` — CSV handling, column expansion, file utilities, parallel processing, logging, accuracy helpers.
-- `src/health_tools/rules/` — `RuleLoader` resolves YAML rule files (checks built-in paths under `rules/` first, then absolute/relative). `RuleValidator` validates rule schemas.
-- `src/health_tools/core/` — Business logic. `LogParser`, `DataPlotter`, `DataClassifier`, `DataConverter`, `DataSplitter`, `BatchProcessor`, `STFTPlotter`, `DataChecker`. These are the classes that do the actual work.
-- `src/health_tools/commands/` — Click command definitions. Each file exposes a `*_cmd` function registered in `cli.py`. Commands have short aliases (e.g., `p` for `parse`, `cv` for `convert`).
+- `commands/`：Click 命令和终端呈现。
+- `core/`：数据处理业务逻辑。
+- `rules/`：五类 YAML 规则加载与验证。
+- `models/`：规则数据类。
+- `utils/`：CSV、列展开、并行、报告和准确度工具。
+- `ui/`：可选 Streamlit 界面。
 
-### Rule System
+详细架构见 `docs/architecture.md`，规则字段见 `docs/rules.md`，命令索引见
+`docs/commands.md`。
 
-YAML rule files in `rules/` define behavior for each command:
-- `rules/chip/` — CSV column definitions per sensor chip (gh3220, gh3036)
-- `rules/parse/` — Regex patterns for log-to-CSV parsing
-- `rules/classify/` — Filename-based classification rules
-- `rules/convert/` — Column mapping for format conversion
+## 实施约定
 
-Column expansion syntax:
-- `ch[0-15]` expands to `ch0, ch1, ..., ch15` (chip/parse rules)
-- `ch{0-15}` expands to `ch0, ch1, ..., ch15` (convert rules, `[]` preserved as literal)
-
-### Key Dependencies
-
-click (CLI), pandas/numpy (data), matplotlib/scipy (plotting/signal processing), pyyaml (rules), rich (terminal output), chardet (encoding detection).
-
-## Language
-
-This project uses Chinese for user-facing strings, comments, and documentation. Maintain this convention.
+- 用户文本、注释和文档使用中文。
+- 业务逻辑放在 `core/`，命令层只做参数、校验和呈现。
+- 新行为先补测试；批量命令复用现有进度和汇总工具。
+- 修改命令、规则或输出格式时同步更新对应文档。
+- 使用 GHealth Tools 完成数据任务时读取 `.agents/skills/use-ghealth-tool/SKILL.md`。
