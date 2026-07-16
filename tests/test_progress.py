@@ -7,6 +7,14 @@ from health_tools.cli import main
 from health_tools.commands.offline import _build_accuracy_tables
 
 
+class _FakeOfflineRunnerPreview:
+    resolved_version = None
+    ppg_warnings = []
+
+    def resolve_ppg_mapping(self):
+        return {}
+
+
 def test_accuracy_tables_only_print_matching_reference_rows():
     import pandas as pd
 
@@ -521,7 +529,7 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
     exe_path.parent.mkdir(parents=True)
     exe_path.write_text("", encoding="utf-8")
 
-    class FakeRunner:
+    class FakeRunner(_FakeOfflineRunnerPreview):
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
@@ -578,7 +586,7 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
     exe_path.parent.mkdir(parents=True)
     exe_path.write_text("", encoding="utf-8")
 
-    class FakeRunner:
+    class FakeRunner(_FakeOfflineRunnerPreview):
         def __init__(self, chip, version=None, **kwargs):
             pass
 
@@ -635,7 +643,7 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
     exe_path.parent.mkdir(parents=True)
     exe_path.write_text("", encoding="utf-8")
 
-    class FakeRunner:
+    class FakeRunner(_FakeOfflineRunnerPreview):
         def __init__(self, chip, version=None, **kwargs):
             pass
 
@@ -692,7 +700,7 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
     exe_path.parent.mkdir(parents=True)
     exe_path.write_text("", encoding="utf-8")
 
-    class FakeRunner:
+    class FakeRunner(_FakeOfflineRunnerPreview):
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
@@ -752,7 +760,7 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
     def fake_find_exe(chip, ver=None):
         return exe_root / ver / "TEE_Algorithm.exe"
 
-    class FakeRunner:
+    class FakeRunner(_FakeOfflineRunnerPreview):
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
@@ -821,7 +829,7 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
         exe_path.write_text("", encoding="utf-8")
         return exe_path
 
-    class FakeRunner:
+    class FakeRunner(_FakeOfflineRunnerPreview):
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 

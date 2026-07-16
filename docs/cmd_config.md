@@ -30,7 +30,9 @@ ghealth_tool cfg [options]
 `cmd_default` 给 `start_idx`、`end_idx`、`datatype` 等非列索引变量提供默认值；未在
 `cmd_default` 或内置变量表中出现的名称会按字面量传给 exe。
 `accx`、`ppg_ch0`、`polar` 等列号不写在 `config.yaml` 中，会从 `rules/chip/<chip>.yaml`
-自动推导，规则缺失时使用内置默认值。
+自动推导，规则缺失时使用内置默认值。PPG 变量最大支持 `ppg_ch0..31`，但只有最终生效
+`cmd_arg` 中出现的通道才会使用 `offline --ppg-offset/--ppg-map` 计算映射；写在
+`cmd_default` 中不算声明。
 
 也可以在每个 `TEE_Algorithm.exe` 同目录放置 `cmd_setting.yaml`，文件根节点直接包含
 `cmd_arg` 和可选的 `cmd_default`：
@@ -81,7 +83,9 @@ offline_cmd:
 ```
 
 如果某个版本不需要 `comp_out`，只从 `cmd_arg` 删除 `comp_out` 即可。心率参考列使用
-规范变量名 `polar`。
+规范变量名 `polar`。PPG 通道也可以稀疏声明，例如只写 `ppg_ch0` 和 `ppg_ch4`；偏移
+仍按变量自身编号计算。命令行指定未声明通道时，该设置会被忽略并输出 WARN。完整映射
+语义与示例见 [`offline` 命令](cmd_offline.md#ppg-通道映射)。
 
 ## 配置目录结构
 

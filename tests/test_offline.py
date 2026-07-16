@@ -27,6 +27,8 @@ def _make_runner(
     hba_fs=None,
     scene_en=None,
     ch_num=None,
+    ppg_offset=0,
+    ppg_maps=(),
 ):
     exe_path = tmp_path / chip / "exclusive" / "v1" / offline.EXE_NAME
     exe_path.parent.mkdir(parents=True)
@@ -44,6 +46,8 @@ def _make_runner(
         hba_fs=hba_fs,
         scene_en=scene_en,
         ch_num=ch_num,
+        ppg_offset=ppg_offset,
+        ppg_maps=ppg_maps,
     )
 
 
@@ -97,6 +101,178 @@ def test_build_command_uses_configured_cmd_arg_order(monkeypatch, tmp_path):
     cmd = runner._build_command("in dir", "out dir")
 
     assert cmd.endswith('"in dir" "out dir" csv 25 1 0 2 2 3 4 5 6 7 8 45 61 46')
+
+
+def test_build_command_maps_sparse_declared_ppg_channels_with_offset(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["ppg_ch0", "ppg_ch4"],
+                    "cmd_default": {},
+                }
+            }
+        },
+        ppg_offset=2,
+    )
+
+    cmd = runner._build_command("input", "output")
+
+    assert cmd.endswith("7 11")
+    assert runner.ppg_mapping == {"ppg_ch0": 7, "ppg_ch4": 11}
+
+
+def test_build_command_supports_all_declared_ppg_channels(monkeypatch, tmp_path):
+    cmd_arg = [f"ppg_ch{channel}" for channel in range(32)]
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": cmd_arg,
+                    "cmd_default": {},
+                }
+            }
+        },
+    )
+
+    cmd = runner._build_command("input", "output")
+
+    assert cmd.endswith(" ".join(str(index) for index in range(5, 37)))
+    assert len(runner.ppg_mapping) == 32
+
+
+def test_build_command_applies_named_and_zero_based_ppg_overrides(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3220": {
+                "v1": {
+                    "cmd_arg": ["{ppg_ch0}", "ppg_ch3"],
+                    "cmd_default": {},
+                }
+            }
+        },
+        chip="gh3220",
+        ppg_maps=("ppg_ch0=CH4", "ppg_ch3=12"),
+    )
+
+    cmd = runner._build_command("input", "output")
+
+    assert cmd.endswith("9 12")
+    assert runner.ppg_mapping == {"ppg_ch0": 9, "ppg_ch3": 12}
+
+
+def test_repeated_ppg_override_uses_last_value(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["ppg_ch0"],
+                    "cmd_default": {},
+                }
+            }
+        },
+        ppg_maps=("ppg_ch0=Ipd4", "ppg_ch0=12"),
+    )
+
+    cmd = runner._build_command("input", "output")
+
+    assert cmd.endswith("12")
+    assert runner.ppg_mapping == {"ppg_ch0": 12}
+
+
+def test_undeclared_ppg_override_is_ignored_without_parsing_value(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["ppg_ch0"],
+                    "cmd_default": {},
+                }
+            }
+        },
+        ppg_maps=("ppg_ch7=NOT_A_COLUMN",),
+    )
+
+    cmd = runner._build_command("input", "output")
+
+    assert cmd.endswith("5")
+    assert runner.ppg_warnings == ["ppg_ch7 未在 cmd_arg 中声明，设置未生效"]
+
+
+@pytest.mark.parametrize(
+    ("ppg_maps", "match"),
+    [
+        (("bad",), "格式"),
+        (("ppg_ch32=1",), "0..31"),
+        (("ppg_ch0=NOT_A_COLUMN",), "列名不存在"),
+        (("ppg_ch0=-1",), "索引超出范围"),
+        (("ppg_ch0=999",), "索引超出范围"),
+    ],
+)
+def test_declared_ppg_override_rejects_invalid_value(monkeypatch, tmp_path, ppg_maps, match):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["ppg_ch0"],
+                    "cmd_default": {},
+                }
+            }
+        },
+        ppg_maps=ppg_maps,
+    )
+
+    with pytest.raises(offline.OfflineConfigError, match=match):
+        runner._build_command("input", "output")
+
+
+def test_declared_ppg_channel_rejects_offset_beyond_detected_channels(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["ppg_ch31"],
+                    "cmd_default": {},
+                }
+            }
+        },
+        ppg_offset=1,
+    )
+
+    with pytest.raises(offline.OfflineConfigError, match="无法映射"):
+        runner._build_command("input", "output")
+
+
+def test_cmd_arg_rejects_ppg_channel_above_supported_range(monkeypatch, tmp_path):
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {
+            "gh3036": {
+                "v1": {
+                    "cmd_arg": ["ppg_ch32"],
+                    "cmd_default": {},
+                }
+            }
+        },
+    )
+
+    with pytest.raises(offline.OfflineConfigError, match="0..31"):
+        runner._build_command("input", "output")
 
 
 def test_build_command_supports_cmd_arg_under_offline_versions(monkeypatch, tmp_path):
@@ -253,11 +429,24 @@ def test_invalid_local_cmd_setting_is_rejected(monkeypatch, tmp_path, content):
 
 
 def test_build_command_falls_back_to_builtin_format(monkeypatch, tmp_path):
-    runner = _make_runner(monkeypatch, tmp_path, {}, hba_fs=25, scene_en=1, ch_num=2)
+    runner = _make_runner(
+        monkeypatch,
+        tmp_path,
+        {},
+        hba_fs=25,
+        scene_en=1,
+        ch_num=2,
+        ppg_offset=4,
+        ppg_maps=("ppg_ch0=CH4",),
+    )
 
     cmd = runner._build_command("input", "output")
 
     assert cmd.endswith(' 0 -1 "input" "output" csv 25 1 2 2 3 4 5 6 7 8 45 61 46')
+    assert runner.ppg_warnings == [
+        "当前命令模板未声明 PPG 通道，--ppg-offset 未生效",
+        "ppg_ch0 未在 cmd_arg 中声明，设置未生效",
+    ]
 
 
 def test_offline_run_result_success_on_zero_return(monkeypatch, tmp_path):
@@ -523,6 +712,149 @@ def test_filter_input_files_stops_when_no_csv_is_accepted(monkeypatch, tmp_path)
     assert (tmp_path / "input_mv" / "bad.csv").exists()
 
 
+def test_offline_validates_ppg_mapping_before_filtering_input(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _write_valid_chip_csv(input_dir / "sample.csv")
+    exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+    filter_calls = []
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip, version=None: exe_path)
+    monkeypatch.setattr(
+        offline,
+        "get_offline_config",
+        lambda: offline.OfflineConfig(
+            tools_path=tmp_path,
+            versions={},
+            commands={
+                "gh3036": {
+                    "v1": {
+                        "cmd_arg": ["input_dir", "ppg_ch0"],
+                        "cmd_default": {},
+                    }
+                }
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        offline_command,
+        "_filter_input_files",
+        lambda *args: filter_calls.append(args),
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-c",
+            "gh3036",
+            "--version",
+            "v1",
+            "--ppg-map",
+            "ppg_ch0=NOT_A_COLUMN",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "PPG映射列名不存在" in result.output
+    assert filter_calls == []
+    assert (input_dir / "sample.csv").exists()
+
+
+def test_offline_ppg_options_are_passed_to_runner(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+    seen = {}
+
+    class FakeRunner:
+        resolved_version = "v1"
+        ppg_mapping = {"ppg_ch0": 9}
+        ppg_warnings = []
+
+        def __init__(self, chip, version=None, **kwargs):
+            seen.update(kwargs)
+
+        def resolve_ppg_mapping(self):
+            return self.ppg_mapping
+
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+            output_path.mkdir(parents=True, exist_ok=True)
+            return offline.OfflineRunResult(success=True)
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip, version=None: exe_path)
+    monkeypatch.setattr(offline, "OfflineRunner", FakeRunner)
+    monkeypatch.setattr(offline_command, "_filter_input_files", lambda *args: None)
+    monkeypatch.setattr(offline, "reorganize_output", lambda *args, **kwargs: output_dir)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3036",
+            "--version",
+            "v1",
+            "--ppg-offset",
+            "4",
+            "--ppg-map",
+            "ppg_ch0=CH4",
+            "--no-plot",
+            "--no-accuracy",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["ppg_offset"] == 4
+    assert seen["ppg_maps"] == ("ppg_ch0=CH4",)
+    assert "PPG列映射" in result.output
+
+
+def test_multi_version_ppg_mapping_uses_each_effective_cmd_arg(monkeypatch, tmp_path):
+    exe_paths = {}
+    commands = {"gh3036": {}}
+    for version, cmd_arg in {"v1": ["ppg_ch0"], "v2": ["ppg_ch1"]}.items():
+        exe_path = tmp_path / "gh3036" / "exclusive" / version / offline.EXE_NAME
+        exe_path.parent.mkdir(parents=True)
+        exe_path.write_text("", encoding="utf-8")
+        exe_paths[version] = exe_path
+        commands["gh3036"][version] = {"cmd_arg": cmd_arg, "cmd_default": {}}
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip, version=None: exe_paths[version])
+    monkeypatch.setattr(
+        offline,
+        "get_offline_config",
+        lambda: offline.OfflineConfig(tools_path=tmp_path, versions={}, commands=commands),
+    )
+
+    prepared = offline_command._prepare_offline_runners(
+        version_exes=exe_paths,
+        chip_name="gh3036",
+        hba_fs=None,
+        scene_en=None,
+        ch_num=None,
+        ref_col=None,
+        ppg_offset=0,
+        ppg_maps=("ppg_ch0=Ipd4",),
+    )
+
+    assert prepared["v1"].ppg_mapping == {"ppg_ch0": 9}
+    assert prepared["v1"].ppg_warnings == []
+    assert prepared["v2"].ppg_mapping == {"ppg_ch1": 6}
+    assert prepared["v2"].ppg_warnings == ["ppg_ch0 未在 cmd_arg 中声明，设置未生效"]
+
+
 def test_build_column_indices_from_chip_rule():
     indices = offline.build_column_indices("gh3036")
 
@@ -531,6 +863,7 @@ def test_build_column_indices_from_chip_rule():
     assert indices["accz"] == 4
     assert indices["ppg_ch0"] == 5
     assert indices["ppg_ch3"] == 8
+    assert indices["ppg_ch31"] == 36
     assert indices["polar"] == 45
     assert indices["mcu_out"] == 61
     assert indices["comp_out"] == 46

@@ -23,6 +23,8 @@ ghealth_tool offline --list [--chip <chip>]
 | `--scene-en` | 场景适配开关，`0=关`、`1=开` |
 | `--ch-num` | 有效 PPG 通道数 |
 | `--ref-col` | 源 CSV 中金标列索引，1-based，覆盖芯片配置 |
+| `--ppg-offset` | PPG 自动识别通道的固定偏移，非负整数，默认 `0` |
+| `--ppg-map` | 覆盖已声明 PPG 通道，可重复使用，格式为 `ppg_chN=列名或0-based索引` |
 | `--no-accuracy` | 跳过准确度统计 |
 | `--no-plot` | 跳过 PSD 时频图绘制 |
 | `--no-run` | 跳过跑库，直接整理/统计/绘图已有结果 |
@@ -140,6 +142,44 @@ cmd_default:
 配置中的默认值。
 `accx`、`ppg_ch0`、`polar` 等列号变量会从 `rules/chip/<chip>.yaml` 自动推导。
 
+### PPG 通道映射
+
+offline 最多支持 `ppg_ch0` 到 `ppg_ch31`。只有当前算法版本最终生效的 `cmd_arg` 中明确
+写出的 PPG 变量才参与映射；`{ppg_ch0}` 与 `ppg_ch0` 等价，`cmd_default` 中的同名字段
+不构成声明。最终模板仍遵循本地 `cmd_setting.yaml`、全局版本配置、芯片级配置的现有
+优先级。
+
+默认情况下，已声明通道与自动识别出的原始 PPG 通道一一对应：
+
+```text
+ppg_chN = detected_channels[N]
+```
+
+使用 `--ppg-offset 4` 后，所有已声明通道统一后移：
+
+```text
+ppg_chN = detected_channels[N + 4]
+```
+
+稀疏声明仍按通道编号计算。例如模板只声明 `ppg_ch0` 和 `ppg_ch4`，偏移为 `2` 时，
+两者分别使用识别通道 `2` 和 `6`。偏移后找不到对应通道会在输入预检前停止，CSV 不会
+因此被移动。
+
+`--ppg-map` 可以覆盖单个已声明通道，右侧既可写芯片规则展开后的精确列名，也可写源
+CSV 的 0-based 绝对列索引。单通道覆盖在固定偏移之后生效；同一通道重复设置时，最后
+一次生效：
+
+```bash
+ghealth_tool offline -i data/ -c gh3220 --ppg-offset 4 \
+  --ppg-map ppg_ch0=CH4 --ppg-map ppg_ch3=12
+```
+
+如果 `cmd_arg` 没有声明 `ppg_ch3`，上例中的第二个设置会被忽略并输出 WARN，右侧内容
+不会继续解析。多版本跑库按每个版本最终生效的 `cmd_arg` 分别处理，因此同一设置可能
+只在部分版本生效。没有有效 `cmd_arg` 的旧内置 GH3036 命令继续使用原有四通道参数；
+新映射参数对它不生效并输出 WARN。`--ch-num` 不决定声明集合，`--no-run` 不解析这些
+跑库参数。
+
 ## 失败与恢复
 
 - `--version`、`--versions`、`--all-versions` 互斥；组合使用会立即退出。
@@ -163,6 +203,9 @@ ghealth_tool offline -i data/ -c gh3220 --version V4200_GH_HR_exc_pv_v1.0.1.0 --
 
 # 指定多个版本并生成汇总准确度
 ghealth_tool offline -i data/ -c gh3300 --versions GH_HR_exc_pv_v1.1.4.0,GH_HR_med_pv_v1.0.2.0_final
+
+# 已声明PPG通道统一偏移，并单独覆盖一个通道
+ghealth_tool offline -i data/ -c gh3220 --ppg-offset 4 --ppg-map ppg_ch0=CH4
 
 # 运行当前芯片已配置的全部版本
 ghealth_tool offline -i data/ -c gh3300 --all-versions

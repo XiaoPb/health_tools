@@ -2,12 +2,15 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import click
 import pandas as pd
 from rich.console import Console
 from rich.table import Table
+
+if TYPE_CHECKING:
+    from health_tools.core.offline import OfflineRunner
 
 console = Console()
 DEFAULT_TIMEOUT = 300
@@ -26,6 +29,19 @@ TIMEOUT_SECONDS_PER_EXTRA_FILE = 20
 @click.option("--scene-en", type=int, help="场景适配 0=关 1=开")
 @click.option("--ch-num", type=int, help="有效PPG通道数 (默认2)")
 @click.option("--ref-col", type=int, help="源CSV中金标列索引(1-based，覆盖芯片配置)")
+@click.option(
+    "--ppg-offset",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="PPG自动识别通道的固定偏移",
+)
+@click.option(
+    "--ppg-map",
+    "ppg_maps",
+    multiple=True,
+    help="覆盖已声明PPG通道，格式 ppg_chN=列名或0-based索引",
+)
 @click.option("--no-accuracy", is_flag=True, help="跳过准确度统计")
 @click.option("--no-plot", is_flag=True, help="跳过PSD时频图绘制")
 @click.option("--no-run", is_flag=True, help="跳过跑库，直接整理/统计/绘图")
@@ -46,6 +62,8 @@ def offline_cmd(
     scene_en: Optional[int],
     ch_num: Optional[int],
     ref_col: Optional[int],
+    ppg_offset: int,
+    ppg_maps: Tuple[str, ...],
     no_accuracy: bool,
     no_plot: bool,
     no_run: bool,
@@ -79,6 +97,7 @@ def offline_cmd(
             target_versions = discovered_versions
     is_multi_version = len(target_versions) > 1
     version_exes: Dict[Optional[str], Optional[Path]] = {}
+    prepared_runners: Dict[Optional[str], "OfflineRunner"] = {}
     should_validate_exes = chip_name is not None and (not no_run or is_multi_version)
     if should_validate_exes and chip_name is not None:
         version_exes = _validate_version_exes(chip_name, target_versions)
@@ -100,6 +119,16 @@ def offline_cmd(
 
     if not no_run:
         _validate_local_cmd_configs(version_exes)
+        prepared_runners = _prepare_offline_runners(
+            version_exes=version_exes,
+            chip_name=chip_name,
+            hba_fs=hba_fs,
+            scene_en=scene_en,
+            ch_num=ch_num,
+            ref_col=ref_col,
+            ppg_offset=ppg_offset,
+            ppg_maps=ppg_maps,
+        )
         _filter_input_files(input_dir, chip_name)
 
     timeout = _resolve_timeout(input_dir, timeout)
@@ -117,6 +146,9 @@ def offline_cmd(
             scene_en=scene_en,
             ch_num=ch_num,
             ref_col=ref_col,
+            ppg_offset=ppg_offset,
+            ppg_maps=ppg_maps,
+            prepared_runner=prepared_runners.get(version),
             no_run=no_run,
             no_plot=no_plot,
             no_accuracy=no_accuracy,
@@ -250,6 +282,55 @@ def _validate_local_cmd_configs(
         raise SystemExit(1) from exc
 
 
+def _prepare_offline_runners(
+    version_exes: Dict[Optional[str], Optional[Path]],
+    chip_name: Optional[str],
+    hba_fs: Optional[int],
+    scene_en: Optional[int],
+    ch_num: Optional[int],
+    ref_col: Optional[int],
+    ppg_offset: int,
+    ppg_maps: Tuple[str, ...],
+) -> Dict[Optional[str], "OfflineRunner"]:
+    """在输入预检前解析各版本参数模板和PPG映射。"""
+    from health_tools.core.offline import OfflineConfigError, OfflineRunner
+
+    if not chip_name:
+        return {}
+
+    prepared: Dict[Optional[str], OfflineRunner] = {}
+    try:
+        for version, exe_path in version_exes.items():
+            column_indices = {"polar": ref_col} if ref_col is not None else None
+            runner = OfflineRunner(
+                chip=chip_name,
+                version=version,
+                hba_fs=hba_fs,
+                scene_en=scene_en,
+                ch_num=ch_num,
+                column_indices=column_indices,
+                ppg_offset=ppg_offset,
+                ppg_maps=ppg_maps,
+            )
+            mapping = runner.resolve_ppg_mapping()
+            version_label = (
+                runner.resolved_version
+                or (exe_path.parent.name if exe_path is not None else None)
+                or version
+                or "默认版本"
+            )
+            if mapping:
+                mapping_text = ", ".join(f"{key}={value}" for key, value in mapping.items())
+                console.print(f"  PPG列映射 ({version_label}): {mapping_text}")
+            for warning in runner.ppg_warnings:
+                console.print(f"[yellow]WARN[/yellow] {version_label}: {warning}")
+            prepared[version] = runner
+    except OfflineConfigError as exc:
+        console.print(f"[red]错误: 离线工具PPG映射无效: {exc}[/red]")
+        raise SystemExit(1) from exc
+    return prepared
+
+
 def _filter_input_files(input_dir: Path, chip_name: Optional[str]) -> None:
     """跑库前严格过滤不符合芯片表头规则的CSV。"""
     from health_tools.core.offline_input_filter import (
@@ -291,6 +372,9 @@ def _run_single_offline_version(
     scene_en: Optional[int],
     ch_num: Optional[int],
     ref_col: Optional[int],
+    ppg_offset: int,
+    ppg_maps: Tuple[str, ...],
+    prepared_runner: Optional["OfflineRunner"],
     no_run: bool,
     no_plot: bool,
     no_accuracy: bool,
@@ -314,15 +398,19 @@ def _run_single_offline_version(
             raise SystemExit(1)
         psd_acc_mode = _default_psd_acc_mode(exe_path)
 
-        column_indices = {"polar": ref_col} if ref_col is not None else None
-        runner = OfflineRunner(
-            chip=chip_name,
-            version=version,
-            hba_fs=hba_fs,
-            scene_en=scene_en,
-            ch_num=ch_num,
-            column_indices=column_indices,
-        )
+        runner = prepared_runner
+        if runner is None:
+            column_indices = {"polar": ref_col} if ref_col is not None else None
+            runner = OfflineRunner(
+                chip=chip_name,
+                version=version,
+                hba_fs=hba_fs,
+                scene_en=scene_en,
+                ch_num=ch_num,
+                column_indices=column_indices,
+                ppg_offset=ppg_offset,
+                ppg_maps=ppg_maps,
+            )
 
         console.print("[bold]离线跑库[/bold]")
         console.print(f"  芯片: {chip_name}")

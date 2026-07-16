@@ -7,7 +7,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 import yaml
@@ -21,6 +21,8 @@ from health_tools.core.vshb import read_vshb_result
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"
 LOCAL_CMD_CONFIG_NAME = "cmd_setting.yaml"
+PPG_CHANNEL_PATTERN = re.compile(r"ppg_ch(\d+)")
+MAX_PPG_CHANNELS = 32
 
 
 class OfflineConfigError(ValueError):
@@ -302,7 +304,7 @@ def _match_first_index(column_index: Dict[str, int], patterns: List[str]) -> Opt
 
 
 def _find_ppg_indices(column_index: Dict[str, int]) -> List[int]:
-    """从展开后的列名中推导前4个PPG通道列号。"""
+    """从展开后的列名中推导最多32个PPG通道列号。"""
     ppg_patterns = [
         r"ipd\d+",
         r"ch\d+",
@@ -319,7 +321,7 @@ def _find_ppg_indices(column_index: Dict[str, int]) -> List[int]:
         ]
         matched.sort()
         if len(matched) >= 4:
-            return [index for index, _ in matched[:4]]
+            return [index for index, _ in matched[:MAX_PPG_CHANNELS]]
     return []
 
 
@@ -346,7 +348,7 @@ def build_column_indices(chip: str) -> Dict[str, int]:
             indices[key] = matched
 
     ppg_indices = _find_ppg_indices(column_index)
-    for idx, column_pos in enumerate(ppg_indices[:4]):
+    for idx, column_pos in enumerate(ppg_indices[:MAX_PPG_CHANNELS]):
         indices[f"ppg_ch{idx}"] = column_pos
 
     if rule.hr_ref_column:
@@ -372,12 +374,18 @@ class OfflineRunner:
         scene_en: Optional[int] = None,
         ch_num: Optional[int] = None,
         column_indices: Optional[Dict[str, int]] = None,
+        ppg_offset: int = 0,
+        ppg_maps: Sequence[str] = (),
     ):
         self.chip = chip
         self.version = version
         self.hba_fs = hba_fs
         self.scene_en = scene_en
         self.ch_num = ch_num
+        self.ppg_offset = ppg_offset
+        self.ppg_maps = tuple(ppg_maps)
+        self.ppg_mapping: Dict[str, int] = {}
+        self.ppg_warnings: List[str] = []
         self.column_indices = build_column_indices(chip)
         if column_indices:
             self.column_indices.update(column_indices)
@@ -389,6 +397,92 @@ class OfflineRunner:
         else:
             self.tool_dir = None
             self.resolved_version = version
+
+    @staticmethod
+    def _declared_ppg_channels(cmd_arg: object) -> Dict[str, int]:
+        """提取cmd_arg中声明的PPG通道，并校验最大支持范围。"""
+        if not isinstance(cmd_arg, list):
+            return {}
+
+        declared: Dict[str, int] = {}
+        for item in cmd_arg:
+            key = _normalize_cmd_arg(item)
+            matched = PPG_CHANNEL_PATTERN.fullmatch(key)
+            if not matched:
+                continue
+            channel = int(matched.group(1))
+            if channel >= MAX_PPG_CHANNELS:
+                raise OfflineConfigError(f"cmd_arg 中的 {key} 超出支持范围，通道编号必须为 0..31")
+            declared[f"ppg_ch{channel}"] = channel
+        return declared
+
+    def _resolve_ppg_override(self, value: str, columns: List[str]) -> int:
+        """将单通道覆盖值解析为0-based CSV列索引。"""
+        if re.fullmatch(r"[+-]?\d+", value):
+            column_index = int(value)
+            if column_index < 0 or column_index >= len(columns):
+                raise OfflineConfigError(
+                    f"PPG列索引超出范围: {value}，有效范围为 0..{len(columns) - 1}"
+                )
+            return column_index
+
+        try:
+            return columns.index(value)
+        except ValueError as exc:
+            raise OfflineConfigError(f"PPG映射列名不存在: {value}") from exc
+
+    def resolve_ppg_mapping(self, cmd_cfg: Optional[dict] = None) -> Dict[str, int]:
+        """按最终cmd_arg解析本版本实际生效的PPG通道映射。"""
+        if self.ppg_offset < 0:
+            raise OfflineConfigError("--ppg-offset 不能为负数")
+
+        if cmd_cfg is None:
+            cmd_cfg = self._get_cmd_config()
+        declared = self._declared_ppg_channels(cmd_cfg.get("cmd_arg", []))
+        mapping: Dict[str, int] = {}
+        warnings: List[str] = []
+
+        if declared:
+            for key, channel in declared.items():
+                source_key = f"ppg_ch{channel + self.ppg_offset}"
+                if source_key not in self.column_indices:
+                    raise OfflineConfigError(
+                        f"{key} 无法映射到识别通道 {channel + self.ppg_offset}，该通道不存在"
+                    )
+                mapping[key] = self.column_indices[source_key]
+        elif self.ppg_offset:
+            warnings.append("当前命令模板未声明 PPG 通道，--ppg-offset 未生效")
+
+        columns: Optional[List[str]] = None
+        for item in self.ppg_maps:
+            if "=" not in item:
+                raise OfflineConfigError(f"PPG映射格式错误: {item}，应为 ppg_chN=列名或索引")
+            raw_key, raw_value = item.split("=", 1)
+            key = raw_key.strip()
+            value = raw_value.strip()
+            matched = PPG_CHANNEL_PATTERN.fullmatch(key)
+            if not matched:
+                raise OfflineConfigError(f"PPG映射格式错误: {item}，通道必须为 ppg_ch0..ppg_ch31")
+            channel = int(matched.group(1))
+            if channel >= MAX_PPG_CHANNELS:
+                raise OfflineConfigError(f"PPG通道超出支持范围 0..31: {key}")
+            normalized_key = f"ppg_ch{channel}"
+            if normalized_key not in declared:
+                warnings.append(f"{normalized_key} 未在 cmd_arg 中声明，设置未生效")
+                continue
+            if columns is None:
+                try:
+                    rule = RuleLoader.load_chip_rule(self.chip)
+                except Exception as exc:
+                    raise OfflineConfigError(
+                        f"无法加载芯片规则，不能解析PPG映射: {self.chip}"
+                    ) from exc
+                columns = RuleLoader.expand_columns(rule.columns)
+            mapping[normalized_key] = self._resolve_ppg_override(value, columns)
+
+        self.ppg_mapping = mapping
+        self.ppg_warnings = warnings
+        return mapping
 
     def _get_cmd_config(self) -> dict:
         """获取当前芯片和算法版本的命令模板配置。"""
@@ -434,6 +528,7 @@ class OfflineRunner:
         exe = str(self.exe_path)
         cmd_cfg = self._get_cmd_config()
         cmd_arg = cmd_cfg.get("cmd_arg", [])
+        self.resolve_ppg_mapping(cmd_cfg)
         if isinstance(cmd_arg, list) and cmd_arg:
             args = [exe]
             values = self._build_template_values(input_dir, output_dir, cmd_cfg)
@@ -484,6 +579,7 @@ class OfflineRunner:
         )
         values["ch_num"] = self.ch_num if self.ch_num is not None else defaults.get("ch_num", 2)
         values.update(self.column_indices)
+        values.update(self.ppg_mapping)
         return values
 
     def run(
