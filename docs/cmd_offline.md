@@ -69,7 +69,8 @@ test1/lzh/sample/sample.csv -> test1_mv/lzh/sample/sample.csv
 相对金标的指标，comp 指标使用 `(comp)` 后缀。带表头的 `.vshb` 依次识别 `comp_hr`、
 `cmp_hr`、`comp` 列；无表头旧格式使用 `polar` 后一列。如果单个文件的 comp 列全为 `0`
 或缺失，该文件跳过 `comp vs polar`，分类平均和 `TOTAL` 也不会把它作为零值纳入 comp
-指标。PSD 图顶部按相同条件显示 `Comp vs Polar`。
+指标。PSD 图顶部按相同条件显示 `Comp vs Polar`，并动态增加标题留白。只要 comp 列包含
+正值，PPG 子图还会用亮青色 `#00E5FF` 虚线叠加 comp 曲线；该曲线不依赖 polar 是否有效。
 
 如果 `.vshb` 中 `polar` 列全为 `0`，表示未提供金标；此时报告改为
 `reference=offline`，只统计 `online_vs_offline` 指标。PSD 图顶部也只显示

@@ -71,7 +71,7 @@ src/health_tools/rules/
 | `classifier.py` | 分类字段提取和目录路由 |
 | `checker.py` | 数据范围、帧、居中、Ipd、ACC、时间戳检查 |
 | `plotter.py`, `stft.py` | 时域、频域、STFT 绘图 |
-| `psd_plotter.py`, `vshb.py` | 离线 PSD 及在线/离线/金标叠加 |
+| `psd_plotter.py`, `vshb.py` | 离线 PSD 及在线/离线/comp/金标叠加 |
 | `factory.py` | SNR、CTR、Noise 产测指标 |
 | `evaluator.py` | 心率/血氧批量评估 |
 | `offline.py` | 算法版本扫描、命令构建、跑库、整理和准确度 |

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 from rich.console import Console
 from health_tools.utils.progress import progress_track
 from health_tools.core.vshb import read_vshb_result
@@ -99,11 +100,12 @@ def _imagesc_exact(ax, psd: np.ndarray, title: str) -> None:
     ax.margins(0)
 
 
-def _subplot_top(plot_count: int, has_overlay: bool) -> float:
+def _subplot_top(plot_count: int, has_overlay: bool, metric_row_count: int) -> float:
     """根据子图数量和顶部指标行数预留标题空间。"""
-    if has_overlay and plot_count <= 2:
-        return 0.80
-    return 0.88
+    if not has_overlay:
+        return 0.88
+    base_top = 0.80 if plot_count <= 2 else 0.88
+    return round(base_top - 0.04, 2) if metric_row_count >= 3 else base_top
 
 
 def _metric_text_rows(
@@ -126,6 +128,27 @@ def _metric_text_rows(
 
     online_m = _calc_metrics(hba_out, mcu_hr)
     return [_format_metric_line("Online vs Offline", online_m)]
+
+
+def _plot_hr_overlays(
+    ax: Axes,
+    second: np.ndarray,
+    offline_hr: np.ndarray,
+    online_hr: np.ndarray,
+    polar_hr: np.ndarray,
+    comp_hr: np.ndarray,
+) -> None:
+    """在PPG子图绘制心率折线和对应图例。"""
+    labels = ["pred(offline)", "mcu(online)"]
+    ax.plot(second, offline_hr, "k-.", linewidth=2)
+    ax.plot(second, online_hr, "w-.", linewidth=2)
+    if _has_valid_ref(polar_hr):
+        ax.plot(second, polar_hr, "r-.", linewidth=2)
+        labels.append("polar(ref)")
+    if _has_valid_ref(comp_hr):
+        ax.plot(second, comp_hr, color="#00E5FF", linestyle="--", linewidth=2)
+        labels.append("comp")
+    ax.legend(labels)
 
 
 class PsdPlotter:
@@ -182,7 +205,9 @@ class PsdPlotter:
                 mcu_hr = overlay["online"]
                 comp_hr = overlay["comp"]
                 has_overlay = len(second) > 0
-                has_ref = _has_valid_ref(polar_hr)
+                metric_rows = (
+                    _metric_text_rows(polar_hr, hba_out, mcu_hr, comp_hr) if has_overlay else []
+                )
 
                 psd_all = []
                 psd_dir = vshb_path.parent
@@ -205,19 +230,13 @@ class PsdPlotter:
                     _imagesc_exact(ax, psd, subplot_titles[i])
 
                     if i == 0 and has_overlay:
-                        ax.plot(second, hba_out, "k-.", linewidth=2)
-                        ax.plot(second, mcu_hr, "w-.", linewidth=2)
-                        if has_ref:
-                            ax.plot(second, polar_hr, "r-.", linewidth=2)
-                            ax.legend(["pred(offline)", "mcu(online)", "polar(ref)"])
-                        else:
-                            ax.legend(["pred(offline)", "mcu(online)"])
+                        _plot_hr_overlays(ax, second, hba_out, mcu_hr, polar_hr, comp_hr)
 
                 fig.subplots_adjust(
                     left=0.03,
                     right=0.995,
                     bottom=0.05,
-                    top=_subplot_top(len(subplot_titles), has_overlay),
+                    top=_subplot_top(len(subplot_titles), has_overlay, len(metric_rows)),
                     wspace=0.08,
                     hspace=0.25,
                 )
@@ -232,9 +251,7 @@ class PsdPlotter:
                     fontweight="bold",
                 )
                 if has_overlay:
-                    for row_idx, metric_text in enumerate(
-                        _metric_text_rows(polar_hr, hba_out, mcu_hr, comp_hr)
-                    ):
+                    for row_idx, metric_text in enumerate(metric_rows):
                         fig.text(
                             0.5,
                             0.95 - row_idx * 0.03,

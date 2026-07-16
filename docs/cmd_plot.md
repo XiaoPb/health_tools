@@ -65,6 +65,11 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 `--psd-acc rms` 时改为读取 `.accrmspsd`，只绘制 `PPG` 和 `ACCRMS`，不绘制
 `ACCX/ACCY/ACCZ`。
 
+PPG 子图叠加离线、在线和 polar 心率曲线；VSHB 的 comp 列包含正值时，额外使用亮青色
+`#00E5FF` 虚线绘制 comp，并在图例中显示 `comp`。comp 全为 `0` 或缺失时不绘制该曲线。
+顶部出现第三行 `Comp vs Polar` 指标时，绘图区会动态下移，为标题和三行指标保留空间；
+没有 comp 指标时保持原有布局。
+
 PSD 模式复用 `offline` 命令的 PSD 绘图方式，`--format`、`--dpi`、`--channels`、
 `--sample-rate` 等普通绘图参数不会影响 PSD 输出。
 

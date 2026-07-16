@@ -16,7 +16,7 @@
 - Modify: `src/health_tools/core/psd_plotter.py`
 - Test: `tests/test_offline.py`
 
-- [ ] **Step 1: 写入失败测试**
+- [x] **Step 1: 写入失败测试**
 
 用 `unittest.mock.Mock` 作为坐标轴，直接测试新的 `_plot_hr_overlays`。有效 comp 应产生第四次
 `plot` 调用，关键字参数为亮青色、虚线和线宽 2，图例顺序固定。
@@ -38,13 +38,13 @@ ax.legend.assert_called_once_with(
 再覆盖两个条件：comp 全为 0 时只有现有三条曲线；polar 全为 0 且 comp 有效时绘制
 offline、online、comp，图例顺序为 `pred(offline), mcu(online), comp`。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `pytest tests/test_offline.py -k "psd_hr_overlays" -v`
 
 Expected: FAIL，提示 `_plot_hr_overlays` 尚不存在。
 
-- [ ] **Step 3: 实现折线与动态图例函数**
+- [x] **Step 3: 实现折线与动态图例函数**
 
 在 `psd_plotter.py` 中新增：
 
@@ -71,7 +71,7 @@ def _plot_hr_overlays(
 
 PPG 子图调用该函数，删除原先写死的两组图例分支。
 
-- [ ] **Step 4: 运行折线测试确认通过**
+- [x] **Step 4: 运行折线测试确认通过**
 
 Run: `pytest tests/test_offline.py -k "psd_hr_overlays" -v`
 
@@ -83,7 +83,7 @@ Expected: 三种曲线组合测试全部通过。
 - Modify: `src/health_tools/core/psd_plotter.py`
 - Test: `tests/test_offline.py`
 
-- [ ] **Step 1: 写入失败测试**
+- [x] **Step 1: 写入失败测试**
 
 修改 `_subplot_top` 测试，显式传入指标行数。第三行时 axis 从 0.88 变为 0.84，rms 从
 0.80 变为 0.76；一至两行和无 overlay 保持原值。
@@ -96,13 +96,13 @@ assert psd_plotter._subplot_top(2, True, 3) == 0.76
 assert psd_plotter._subplot_top(4, False, 0) == 0.88
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `pytest tests/test_offline.py -k "subplot_top" -v`
 
 Expected: FAIL，现有函数不接受第三个参数。
 
-- [ ] **Step 3: 实现动态留白并复用指标行**
+- [x] **Step 3: 实现动态留白并复用指标行**
 
 将留白函数改为：
 
@@ -117,7 +117,7 @@ def _subplot_top(plot_count: int, has_overlay: bool, metric_row_count: int) -> f
 读取 overlay 后只生成一次 `metric_rows`，同时用于 `subplots_adjust(top=...)` 和顶部文字循环，
 避免布局判断与实际显示行数不一致。
 
-- [ ] **Step 4: 运行 PSD 单元测试确认通过**
+- [x] **Step 4: 运行 PSD 单元测试确认通过**
 
 Run: `pytest tests/test_offline.py -k "psd" -v`
 
@@ -132,17 +132,17 @@ Expected: PSD overlay、指标、留白及图片生成测试全部通过。
 - Modify: `docs/architecture.md`
 - Modify: `docs/superpowers/plans/2026-07-16-psd-comp-overlay-spacing.md`
 
-- [ ] **Step 1: 清理视觉伴侣工作区状态**
+- [x] **Step 1: 清理视觉伴侣工作区状态**
 
 在 `.gitignore` 的项目规则中加入 `.superpowers/`，保留本地颜色与布局对比稿，但不让会话
 文件进入版本控制。
 
-- [ ] **Step 2: 更新用户和架构文档**
+- [x] **Step 2: 更新用户和架构文档**
 
 `cmd_plot.md` 与 `cmd_offline.md` 说明 comp 有效时以 `#00E5FF` 虚线叠加，第三行指标触发
 额外留白；`architecture.md` 将 VSHB overlay 描述更新为离线、在线、comp 与金标叠加。
 
-- [ ] **Step 3: 修复并确认开发环境来源**
+- [x] **Step 3: 修复并确认开发环境来源**
 
 Run: `pip install -e ".[dev]"`
 
@@ -152,7 +152,7 @@ Run: `python -c "import health_tools; print(health_tools.__file__)"`
 
 Expected: 输出 `E:\Code\Python\health_tools\src\health_tools\__init__.py`。
 
-- [ ] **Step 4: 生成代表性图片并视觉检查**
+- [x] **Step 4: 生成代表性图片并视觉检查**
 
 在临时目录生成带表头 VSHB、PPG 与 ACC PSD 矩阵，分别调用：
 
@@ -164,7 +164,7 @@ plotter.plot(result_dir, save_dir=rms_output, acc_mode="rms")
 检查两张 PNG 非空，并查看图片确认：comp 为亮青色虚线；图例顺序正确；三行指标与 PPG
 标题、图轴无重叠；axis 和 rms 的数据区域均非空。
 
-- [ ] **Step 5: 运行全量验证**
+- [x] **Step 5: 运行全量验证**
 
 Run: `pytest`
 
@@ -182,7 +182,7 @@ Run: `mypy src/`
 
 Expected: 通过。
 
-- [ ] **Step 6: 检查差异并提交**
+- [x] **Step 6: 检查差异并提交**
 
 Run: `git diff --check`
 

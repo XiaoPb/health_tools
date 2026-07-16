@@ -2,6 +2,7 @@
 
 import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -949,10 +950,51 @@ def test_psd_metric_text_skips_zero_comp():
     assert all(not row.startswith("Comp vs Polar:") for row in rows)
 
 
+def test_psd_hr_overlays_draws_cyan_dashed_comp():
+    ax = Mock()
+    second = np.array([1, 2], dtype=float)
+    offline_hr = np.array([100, 101], dtype=float)
+    online_hr = np.array([101, 102], dtype=float)
+    polar_hr = np.array([99, 100], dtype=float)
+    comp_hr = np.array([102, 103], dtype=float)
+
+    psd_plotter._plot_hr_overlays(ax, second, offline_hr, online_hr, polar_hr, comp_hr)
+
+    assert len(ax.plot.call_args_list) == 4
+    assert ax.plot.call_args_list[3].kwargs == {
+        "color": "#00E5FF",
+        "linestyle": "--",
+        "linewidth": 2,
+    }
+    ax.legend.assert_called_once_with(["pred(offline)", "mcu(online)", "polar(ref)", "comp"])
+
+
+def test_psd_hr_overlays_skips_zero_comp():
+    ax = Mock()
+    values = np.array([100, 101], dtype=float)
+
+    psd_plotter._plot_hr_overlays(ax, values, values, values, values, np.zeros(2))
+
+    assert len(ax.plot.call_args_list) == 3
+    ax.legend.assert_called_once_with(["pred(offline)", "mcu(online)", "polar(ref)"])
+
+
+def test_psd_hr_overlays_draws_comp_without_polar():
+    ax = Mock()
+    values = np.array([100, 101], dtype=float)
+
+    psd_plotter._plot_hr_overlays(ax, values, values, values, np.zeros(2), values)
+
+    assert len(ax.plot.call_args_list) == 3
+    ax.legend.assert_called_once_with(["pred(offline)", "mcu(online)", "comp"])
+
+
 def test_psd_subplot_top_reserves_space_for_rms_metrics():
-    assert psd_plotter._subplot_top(plot_count=2, has_overlay=True) == 0.80
-    assert psd_plotter._subplot_top(plot_count=2, has_overlay=False) == 0.88
-    assert psd_plotter._subplot_top(plot_count=4, has_overlay=True) == 0.88
+    assert psd_plotter._subplot_top(4, True, 2) == 0.88
+    assert psd_plotter._subplot_top(4, True, 3) == 0.84
+    assert psd_plotter._subplot_top(2, True, 2) == 0.80
+    assert psd_plotter._subplot_top(2, True, 3) == 0.76
+    assert psd_plotter._subplot_top(4, False, 0) == 0.88
 
 
 def test_psd_plotter_skips_overlay_when_vshb_read_fails(monkeypatch, tmp_path):
