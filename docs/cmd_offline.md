@@ -71,6 +71,7 @@ test1/lzh/sample/sample.csv -> test1_mv/lzh/sample/sample.csv
 或缺失，该文件跳过 `comp vs polar`，分类平均和 `TOTAL` 也不会把它作为零值纳入 comp
 指标。PSD 图顶部按相同条件显示 `Comp vs Polar`，并动态增加标题留白。只要 comp 列包含
 正值，PPG 子图还会用亮青色 `#00E5FF` 虚线叠加 comp 曲线；该曲线不依赖 polar 是否有效。
+图例固定在 PPG 子图右上角，允许遮挡部分曲线或 PSD 内容。
 
 如果 `.vshb` 中 `polar` 列全为 `0`，表示未提供金标；此时报告改为
 `reference=offline`，只统计 `online_vs_offline` 指标。PSD 图顶部也只显示
@@ -81,6 +82,14 @@ test1/lzh/sample/sample.csv -> test1_mv/lzh/sample/sample.csv
 只要命令能解析出算法版本，结果都会写入 `<output>/<version>/` 子目录；单版本和多版本使用
 相同目录格式，避免不同算法结果互相覆盖。每个版本子目录内仍会生成自己的 `数据整理/`、
 `psd_bmpfile/` 和 `accuracy_report.csv`。
+
+offline 绘制每个 VSHB 时只渲染一次，并保存两份相同 PNG：一份集中写入
+`<版本输出>/psd_bmpfile/`，另一份写入对应 VSHB 所在的 `数据整理/` 子目录。例如：
+
+```text
+<版本输出>/psd_bmpfile/sample.png
+<版本输出>/数据整理/场景A/sample.png
+```
 
 多版本准确度会额外汇总到：
 

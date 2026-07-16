@@ -68,10 +68,12 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 PPG 子图叠加离线、在线和 polar 心率曲线；VSHB 的 comp 列包含正值时，额外使用亮青色
 `#00E5FF` 虚线绘制 comp，并在图例中显示 `comp`。comp 全为 `0` 或缺失时不绘制该曲线。
 顶部出现第三行 `Comp vs Polar` 指标时，绘图区会动态下移，为标题和三行指标保留空间；
-没有 comp 指标时保持原有布局。
+没有 comp 指标时保持原有布局。图例固定在 PPG 子图右上角，允许遮挡部分曲线或 PSD
+内容。
 
 PSD 模式复用 `offline` 命令的 PSD 绘图方式，`--format`、`--dpi`、`--channels`、
-`--sample-rate` 等普通绘图参数不会影响 PSD 输出。
+`--sample-rate` 等普通绘图参数不会影响 PSD 输出。直接使用 `plot --type psd` 时只把图片
+保存到 `-o/--output` 指定目录，不在 VSHB 所在目录生成副本。
 
 ## 数据处理流程
 

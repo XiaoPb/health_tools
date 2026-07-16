@@ -148,7 +148,7 @@ def _plot_hr_overlays(
     if _has_valid_ref(comp_hr):
         ax.plot(second, comp_hr, color="#00E5FF", linestyle="--", linewidth=2)
         labels.append("comp")
-    ax.legend(labels)
+    ax.legend(labels, loc="upper right")
 
 
 class PsdPlotter:
@@ -165,6 +165,7 @@ class PsdPlotter:
         save_dir: Optional[Path] = None,
         show_progress: bool = False,
         acc_mode: str = "axis",
+        save_to_source: bool = False,
     ) -> List[Path]:
         """生成PSD时频图
 
@@ -172,6 +173,7 @@ class PsdPlotter:
             result_dir: 离线跑库输出目录（含.vshb和.psd文件）
             save_dir: 图片保存目录，默认 result_dir/bmpfile
             acc_mode: ACC PSD模式，axis=三轴ACC，rms=合成ACC RMS
+            save_to_source: 是否同步保存到对应VSHB所在目录
 
         Returns:
             保存的图片路径列表
@@ -265,6 +267,10 @@ class PsdPlotter:
                 fig.canvas.draw()
                 img = np.array(fig.canvas.buffer_rgba())[..., :3]
                 plt.imsave(str(save_path), img)
+                if save_to_source:
+                    source_save_path = vshb_path.parent / f"{base_name}.png"
+                    if source_save_path != save_path:
+                        plt.imsave(str(source_save_path), img)
                 plt.close(fig)
                 saved.append(save_path)
 

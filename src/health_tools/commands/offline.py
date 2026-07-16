@@ -435,9 +435,17 @@ def _run_psd_plot(result_dir: Path, save_dir: Path, acc_mode: str = "axis") -> N
     from health_tools.core.psd_plotter import PsdPlotter
 
     plotter = PsdPlotter()
-    saved = plotter.plot(result_dir, save_dir=save_dir, show_progress=True, acc_mode=acc_mode)
+    saved = plotter.plot(
+        result_dir,
+        save_dir=save_dir,
+        show_progress=True,
+        acc_mode=acc_mode,
+        save_to_source=True,
+    )
     if saved:
-        console.print(f"[green]OK[/green] 生成 {len(saved)} 张时频图: {save_dir}")
+        console.print(
+            f"[green]OK[/green] 生成 {len(saved)} 张时频图: {save_dir}，并同步保存到VSHB目录"
+        )
     else:
         console.print("[yellow]WARN[/yellow] 未找到PSD数据文件")
 

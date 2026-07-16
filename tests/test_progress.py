@@ -163,8 +163,15 @@ def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path:
     output_dir = tmp_path / "new_output"
     input_dir.mkdir()
 
-    def fake_plot(self, result_dir, save_dir=None, show_progress=False, acc_mode="axis"):
-        calls.append((result_dir, save_dir, show_progress, acc_mode))
+    def fake_plot(
+        self,
+        result_dir,
+        save_dir=None,
+        show_progress=False,
+        acc_mode="axis",
+        save_to_source=False,
+    ):
+        calls.append((result_dir, save_dir, show_progress, acc_mode, save_to_source))
         return [save_dir / "sample.png"]
 
     monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
@@ -184,7 +191,7 @@ def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path:
 
     assert result.exit_code == 0
     assert output_dir.exists()
-    assert calls == [(input_dir, output_dir, True, "axis")]
+    assert calls == [(input_dir, output_dir, True, "axis", False)]
 
 
 def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
@@ -193,8 +200,15 @@ def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
     output_dir = tmp_path / "new_output"
     input_dir.mkdir()
 
-    def fake_plot(self, result_dir, save_dir=None, show_progress=False, acc_mode="axis"):
-        calls.append((result_dir, save_dir, show_progress, acc_mode))
+    def fake_plot(
+        self,
+        result_dir,
+        save_dir=None,
+        show_progress=False,
+        acc_mode="axis",
+        save_to_source=False,
+    ):
+        calls.append((result_dir, save_dir, show_progress, acc_mode, save_to_source))
         return [save_dir / "sample.png"]
 
     monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
@@ -215,7 +229,7 @@ def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [(input_dir, output_dir, True, "rms")]
+    assert calls == [(input_dir, output_dir, True, "rms", False)]
 
 
 def test_plot_psd_requires_directory(tmp_path: Path):
@@ -421,8 +435,8 @@ def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": calls.append(
-            ("plot", show_progress, acc_mode)
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: calls.append(
+            ("plot", show_progress, acc_mode, save_to_source)
         )
         or [],
     )
@@ -445,7 +459,7 @@ def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [("reorganize", True), ("plot", True, "axis"), ("accuracy", True)]
+    assert calls == [("reorganize", True), ("plot", True, "axis", True), ("accuracy", True)]
 
 
 def test_offline_medium_version_defaults_psd_to_accrms(monkeypatch, tmp_path: Path):
@@ -467,7 +481,7 @@ def test_offline_medium_version_defaults_psd_to_accrms(monkeypatch, tmp_path: Pa
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": calls.append(
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: calls.append(
             acc_mode
         )
         or [],
@@ -528,7 +542,7 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -585,7 +599,7 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -642,7 +656,7 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -699,7 +713,7 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -763,7 +777,7 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
     monkeypatch.setattr("health_tools.core.offline.calculate_offline_accuracy", fake_accuracy)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -843,7 +857,7 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -889,7 +903,7 @@ def test_offline_no_run_versions_collects_existing_reorganized_vshb(monkeypatch,
     monkeypatch.setattr("health_tools.core.offline.find_exe", fake_find_exe)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -945,7 +959,7 @@ def test_offline_no_run_versions_reuses_existing_reorganized_dirs(monkeypatch, t
     monkeypatch.setattr("health_tools.core.offline.reorganize_output", fail_reorganize)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(
@@ -991,7 +1005,7 @@ def test_offline_no_run_discovers_version_dirs_under_output_parent(monkeypatch, 
     monkeypatch.setattr("health_tools.core.offline.reorganize_output", fail_reorganize)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis": [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
     )
 
     result = CliRunner().invoke(

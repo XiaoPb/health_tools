@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 from matplotlib.axes import Axes
+from PIL import Image
 
 from health_tools.cli import main
 from health_tools.commands import offline as offline_command
@@ -966,7 +967,9 @@ def test_psd_hr_overlays_draws_cyan_dashed_comp():
         "linestyle": "--",
         "linewidth": 2,
     }
-    ax.legend.assert_called_once_with(["pred(offline)", "mcu(online)", "polar(ref)", "comp"])
+    ax.legend.assert_called_once_with(
+        ["pred(offline)", "mcu(online)", "polar(ref)", "comp"], loc="upper right"
+    )
 
 
 def test_psd_hr_overlays_skips_zero_comp():
@@ -976,7 +979,9 @@ def test_psd_hr_overlays_skips_zero_comp():
     psd_plotter._plot_hr_overlays(ax, values, values, values, values, np.zeros(2))
 
     assert len(ax.plot.call_args_list) == 3
-    ax.legend.assert_called_once_with(["pred(offline)", "mcu(online)", "polar(ref)"])
+    ax.legend.assert_called_once_with(
+        ["pred(offline)", "mcu(online)", "polar(ref)"], loc="upper right"
+    )
 
 
 def test_psd_hr_overlays_draws_comp_without_polar():
@@ -986,7 +991,7 @@ def test_psd_hr_overlays_draws_comp_without_polar():
     psd_plotter._plot_hr_overlays(ax, values, values, values, np.zeros(2), values)
 
     assert len(ax.plot.call_args_list) == 3
-    ax.legend.assert_called_once_with(["pred(offline)", "mcu(online)", "comp"])
+    ax.legend.assert_called_once_with(["pred(offline)", "mcu(online)", "comp"], loc="upper right")
 
 
 def test_psd_subplot_top_reserves_space_for_rms_metrics():
@@ -1047,6 +1052,34 @@ def test_psd_plotter_axis_mode_reads_acc_xyz(monkeypatch, tmp_path):
 
     assert len(saved) == 1
     assert loaded == ["sample0.prepsd", "sample.accxpsd", "sample.accypsd", "sample.acczpsd"]
+
+
+def test_psd_source_copy_is_optional_and_pixel_identical(tmp_path):
+    result_dir = tmp_path / "result"
+    nested_dir = result_dir / "scene"
+    primary_dir = tmp_path / "primary"
+    mirrored_primary_dir = tmp_path / "mirrored_primary"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "sample_result.vshb").write_text("bad vshb\n", encoding="utf-8")
+    np.savetxt(nested_dir / "sample0.prepsd", np.arange(16).reshape(4, 4), delimiter=",")
+
+    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=primary_dir)
+
+    source_copy = nested_dir / "sample.png"
+    assert saved == [primary_dir / "sample.png"]
+    assert not source_copy.exists()
+
+    mirrored = psd_plotter.PsdPlotter().plot(
+        result_dir,
+        save_dir=mirrored_primary_dir,
+        save_to_source=True,
+    )
+
+    assert mirrored == [mirrored_primary_dir / "sample.png"]
+    assert source_copy.exists()
+    primary_pixels = np.asarray(Image.open(mirrored[0]).convert("RGB"))
+    source_pixels = np.asarray(Image.open(source_copy).convert("RGB"))
+    assert np.array_equal(primary_pixels, source_pixels)
 
 
 def test_psd_plotter_rms_mode_reads_accrms(monkeypatch, tmp_path):

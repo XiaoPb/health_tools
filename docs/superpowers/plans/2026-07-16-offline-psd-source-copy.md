@@ -16,7 +16,7 @@
 - Modify: `src/health_tools/core/psd_plotter.py`
 - Test: `tests/test_offline.py`
 
-- [ ] **Step 1: 更新图例失败测试**
+- [x] **Step 1: 更新图例失败测试**
 
 三个 `_plot_hr_overlays` 测试都应断言图例标签之外还显式传入右上角位置：
 
@@ -27,13 +27,13 @@ ax.legend.assert_called_once_with(
 )
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `pytest tests/test_offline.py -k "psd_hr_overlays" -v`
 
 Expected: FAIL，现有图例调用缺少 `loc`。
 
-- [ ] **Step 3: 实现固定图例位置**
+- [x] **Step 3: 实现固定图例位置**
 
 将 `_plot_hr_overlays` 最后一行改为：
 
@@ -41,7 +41,7 @@ Expected: FAIL，现有图例调用缺少 `loc`。
 ax.legend(labels, loc="upper right")
 ```
 
-- [ ] **Step 4: 运行图例测试确认通过**
+- [x] **Step 4: 运行图例测试确认通过**
 
 Run: `pytest tests/test_offline.py -k "psd_hr_overlays" -v`
 
@@ -53,7 +53,7 @@ Expected: 三种曲线组合测试全部通过。
 - Modify: `src/health_tools/core/psd_plotter.py`
 - Test: `tests/test_offline.py`
 
-- [ ] **Step 1: 写入双份保存失败测试**
+- [x] **Step 1: 写入双份保存失败测试**
 
 在嵌套目录创建有效 VSHB 和 PSD 文件，开启 `save_to_source=True`。断言返回值只含主副本，
 VSHB 同目录也存在同名 PNG，并用 Pillow 解码比较像素数组：
@@ -71,13 +71,13 @@ assert np.array_equal(np.asarray(Image.open(saved[0])), np.asarray(Image.open(so
 
 另一个测试使用默认参数，断言 VSHB 同目录不生成 PNG。
 
-- [ ] **Step 2: 运行保存测试确认失败**
+- [x] **Step 2: 运行保存测试确认失败**
 
 Run: `pytest tests/test_offline.py -k "psd_source_copy" -v`
 
 Expected: FAIL，`plot` 尚不接受 `save_to_source`。
 
-- [ ] **Step 3: 实现可选源目录副本**
+- [x] **Step 3: 实现可选源目录副本**
 
 给 `plot` 增加 `save_to_source: bool = False`。渲染后构建目标列表，去重后写入同一数组：
 
@@ -93,7 +93,7 @@ saved.append(save_path)
 
 返回列表只追加主副本。更新 docstring 说明参数和返回约定。
 
-- [ ] **Step 4: 运行 PSD 绘图测试确认通过**
+- [x] **Step 4: 运行 PSD 绘图测试确认通过**
 
 Run: `pytest tests/test_offline.py -k "psd" -v`
 
@@ -105,7 +105,7 @@ Expected: 双份保存、默认单份保存、嵌套目录和现有 axis/rms 测
 - Modify: `src/health_tools/commands/offline.py`
 - Test: `tests/test_progress.py`
 
-- [ ] **Step 1: 更新 offline 参数传递失败测试**
+- [x] **Step 1: 更新 offline 参数传递失败测试**
 
 offline 相关的 `PsdPlotter.plot` 测试替身接受 `save_to_source=False`，并在阶段进度测试中记录
 该值：
@@ -125,13 +125,13 @@ def fake_plot(
 
 断言 offline 传入 `True`；普通 `plot --type psd` 仍通过默认值得到 `False`。
 
-- [ ] **Step 2: 运行命令测试确认失败**
+- [x] **Step 2: 运行命令测试确认失败**
 
 Run: `pytest tests/test_progress.py -k "offline_command_enables_stage_progress or plot_psd" -v`
 
 Expected: offline 记录的 `save_to_source` 仍为 `False`。
 
-- [ ] **Step 3: Offline 显式开启源目录副本**
+- [x] **Step 3: Offline 显式开启源目录副本**
 
 在 `_run_psd_plot` 中调用：
 
@@ -147,7 +147,7 @@ saved = plotter.plot(
 
 成功消息说明图片同步保存到各 VSHB 目录。
 
-- [ ] **Step 4: 运行 offline 与 plot 测试确认通过**
+- [x] **Step 4: 运行 offline 与 plot 测试确认通过**
 
 Run: `pytest tests/test_progress.py -k "offline or plot_psd" -v`
 
@@ -160,12 +160,12 @@ Expected: offline 开启双份保存，普通 plot 保持单份保存，所有�
 - Modify: `docs/cmd_plot.md`
 - Modify: `docs/superpowers/plans/2026-07-16-offline-psd-source-copy.md`
 
-- [ ] **Step 1: 更新命令文档**
+- [x] **Step 1: 更新命令文档**
 
 `cmd_offline.md` 写明集中副本和 VSHB 同目录副本；`cmd_plot.md` 写明直接 PSD 绘图仅写
 `-o/--output` 指定目录。两页都说明图例固定右上角。
 
-- [ ] **Step 2: 确认环境与全量质量检查**
+- [x] **Step 2: 确认环境与全量质量检查**
 
 Run: `python -c "import health_tools; print(health_tools.__file__)"`
 
@@ -187,7 +187,7 @@ Run: `mypy src/`
 
 Expected: 通过。
 
-- [ ] **Step 3: 检查差异并提交**
+- [x] **Step 3: 检查差异并提交**
 
 Run: `git diff --check`
 
