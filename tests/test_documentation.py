@@ -31,7 +31,7 @@ def _command_options(command_name: str) -> set[str]:
 
 
 def test_every_primary_command_has_complete_reference_page():
-    assert len(PRIMARY_COMMANDS) == 14
+    assert len(PRIMARY_COMMANDS) == 13
 
     for command_name in PRIMARY_COMMANDS:
         doc_path = DOCS_DIR / f"cmd_{command_name}.md"

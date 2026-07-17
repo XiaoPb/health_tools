@@ -2,20 +2,17 @@
 
 import csv
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import click
 from rich.console import Console
-from rich.progress import Progress
 from rich.table import Table
-from health_tools.utils.reporting import ResultCollector, print_summary
 
 console = Console()
 
 if TYPE_CHECKING:
-    import pandas as pd
+    pass
 
 
 @click.command("check")
@@ -80,189 +77,54 @@ def check_cmd(
     verbose: bool,
 ) -> None:
     """检查PPG数据完整性和正确性"""
-    from health_tools.core.checker import AccAnomalyReport, DataChecker, FileCheckReport
-    from health_tools.rules.loader import RuleLoader
-    from health_tools.utils.csv_handler import CSVHandler
+    from health_tools.api import CheckRequest, run_check
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    if sort_report:
-        if not sort_output:
-            raise click.ClickException("使用 --sort 时必须指定 --sort-output")
-        report = Path(report_path) if report_path else Path.cwd() / "check_report.csv"
-        if not report.exists():
-            raise click.ClickException(f"检查报告不存在: {report}，请指定 --report 或先运行 check")
-        stats = _sort_report_files(report, Path(sort_output))
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_check(
+                CheckRequest(
+                    input_path=Path(input_path) if input_path else None,
+                    chip_name=chip_name,
+                    checks=checks,
+                    tolerance=tolerance,
+                    static_min=static_min,
+                    range_ratio=range_ratio,
+                    frame_ratio=frame_ratio,
+                    center_ratio=center_ratio,
+                    ipd_ratio=ipd_ratio,
+                    acc_ratio=acc_ratio,
+                    acc_axis=acc_axis,
+                    timestamp_column=timestamp_column,
+                    timestamp_ratio=timestamp_ratio,
+                    timestamp_ms=timestamp_ms,
+                    timestamp_fail_ratio=timestamp_fail_ratio,
+                    output_path=Path(output_path) if output_path else None,
+                    sort_report=sort_report,
+                    report_path=Path(report_path) if report_path else None,
+                    sort_output=Path(sort_output) if sort_output else None,
+                    workers=workers,
+                ),
+                context=context,
+            )
+        )
+    print_batch("检查处理结果", result.batch, console, verbose)
+    if verbose:
+        for item in result.batch.items:
+            if item.status.value == "SKIP":
+                console.print(f"[yellow]跳过（{item.reason}）: {Path(item.input).name}[/yellow]")
+    if result.sort_counts:
         console.print(
             "[green]分拣完成[/green]: "
-            f"{stats['normal']} 正常, {stats['abnormal']} 异常, {stats['skipped']} 跳过"
+            f"{result.sort_counts['normal']} 正常, "
+            f"{result.sort_counts['abnormal']} 异常, "
+            f"{result.sort_counts['skipped']} 跳过"
         )
-        return
-
-    if not input_path:
-        raise click.ClickException("普通检查模式必须指定 -i/--input")
-
-    target = Path(input_path)
-    if not target.exists():
-        console.print(f"[red]路径不存在: {target}[/red]")
-        return
-    if target.is_file():
-        files = [target]
-    else:
-        files = sorted(f for f in target.rglob("*.csv") if f.name != "check_report.csv")
-        if not files:
-            console.print(f"[yellow]未找到CSV文件: {target}[/yellow]")
-            return
-
-    console.print(f"找到 {len(files)} 个CSV文件, {workers} 线程处理中...")
-
-    check_set = set(checks.split(",")) if checks else {"range", "ipd", "frame", "center", "acc"}
-
-    def _process_file(
-        csv_file: Path,
-    ) -> Tuple[
-        Optional["FileCheckReport"],
-        Optional["AccAnomalyReport"],
-        Optional["pd.DataFrame"],
-        str,
-    ]:
-        """处理单个文件，返回 (report, acc_report, ipd_detail, skip_reason)"""
-        chip = chip_name or _detect_chip(csv_file)
-        if not chip:
-            return None, None, None, "无法识别芯片"
-
-        try:
-            chip_rule = RuleLoader.load_chip_rule(chip)
-        except Exception:
-            return None, None, None, f"无法加载规则 {chip}"
-
-        handler = CSVHandler(chip_rule)
-        try:
-            _, df = handler.read(csv_file)
-        except Exception as e:
-            return None, None, None, f"读取失败: {e}"
-
-        if df.empty:
-            return None, None, None, "空文件"
-
-        checker = DataChecker(chip_rule, tolerance=tolerance, static_min=static_min)
-        mismatch_reason = _check_rule_mismatch(
-            checker,
-            df,
-            check_set,
-            timestamp_column=timestamp_column,
-            chip=chip,
-            require_acc_columns=checks is not None and "acc" in check_set,
-        )
-        if mismatch_reason:
-            return None, None, None, mismatch_reason
-
-        report = FileCheckReport(file_path=csv_file, chip=chip)
-
-        if "range" in check_set:
-            report.results.append(checker.check_data_range(df, threshold_ratio=range_ratio))
-        if "frame" in check_set:
-            report.results.append(checker.check_frame_completeness(df, threshold_ratio=frame_ratio))
-        if "center" in check_set:
-            report.results.append(checker.check_data_centering(df, threshold_ratio=center_ratio))
-        if timestamp_column:
-            report.results.append(
-                checker.check_timestamp_interval(
-                    df,
-                    timestamp_column,
-                    ratio_tolerance=timestamp_ratio,
-                    ms_tolerance=timestamp_ms,
-                    threshold_ratio=timestamp_fail_ratio,
-                )
-            )
-
-        ipd_detail = None
-        if "ipd" in check_set and chip.startswith("gh3036"):
-            ipd_result = checker.check_ipd_conversion(df, threshold_ratio=ipd_ratio)
-            report.results.append(ipd_result)
-            if ipd_result.failed:
-                ipd_detail = checker.build_ipd_detail(df)
-
-        acc_report = None
-        if "acc" in check_set:
-            acc_report = checker.check_acc_anomaly(df, include_single_axis=acc_axis)
-            acc_report.file_path = csv_file
-            report.results.append(checker.build_acc_result(acc_report, threshold_ratio=acc_ratio))
-
-        return report, acc_report, ipd_detail, ""
-
-    reports: List[FileCheckReport] = []
-    acc_reports: Dict[Path, AccAnomalyReport] = {}
-    ipd_details: Dict[Path, "pd.DataFrame"] = {}
-    collector = ResultCollector()
-
-    with Progress(console=console) as progress:
-        task = progress.add_task("检查中", total=len(files))
-
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(_process_file, f): f for f in files}
-            for future in as_completed(futures):
-                csv_file = futures[future]
-                try:
-                    file_report, acc_report, ipd_detail, skip_reason = future.result()
-                except Exception as e:
-                    collector.add_exception(csv_file, e)
-                    progress.advance(task)
-                    continue
-                if file_report:
-                    reports.append(file_report)
-                    collector.add_ok(csv_file)
-                    if acc_report:
-                        acc_reports[csv_file] = acc_report
-                    if ipd_detail is not None and not ipd_detail.empty:
-                        ipd_details[csv_file] = ipd_detail
-                elif skip_reason:
-                    collector.add_skip(csv_file, reason=skip_reason)
-                    if verbose:
-                        progress.console.print(
-                            f"[yellow]跳过（{skip_reason}）: {csv_file.name}[/yellow]"
-                        )
-                progress.advance(task)
-
-    print_summary("检查处理结果", collector, console=console, verbose=verbose)
-
-    if not reports:
+    if result.report_path:
+        console.print(f"[green]检查报告已保存: {result.report_path}[/green]")
+    elif not result.sort_counts:
         console.print("[yellow]无可检查的文件[/yellow]")
-        return
-
-    _print_reports(reports, verbose)
-
-    if acc_reports:
-        _print_acc_table(list(acc_reports.values()), include_single_axis=acc_axis)
-
-    ratios = {
-        "range": range_ratio,
-        "frame": frame_ratio,
-        "center": center_ratio,
-        "ipd": ipd_ratio,
-        "acc": acc_ratio,
-    }
-    if timestamp_column:
-        ratios["timestamp"] = timestamp_fail_ratio
-    _print_criteria(
-        check_set,
-        tolerance,
-        static_min,
-        ratios,
-        timestamp_column,
-        timestamp_ratio,
-        timestamp_ms,
-        acc_axis=acc_axis,
-    )
-
-    csv_out = Path(output_path) if output_path else _default_output(target)
-    base_dir = target.parent if target.is_file() else target
-    _save_report_csv(reports, acc_reports, csv_out, base_dir=base_dir, include_acc_axis=acc_axis)
-
-    if ipd_details:
-        out_dir = csv_out.parent
-        for csv_file, detail_df in ipd_details.items():
-            detail_path = out_dir / f"ipd_detail_{csv_file.stem}.csv"
-            detail_df.to_csv(detail_path, index=False, encoding="utf-8-sig")
-        console.print(f"[green]Ipd超差详情已保存: {len(ipd_details)} 个文件[/green]")
+    return
 
 
 def _detect_chip(csv_file: Path) -> Optional[str]:

@@ -6,11 +6,6 @@ import click
 from rich.console import Console
 
 from health_tools.config import (
-    CONFIG_DIR,
-    CONFIG_FILE,
-    DEFAULT_RULES_DIR,
-    get_user_rules_dir,
-    init_config_dir,
     load_config,
     save_config,
 )
@@ -38,70 +33,29 @@ def config_cmd(
     do_offline_scan: bool,
 ) -> None:
     """全局配置管理"""
+    from health_tools.api import ConfigAction, ConfigRequest, run_config
+    from health_tools.commands.api_support import CliExecution, invoke_api
+
     if do_init or do_force:
-        path = init_config_dir()
-        console.print(f"[green]OK[/green] 配置目录已初始化: {path}")
-        console.print(f"  规则目录: {DEFAULT_RULES_DIR}")
-
-        from health_tools.config import sync_builtin_rules
-
-        count = sync_builtin_rules(force=do_force)
-        if do_force:
-            console.print(f"  已强制更新 {count} 个内置规则文件")
-        else:
-            console.print(f"  已同步 {count} 个内置规则文件到用户目录")
-        console.print("  子目录: chip/ parse/ classify/ convert/ evaluate/")
-        return
-
-    if rules_dir:
-        config = load_config()
-        config["rules_dir"] = rules_dir
-        save_config(config)
-        console.print(f"[green]OK[/green] 规则目录已设置: {rules_dir}")
-        return
-
-    if offline_path:
-        _set_offline_path(offline_path)
-        return
-
-    if offline_default:
-        _set_offline_default(offline_default)
-        return
-
-    if do_offline_scan:
-        _scan_offline_versions()
-        return
-
-    if do_show or not (do_init or rules_dir):
-        config = load_config()
-        console.print(f"配置目录: {CONFIG_DIR}")
-        console.print(f"配置文件: {CONFIG_FILE} ({'存在' if CONFIG_FILE.exists() else '不存在'})")
-        user_dir = get_user_rules_dir()
-        console.print(
-            f"规则目录: {user_dir if user_dir else DEFAULT_RULES_DIR}"
-            f" ({'有效' if user_dir else '未初始化'})"
+        action, value = ConfigAction.INIT, None
+    elif rules_dir:
+        action, value = ConfigAction.SET_RULES_DIR, rules_dir
+    elif offline_path:
+        action, value = ConfigAction.SET_OFFLINE_PATH, offline_path
+    elif offline_default:
+        action, value = ConfigAction.SET_OFFLINE_DEFAULT, offline_default
+    elif do_offline_scan:
+        action, value = ConfigAction.SCAN_OFFLINE, None
+    else:
+        action, value = ConfigAction.SHOW, None
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_config(ConfigRequest(action, value=value, force=do_force), context=context)
         )
-        if user_dir:
-            for subdir in ["chip", "parse", "classify", "convert", "evaluate"]:
-                sub_path = user_dir / subdir
-                count = len(list(sub_path.glob("*.yaml"))) if sub_path.exists() else 0
-                console.print(f"  {subdir}/: {count} 个规则文件")
-
-        offline_tools_path = config.get("offline_tools_path", "")
-        if offline_tools_path:
-            console.print(f"离线工具路径: {offline_tools_path}")
-            versions = config.get("offline_versions", {})
-            for chip, info in versions.items():
-                default_ver = info.get("default", "")
-                categories = info.get("versions", {})
-                if isinstance(categories, dict):
-                    total = sum(len(v) for v in categories.values())
-                    console.print(f"  {chip}: {total} 个版本, 默认={default_ver}")
-                    for cat, ver_list in categories.items():
-                        console.print(f"    {cat}/: {', '.join(ver_list)}")
-                else:
-                    ver_count = len(categories) if isinstance(categories, list) else 0
-                    console.print(f"  {chip}: {ver_count} 个版本, 默认={default_ver}")
+    console.print(f"[green]OK[/green] 配置操作完成: {result.action.value}")
+    if action == ConfigAction.SHOW:
+        console.print(dict(result.config))
+    return
 
 
 def _set_offline_path(path_str: str) -> None:

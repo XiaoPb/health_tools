@@ -8,11 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 新增覆盖全部 13 个 CLI 能力的同步 `health_tools.api`，支持结构化结果、进度回调和取消
+- 新增 Python API 架构说明与使用指南
 - 新增仓库级 `use-ghealth-tool` AI Skill，包含端到端工作流、规则编写、故障排查和环境诊断
 - 新增 CLI 与命令文档一致性测试
 
 ### Changed
+- CLI 与独立 UI 项目统一通过公共 Python API 使用业务能力
 - 重整 README、命令、规则、架构和维护者文档，覆盖全部主命令与现有规则能力
+
+### Removed
+- 移除内置 Streamlit UI、`ghealth_tool ui` 命令和 `[ui]` 可选依赖
 
 ## [0.4.27] - 2026-06-22
 

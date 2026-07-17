@@ -9,9 +9,6 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from health_tools.utils.errors import REASON_NO_DATA
-from health_tools.utils.progress import progress_track
-from health_tools.utils.reporting import ResultCollector, print_summary
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -155,124 +152,31 @@ def factory_cmd(
     verbose: bool,
 ) -> None:
     """计算SNR/CTR/Noise（产测）"""
-    import pandas as pd
+    from health_tools.api import FactoryRequest, run_factory
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    from health_tools.core.factory import ChipInfoExtractor
-    from health_tools.rules.loader import RuleLoader
-    from health_tools.utils.csv_handler import read_csv_df
-
-    snr_override = _parse_metric_cfg(snr_cfg)
-    ctr_override = _parse_metric_cfg(ctr_cfg)
-    noise_override = _parse_metric_cfg(noise_cfg)
-
-    chip_rule = None
-    if chip_name:
-        chip_rule = RuleLoader.load_chip_rule(chip_name)
-    elif rule_file:
-        convert_rule = RuleLoader.load_convert_rule(rule_file)
-        from health_tools.models.rules import ChipRule as _ChipRule
-
-        chip_rule = _ChipRule(chip="", csv=convert_rule.csv, columns=[])
-
-    input_p = Path(input_path)
-    if not input_p.exists():
-        console.print(f"[red]错误: 路径不存在: {input_path}[/red]")
-        raise SystemExit(1)
-
-    calculator = _build_calculator(
-        chip_rule,
-        gain,
-        current,
-        sample_rate,
-        snr_override,
-        ctr_override,
-        noise_override,
-        adc_offset_override=adc_offset,
-    )
-
-    extractor = None
-    if chip_rule and chip_rule.chip_info:
-        extractor = ChipInfoExtractor(chip_rule.chip_info, chip_rule.gain_tia_map)
-
-    channel_list = channels.split(",") if channels else None
-
-    if input_p.is_dir():
-        csv_files = sorted(input_p.rglob("*.csv"))
-        if filter_name:
-            csv_files = [f for f in csv_files if filter_name in f.name]
-        if not csv_files:
-            console.print(f"[yellow]WARN[/yellow] 目录中无CSV文件: {input_path}")
-            return
-
-        all_dfs = []
-        collector = ResultCollector()
-        for f in progress_track(csv_files, "计算产测指标...", console=console):
-            try:
-                df = read_csv_df(f, chip_rule)
-            except Exception as e:
-                collector.add_exception(f, e)
-                continue
-            ch_list = channel_list or _get_channel_list(None, chip_rule, df)
-            results = calculator.calculate(df, ch_list, extractor=extractor)
-            if results:
-                rel_name = str(f.relative_to(input_p))
-                _print_chip_info(results, rel_name)
-                file_df = calculator.to_dataframe(results, file_name=rel_name)
-                all_dfs.append(file_df)
-                if verbose:
-                    console.print(f"  [dim]{rel_name}: {len(results)} 通道[/dim]")
-                collector.add_ok(f, rows=len(df), detail=f"{len(results)} 通道")
-            else:
-                collector.add_skip(f, reason=REASON_NO_DATA, detail="无有效数据通道")
-
-        if not all_dfs:
-            print_summary("产测结果", collector, console=console, verbose=verbose)
-            console.print("[yellow]WARN[/yellow] 无有效数据通道")
-            return
-
-        result_df = pd.concat(all_dfs, ignore_index=True)
-        print_summary("产测结果", collector, console=console, verbose=verbose)
-        console.print(f"[green]OK[/green] 生成 {len(result_df)} 条记录")
-    else:
-        try:
-            df = read_csv_df(input_p, chip_rule)
-        except Exception as e:
-            console.print(f"[red]错误[/red] 读取失败: {input_p}: {e}")
-            raise SystemExit(1)
-        ch_list = channel_list or _get_channel_list(None, chip_rule, df)
-        results = calculator.calculate(df, ch_list, extractor=extractor)
-
-        if not results:
-            console.print("[yellow]WARN[/yellow] 无有效数据通道")
-            return
-
-        _print_chip_info(results, input_p.name)
-        result_df = calculator.to_dataframe(results, file_name=input_p.name)
-
-    if output_path:
-        out_p = Path(output_path)
-        if out_p.is_dir() or (not out_p.suffix and not out_p.exists()):
-            out_p.mkdir(parents=True, exist_ok=True)
-            name = input_p.name if input_p.is_file() else input_p.resolve().name
-            out_file = out_p / f"factory_{name}.csv"
-        else:
-            out_file = out_p
-            out_file.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        if input_p.is_dir():
-            dir_name = input_p.resolve().name
-            out_file = input_p / f"factory_{dir_name}.csv"
-        else:
-            out_file = input_p.parent / f"factory_{input_p.stem}.csv"
-
-    result_df.to_csv(out_file, index=False)
-    console.print(f"[green]OK[/green] 结果已保存: {out_file}")
-
-    table = Table(title="SNR/CTR/Noise 计算结果")
-    for col in result_df.columns:
-        table.add_column(col, style="cyan" if col in ("file_name", "ch_num") else "green")
-    for _, row in result_df.iterrows():
-        table.add_row(*[str(v) for v in row.values])
-
-    console.print(table)
-    _print_adc_info(calculator)
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_factory(
+                FactoryRequest(
+                    Path(input_path),
+                    chip_name=chip_name,
+                    rule_file=rule_file,
+                    gain=gain,
+                    current=current,
+                    sample_rate=sample_rate,
+                    snr_cfg=snr_cfg,
+                    ctr_cfg=ctr_cfg,
+                    noise_cfg=noise_cfg,
+                    adc_offset=adc_offset,
+                    channels=channels,
+                    output_path=Path(output_path) if output_path else None,
+                    filter_name=filter_name,
+                ),
+                context=context,
+            )
+        )
+    print_batch("产测结果", result, console, verbose)
+    if result.artifacts:
+        console.print(f"[green]OK[/green] 结果已保存: {result.artifacts[-1]}")
+    return

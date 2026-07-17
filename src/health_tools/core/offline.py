@@ -7,7 +7,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 import yaml
@@ -588,6 +588,7 @@ class OfflineRunner:
         output_dir: Path,
         timeout: int = 300,
         settle_timeout: int = 10,
+        is_cancelled: Optional[Callable[[], bool]] = None,
     ) -> OfflineRunResult:
         """执行离线跑库
 
@@ -618,8 +619,32 @@ class OfflineRunner:
         returncode = None
         timed_out = False
         try:
-            result = subprocess.run(cmd, shell=True, timeout=timeout)
-            returncode = result.returncode
+            if is_cancelled is None:
+                result = subprocess.run(cmd, shell=True, timeout=timeout)
+                returncode = result.returncode
+            else:
+                process = subprocess.Popen(cmd, shell=True)
+                while returncode is None:
+                    if is_cancelled():
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                        raise InterruptedError("离线任务已取消")
+                    if time.time() - started_at >= timeout:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                        timed_out = True
+                        break
+                    returncode = process.poll()
+                    if returncode is None:
+                        time.sleep(0.1)
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:

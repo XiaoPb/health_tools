@@ -1,21 +1,23 @@
 # 架构说明
 
-GHealth Tools 同时提供 Click 命令行和可选的 Streamlit 图形界面。两种入口复用同一组
-业务逻辑、规则模型和 CSV 工具。
+GHealth Tools 同时提供 Click 命令行和同步 Python API。两种入口复用同一组业务逻辑、
+规则模型和 CSV 工具；独立 UI 项目只依赖公共 API。
 
 ## 组件关系
 
 ```text
-cli.py / commands/        Click 命令、参数校验、进度与结果汇总
+cli.py / commands/        Click 参数与终端呈现
+          |
+          v
+api/                     公共请求、结果、校验、进度、取消与业务编排
           |  \
           |   +---------- config.py / rules/loader.py
           v
-core/                    解析、转换、检查、绘图、评估、离线跑库等业务逻辑
+core/                    解析、转换、检查、绘图、评估、离线跑库等算法逻辑
           |
           v
 models/ + utils/         规则数据类、CSV、列展开、文件、并行和准确度工具
 
-ui/                      Streamlit 页面，调用 commands/core/rules 的现有能力
 ```
 
 主要依赖方向是入口层到业务层，再到规则与工具层。`models/rules.py` 为复用列展开逻辑会
@@ -25,7 +27,7 @@ ui/                      Streamlit 页面，调用 commands/core/rules 的现有
 ## 入口与延迟加载
 
 `ghealth_tool` 指向 `health_tools.cli:main`。`cli.py` 中的 `LazyGroup` 只在用户调用某个
-命令时导入对应模块，因此未安装 Streamlit 时仍可使用其他命令。
+命令时导入对应模块，缩短主帮助命令的启动时间。
 
 主命令及别名由 `COMMAND_MAP` 和 `PRIMARY_COMMANDS` 定义。新增命令时必须同时更新：
 
@@ -88,10 +90,11 @@ src/health_tools/rules/
 - 使用 Rich 进度条与 `ResultCollector` 汇总结果。
 - 将领域异常转换为中文、可执行的错误信息。
 
-### ui
+### api
 
-`ui/app.py` 是 Streamlit 入口，`ui/pages/` 对应各功能页面，`ui/components/` 提供文件
-选择、规则构建和结果显示等组件。UI 是可选依赖，不应被 CLI 核心模块导入。
+`health_tools.api` 是对外稳定入口。请求对象使用冻结 dataclass，返回结构化结果；
+`ExecutionContext` 提供进度与协作式取消。API 不依赖 Click 或 Rich，也不直接写终端。
+接口的完整边界见 [Python API 架构](api_architecture.md)。
 
 ## 配置与规则查找
 

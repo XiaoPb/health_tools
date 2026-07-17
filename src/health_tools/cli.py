@@ -30,7 +30,6 @@ COMMAND_MAP = {
     "offline": ("health_tools.commands.offline", "offline_cmd"),
     "check": ("health_tools.commands.check", "check_cmd"),
     "chk": ("health_tools.commands.check", "check_cmd"),
-    "ui": ("health_tools.commands.ui", "ui_cmd"),
 }
 
 COMMAND_HELP = {
@@ -47,7 +46,6 @@ COMMAND_HELP = {
     "evaluate": "评估指标命令",
     "offline": "离线评估流程",
     "check": "数据质量检查",
-    "ui": "启动图形界面",
 }
 
 PRIMARY_COMMANDS = [
@@ -64,7 +62,6 @@ PRIMARY_COMMANDS = [
     "evaluate",
     "offline",
     "check",
-    "ui",
 ]
 
 ALIASES: dict = {}

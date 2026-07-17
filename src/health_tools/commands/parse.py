@@ -1,11 +1,10 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import click
 from rich.console import Console
 from health_tools.utils.errors import REASON_NO_DATA
-from health_tools.utils.progress import progress_track
-from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
+from health_tools.utils.reporting import FileResult, ResultCollector
 
 console = Console()
 
@@ -34,94 +33,30 @@ def parse_cmd(
     dry_run: bool,
 ) -> None:
     """log解析转CSV命令"""
-    from health_tools.rules.loader import RuleLoader
+    from health_tools.api import ParseRequest, run_parse
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    chip_columns = None
-    chip_rule = None
-    rule: Any
-    if rule_file:
-        rule = RuleLoader.load_parse_rule(rule_file)
-        if rule.chip:
-            chip_rule = RuleLoader.load_chip_rule(rule.chip)
-            chip_columns = chip_rule.columns
-    elif chip_name:
-        chip_rule = RuleLoader.load_chip_rule(chip_name)
-        rule = chip_rule
-    else:
-        console.print("[red]错误: 需要指定 --rule 或 --chip 参数[/red]")
-        raise SystemExit(1)
-
-    multi_mode = bool(getattr(rule, "patterns", None))
-
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_parse(
+                ParseRequest(
+                    Path(input_path),
+                    Path(output_path),
+                    rule_file=rule_file,
+                    chip_name=chip_name,
+                    delimiter=delimiter,
+                    encoding=encoding,
+                    filter_name=filter_name,
+                    dry_run=dry_run,
+                ),
+                context=context,
+            )
+        )
     if dry_run:
         console.print("[green]规则验证通过[/green]")
-        if multi_mode:
-            for name, pat in rule.patterns.items():
-                console.print(f"  [{name}] 正则: {pat.regex}")
-                console.print(f"  [{name}] 列名: {pat.columns}")
-        else:
-            console.print(f"  正则表达式: {rule.regex}")
-            console.print(f"  列名: {rule.columns}")
-        if chip_columns:
-            console.print(f"  芯片列数: {len(chip_columns)}")
-        return
-
-    input_path_obj = Path(input_path)
-    output_path_obj = Path(output_path)
-
-    if multi_mode:
-        output_path_obj.mkdir(parents=True, exist_ok=True)
-
-    if input_path_obj.is_file():
-        if multi_mode:
-            result = _parse_file_multi(
-                input_path_obj, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
-            )
-        else:
-            result = _parse_file(
-                input_path_obj,
-                output_path_obj,
-                rule,
-                chip_rule,
-                chip_columns,
-                delimiter,
-                encoding,
-                verbose,
-            )
-        collector = ResultCollector()
-        collector.add(result)
-        print_summary("解析结果", collector, console=console, verbose=verbose)
-    elif input_path_obj.is_dir():
-        output_path_obj.mkdir(parents=True, exist_ok=True)
-        files = list(input_path_obj.rglob("*.log")) + list(input_path_obj.rglob("*.txt"))
-        if filter_name:
-            files = [f for f in files if filter_name in f.name]
-        collector = ResultCollector()
-        for file in progress_track(files, "解析文件...", console=console):
-            if multi_mode:
-                collector.add(
-                    _parse_file_multi(
-                        file, output_path_obj, rule, chip_rule, chip_columns, encoding, verbose
-                    )
-                )
-            else:
-                out_file = output_path_obj / f"{file.stem}.csv"
-                collector.add(
-                    _parse_file(
-                        file,
-                        out_file,
-                        rule,
-                        chip_rule,
-                        chip_columns,
-                        delimiter,
-                        encoding,
-                        verbose,
-                    )
-                )
-        print_summary("解析结果", collector, console=console, verbose=verbose)
     else:
-        console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
-        raise SystemExit(1)
+        print_batch("解析结果", result, console, verbose)
+    return
 
 
 def _parse_file(

@@ -1,0 +1,78 @@
+from pathlib import Path
+
+import pytest
+
+from health_tools.api import (
+    BatchResult,
+    CallbackError,
+    ExecutionContext,
+    ItemResult,
+    ItemStatus,
+    OperationCancelled,
+    ParseRequest,
+    ProgressEvent,
+    run_info,
+)
+
+
+def test_batch_result_exposes_status_counts():
+    result = BatchResult(
+        operation="parse",
+        items=(
+            ItemResult(ItemStatus.OK, "a.log"),
+            ItemResult(ItemStatus.SKIP, "b.log"),
+            ItemResult(ItemStatus.FAIL, "c.log"),
+        ),
+    )
+
+    assert result.ok_count == 1
+    assert result.skip_count == 1
+    assert result.warn_count == 0
+    assert result.fail_count == 1
+
+
+def test_execution_context_emits_progress_and_checks_cancellation():
+    events = []
+    context = ExecutionContext(on_progress=events.append, is_cancelled=lambda: True)
+    event = ProgressEvent("parse", "files", 0, 2, "开始")
+
+    context.emit(event)
+    with pytest.raises(OperationCancelled) as exc_info:
+        context.check_cancelled("files", BatchResult("parse"))
+
+    assert events == [event]
+    assert exc_info.value.stage == "files"
+    assert isinstance(exc_info.value.partial_result, BatchResult)
+
+
+def test_execution_context_wraps_callback_errors():
+    def fail(_event):
+        raise RuntimeError("boom")
+
+    context = ExecutionContext(on_progress=fail)
+    with pytest.raises(CallbackError, match="进度回调执行失败"):
+        context.emit(ProgressEvent("parse", "files", 0, 1))
+
+
+def test_request_models_are_immutable():
+    request = ParseRequest(Path("input.log"), Path("output.csv"), chip_name="gh3036")
+
+    with pytest.raises(Exception):
+        request.chip_name = "gh3220"
+
+
+def test_run_info_returns_structured_csv_data(tmp_path: Path):
+    csv_path = tmp_path / "sample.csv"
+    csv_path.write_text("value,label\n1,a\n2,b\n", encoding="utf-8")
+
+    from health_tools.api import InfoRequest
+
+    result = run_info(InfoRequest(csv_path, stats=True, schema=True, preview=1))
+
+    assert result.kind == "csv"
+    assert result.summary["rows"] == 2
+    assert result.schema["value"]["non_null"] == 2
+    assert result.preview == ({"value": 1, "label": "a"},)
+
+    with pytest.raises(TypeError):
+        result.summary["rows"] = 3

@@ -206,94 +206,29 @@ def convert_cmd(
     verbose: bool,
 ) -> None:
     """CSV格式转换"""
-    from health_tools.core.converter import DataConverter
-    from health_tools.rules.loader import RuleLoader
+    from health_tools.api import ConvertRequest, run_convert
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    if init_rule:
-        if not chip_name:
-            console.print("[red]错误: --init-rule 需要指定 --chip 参数[/red]")
-            raise SystemExit(1)
-        if not output_path:
-            output_path = f"convert_{chip_name}.yaml"
-        init_chip_rule = RuleLoader.load_chip_rule(chip_name)
-        source_file = Path(input_path) if input_path else None
-        _generate_rule_template(init_chip_rule, Path(output_path), source_file)
-        return
-
-    if not input_path or not output_path:
-        console.print("[red]错误: 需要指定 --input 和 --output 参数[/red]")
-        raise SystemExit(1)
-
-    chip_rule: Optional[ChipRule] = None
-    if rule_file:
-        rule = RuleLoader.load_convert_rule(rule_file)
-        if rule.target_chip:
-            chip_rule = RuleLoader.load_chip_rule(rule.target_chip)
-        elif chip_name:
-            chip_rule = RuleLoader.load_chip_rule(chip_name)
-    else:
-        console.print("[red]错误: 需要指定 --rule 参数[/red]")
-        raise SystemExit(1)
-
-    chip_columns = chip_rule.columns if chip_rule else None
-    converter = DataConverter(rule, chip_columns=chip_columns)
-
-    input_path_obj = Path(input_path)
-    output_path_obj = Path(output_path)
-
-    input_csv_config = rule.csv if rule.csv else None
-    output_csv_config = chip_rule.csv if chip_rule else None
-
-    if input_path_obj.is_file():
-        results = [
-            _convert_file(
-                input_path_obj,
-                output_path_obj,
-                converter,
-                input_csv_config,
-                output_csv_config,
-                verbose,
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_convert(
+                ConvertRequest(
+                    input_path=Path(input_path) if input_path else None,
+                    output_path=Path(output_path) if output_path else None,
+                    rule_file=rule_file,
+                    chip_name=chip_name,
+                    from_format=from_format,
+                    to_format=to_format,
+                    merge=merge,
+                    split=split,
+                    init_rule=init_rule,
+                    filter_name=filter_name,
+                ),
+                context=context,
             )
-        ]
-        _print_convert_results_table(results, verbose)
-        _print_convert_summary(results, verbose)
-        _write_extra_source_align_error_report(converter, output_path_obj.parent)
-    elif input_path_obj.is_dir():
-        if merge:
-            output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-            _merge_and_convert(
-                input_path_obj,
-                output_path_obj,
-                converter,
-                input_csv_config,
-                output_csv_config,
-                split,
-                filter_name,
-                verbose,
-                show_progress=True,
-            )
-            _write_extra_source_align_error_report(converter, output_path_obj.parent)
-        else:
-            output_path_obj.mkdir(parents=True, exist_ok=True)
-            files = list(input_path_obj.rglob("*.csv"))
-            if filter_name:
-                files = [f for f in files if filter_name in f.name]
-            results = []
-            for file in progress_track(files, "转换CSV...", console=console):
-                relative = file.relative_to(input_path_obj)
-                out_file = output_path_obj / relative
-                out_file.parent.mkdir(parents=True, exist_ok=True)
-                results.append(
-                    _convert_file(
-                        file, out_file, converter, input_csv_config, output_csv_config, verbose
-                    )
-                )
-            _print_convert_results_table(results, verbose)
-            _print_convert_summary(results, verbose)
-            _write_extra_source_align_error_report(converter, output_path_obj)
-    else:
-        console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
-        raise SystemExit(1)
+        )
+    print_batch("转换汇总", result, console, verbose)
+    return
 
 
 def _read_input_csv(file_path: Path, csv_config: Optional[dict]) -> pd.DataFrame:

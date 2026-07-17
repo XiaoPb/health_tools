@@ -21,19 +21,70 @@ def info_cmd(
     preview: int,
 ) -> None:
     """查看数据文件或规则文件信息"""
-    target_path = Path(target)
+    from health_tools.api import InfoRequest, run_info
+    from health_tools.commands.api_support import CliExecution, invoke_api
 
-    if not target_path.exists():
-        console.print(f"[red]错误: 文件不存在: {target}[/red]")
-        raise SystemExit(1)
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_info(
+                InfoRequest(Path(target), stats=stats, schema=schema, preview=preview),
+                context=context,
+            )
+        )
+    if result.kind == "rule":
+        import yaml
 
-    if target_path.suffix in (".yaml", ".yml"):
-        _show_rule_info(target_path, schema)
-    elif target_path.suffix == ".csv":
-        _show_csv_info(target_path, stats, schema, preview)
+        console.print(f"\n[bold cyan]规则文件: {result.target.name}[/bold cyan]\n")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("字段", style="cyan")
+        table.add_column("值", style="green")
+        for key, value in result.schema.items():
+            if hasattr(value, "items"):
+                text = ", ".join(f"{name}: {item}" for name, item in value.items())
+            elif isinstance(value, (list, tuple)):
+                text = ", ".join(str(item) for item in value[:5])
+                if len(value) > 5:
+                    text += f" ... ({len(value)} items)"
+            else:
+                text = str(value)
+            table.add_row(str(key), text)
+        console.print(table)
+        if schema:
+            console.print("\n[bold]完整结构:[/bold]")
+            console.print(
+                yaml.safe_dump(_plain(result.schema), allow_unicode=True, sort_keys=False)
+            )
     else:
-        console.print(f"[red]错误: 不支持的文件类型: {target_path.suffix}[/red]")
-        raise SystemExit(1)
+        import pandas as pd
+
+        console.print(f"\n[bold cyan]CSV文件: {result.target.name}[/bold cyan]\n")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("属性", style="cyan")
+        table.add_column("值", style="green")
+        table.add_row("行数", str(result.summary["rows"]))
+        table.add_row("列数", str(result.summary["columns"]))
+        table.add_row("文件大小", f"{result.summary['size_bytes'] / 1024:.2f} KB")
+        console.print(table)
+        if schema:
+            schema_table = Table(show_header=True, header_style="bold magenta")
+            schema_table.add_column("列名", style="cyan")
+            schema_table.add_column("类型", style="green")
+            schema_table.add_column("非空数", style="yellow")
+            for name, value in result.schema.items():
+                schema_table.add_row(str(name), str(value["dtype"]), str(value["non_null"]))
+            console.print(schema_table)
+        if result.statistics:
+            console.print(pd.DataFrame(_plain(result.statistics)).to_string())
+        console.print(pd.DataFrame(_plain(result.preview)).to_string())
+    return
+
+
+def _plain(value):
+    if hasattr(value, "items"):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_plain(item) for item in value]
+    return value
 
 
 def _show_rule_info(file_path: Path, show_schema: bool) -> None:

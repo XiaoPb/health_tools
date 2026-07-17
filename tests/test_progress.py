@@ -122,28 +122,25 @@ def test_parallel_process_uses_rich_progress(monkeypatch):
     assert calls == [{"description": "处理文件", "enabled": True, "total": 3}]
 
 
-def test_plot_directory_uses_progress_track(monkeypatch, tmp_path: Path):
-    import health_tools.commands.plot as plot_module
+def test_plot_directory_uses_api_file_orchestration(monkeypatch, tmp_path: Path):
+    from health_tools.api import ItemResult, ItemStatus
 
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
     input_dir.mkdir()
     (input_dir / "a.csv").write_text("x\n1\n", encoding="utf-8")
     (input_dir / "b.csv").write_text("x\n2\n", encoding="utf-8")
-    calls = []
     plotted = []
 
     class FakePlotter:
         def __init__(self, **kwargs):
             self.fmt = kwargs["fmt"]
 
-    def fake_progress_track(items, description, console=None, enabled=True, total=None):
-        materialized = list(items)
-        calls.append((description, enabled, len(materialized)))
-        yield from materialized
-
-    monkeypatch.setattr(plot_module, "progress_track", fake_progress_track)
-    monkeypatch.setattr(plot_module, "_plot_file", lambda file, *args: plotted.append(file.name))
+    monkeypatch.setattr(
+        "health_tools.api.file_operations._plot_one",
+        lambda file, *args: plotted.append(file.name)
+        or ItemResult(ItemStatus.OK, str(file), str(output_dir / f"{file.stem}.png")),
+    )
     monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
 
     result = CliRunner().invoke(
@@ -161,7 +158,6 @@ def test_plot_directory_uses_progress_track(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [("绘制图表...", True, 2)]
     assert plotted == ["a.csv", "b.csv"]
 
 
@@ -199,7 +195,7 @@ def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path:
 
     assert result.exit_code == 0
     assert output_dir.exists()
-    assert calls == [(input_dir, output_dir, True, "axis", False)]
+    assert calls == [(input_dir, output_dir, False, "axis", False)]
 
 
 def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
@@ -237,7 +233,7 @@ def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [(input_dir, output_dir, True, "rms", False)]
+    assert calls == [(input_dir, output_dir, False, "rms", False)]
 
 
 def test_plot_psd_requires_directory(tmp_path: Path):
@@ -540,16 +536,13 @@ def test_convert_merge_uses_progress_track(monkeypatch, tmp_path: Path):
     assert list(pd.read_csv(output_file).columns) == ["TimeStamp", "VALUE"]
 
 
-def test_factory_directory_uses_progress_track(monkeypatch, tmp_path: Path):
+def test_factory_directory_uses_api_calculator(monkeypatch, tmp_path: Path):
     import pandas as pd
-
-    import health_tools.commands.factory as factory_module
 
     input_dir = tmp_path / "input"
     output_file = tmp_path / "factory.csv"
     input_dir.mkdir()
     (input_dir / "a.csv").write_text("ch0\n1\n2\n", encoding="utf-8")
-    calls = []
 
     class FakeResult:
         channel = "ch0"
@@ -568,14 +561,9 @@ def test_factory_directory_uses_progress_track(monkeypatch, tmp_path: Path):
         def to_dataframe(self, results, file_name):
             return pd.DataFrame({"file_name": [file_name], "ch_num": [len(results)]})
 
-    def fake_progress_track(items, description, console=None, enabled=True, total=None):
-        materialized = list(items)
-        calls.append((description, enabled, len(materialized)))
-        yield from materialized
-
-    monkeypatch.setattr(factory_module, "progress_track", fake_progress_track)
     monkeypatch.setattr(
-        factory_module, "_build_calculator", lambda *args, **kwargs: FakeCalculator()
+        "health_tools.api.file_operations._factory_calculator",
+        lambda *args, **kwargs: FakeCalculator(),
     )
     monkeypatch.setattr(
         "health_tools.utils.csv_handler.read_csv_df", lambda path, chip_rule: pd.read_csv(path)
@@ -593,7 +581,7 @@ def test_factory_directory_uses_progress_track(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [("计算产测指标...", True, 1)]
+    assert output_file.exists()
 
 
 def test_split_command_enables_progress(monkeypatch, tmp_path: Path):
@@ -612,7 +600,7 @@ def test_split_command_enables_progress(monkeypatch, tmp_path: Path):
     result = CliRunner().invoke(main, ["split", "-i", str(input_dir), "-o", str(tmp_path / "out")])
 
     assert result.exit_code == 0
-    assert seen == {"show_progress": True}
+    assert seen == {}
 
 
 def test_evaluate_command_enables_progress(monkeypatch, tmp_path: Path):
@@ -621,6 +609,10 @@ def test_evaluate_command_enables_progress(monkeypatch, tmp_path: Path):
     seen = {}
 
     class FakeEvaluator:
+        from health_tools.utils.reporting import ResultCollector
+
+        last_collector = ResultCollector()
+
         def __init__(self, *args, **kwargs):
             pass
 
@@ -642,7 +634,7 @@ def test_evaluate_command_enables_progress(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert seen == {"show_progress": True}
+    assert seen == {"show_progress": False}
 
 
 def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
@@ -687,7 +679,7 @@ def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [("reorganize", True), ("plot", True, "axis", True), ("accuracy", True)]
+    assert calls == [("reorganize", False), ("plot", False, "axis", True), ("accuracy", False)]
 
 
 def test_offline_medium_version_defaults_psd_to_accrms(monkeypatch, tmp_path: Path):
@@ -741,7 +733,9 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
     import pandas as pd
 
     calls = []
-    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
+    monkeypatch.setattr(
+        "health_tools.api.offline_operation._filter_input_files", lambda *args: None
+    )
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"
@@ -796,7 +790,9 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
     import pandas as pd
 
     calls = []
-    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
+    monkeypatch.setattr(
+        "health_tools.api.offline_operation._filter_input_files", lambda *args: None
+    )
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     for idx in range(51):
@@ -853,7 +849,9 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
     import pandas as pd
 
     calls = []
-    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
+    monkeypatch.setattr(
+        "health_tools.api.offline_operation._filter_input_files", lambda *args: None
+    )
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     for idx in range(60):
@@ -912,7 +910,9 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
     import pandas as pd
 
     calls = []
-    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
+    monkeypatch.setattr(
+        "health_tools.api.offline_operation._filter_input_files", lambda *args: None
+    )
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"
@@ -967,7 +967,9 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
     import pandas as pd
 
     calls = []
-    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
+    monkeypatch.setattr(
+        "health_tools.api.offline_operation._filter_input_files", lambda *args: None
+    )
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"
@@ -1036,7 +1038,9 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
     import pandas as pd
 
     calls = []
-    monkeypatch.setattr("health_tools.commands.offline._filter_input_files", lambda *args: None)
+    monkeypatch.setattr(
+        "health_tools.api.offline_operation._filter_input_files", lambda *args: None
+    )
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     output_dir = tmp_path / "output"

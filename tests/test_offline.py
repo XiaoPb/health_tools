@@ -11,6 +11,7 @@ from click.testing import CliRunner
 from matplotlib.axes import Axes
 from PIL import Image
 
+import health_tools.api.offline_operation as offline_api
 from health_tools.cli import main
 from health_tools.commands import offline as offline_command
 from health_tools.core import psd_plotter
@@ -623,6 +624,34 @@ def test_offline_filters_once_before_multi_version_run(monkeypatch, tmp_path):
         lambda **kwargs: None,
     )
 
+    class FakeRunner:
+        ppg_warnings = []
+
+        def __init__(self, chip, version=None, **kwargs):
+            self.version = version
+
+        def resolve_ppg_mapping(self):
+            return {}
+
+        def run(self, input_path, output_path, **kwargs):
+            output_path.mkdir(parents=True, exist_ok=True)
+            return offline.OfflineRunResult(success=True)
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip, version=None: exe_paths[version])
+    monkeypatch.setattr(offline, "OfflineRunner", FakeRunner)
+    monkeypatch.setattr(
+        offline_api,
+        "_filter_input_files",
+        lambda input_path, chip: filter_calls.append((input_path, chip)),
+    )
+    monkeypatch.setattr(
+        offline,
+        "reorganize_output",
+        lambda input_path, output_path, show_progress=False: output_path,
+    )
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", lambda *args, **kwargs: [])
+    monkeypatch.setattr(offline, "calculate_offline_accuracy", lambda *args, **kwargs: None)
+
     result = CliRunner().invoke(
         main,
         ["offline", "-i", str(input_dir), "-c", "gh3036", "--versions", "v1,v2"],
@@ -693,6 +722,36 @@ def test_offline_default_timeout_uses_filtered_file_count(monkeypatch, tmp_path)
         "_run_single_offline_version",
         lambda **kwargs: timeouts.append(kwargs["timeout"]),
     )
+
+    class FakeRunner:
+        ppg_warnings = []
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def resolve_ppg_mapping(self):
+            return {}
+
+        def run(self, input_path, output_path, timeout=300, **kwargs):
+            timeouts.append(timeout)
+            output_path.mkdir(parents=True, exist_ok=True)
+            return offline.OfflineRunResult(success=True)
+
+    monkeypatch.setattr(offline, "find_exe", lambda *args: exe_path)
+    monkeypatch.setattr(offline, "OfflineRunner", FakeRunner)
+
+    def api_remove_one_file(input_path, chip):
+        remove_one_file(input_path, chip)
+        return None
+
+    monkeypatch.setattr(offline_api, "_filter_input_files", api_remove_one_file)
+    monkeypatch.setattr(
+        offline,
+        "reorganize_output",
+        lambda input_path, output_path, show_progress=False: output_path,
+    )
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", lambda *args, **kwargs: [])
+    monkeypatch.setattr(offline, "calculate_offline_accuracy", lambda *args, **kwargs: None)
 
     result = CliRunner().invoke(main, ["offline", "-i", str(input_dir), "-c", "gh3036"])
 
@@ -792,6 +851,7 @@ def test_offline_ppg_options_are_passed_to_runner(monkeypatch, tmp_path):
     monkeypatch.setattr(offline, "find_exe", lambda chip, version=None: exe_path)
     monkeypatch.setattr(offline, "OfflineRunner", FakeRunner)
     monkeypatch.setattr(offline_command, "_filter_input_files", lambda *args: None)
+    monkeypatch.setattr(offline_api, "_filter_input_files", lambda *args: None)
     monkeypatch.setattr(offline, "reorganize_output", lambda *args, **kwargs: output_dir)
 
     result = CliRunner().invoke(

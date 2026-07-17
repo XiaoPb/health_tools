@@ -36,9 +36,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = [
-    "streamlit>=1.30.0",
-]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -75,12 +72,12 @@ warn_return_any = false
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["scipy.*", "bokeh.*", "streamlit.*", "ruamel.*"]
+module = ["scipy.*", "bokeh.*", "ruamel.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
-module = ["health_tools.core.*", "health_tools.ui.*"]
+module = ["health_tools.core.*"]
 ignore_errors = true
 
 [tool.pytest.ini_options]

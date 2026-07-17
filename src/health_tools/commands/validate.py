@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import click
-import yaml
 from rich.console import Console
 
 console = Console()
@@ -13,37 +12,17 @@ console = Console()
 @click.pass_context
 def validate_cmd(ctx: click.Context, rule_file: str, strict: bool) -> None:
     """验证YAML规则文件格式和内容"""
-    rule_path = Path(rule_file)
+    from health_tools.api import ValidateRequest, run_validate
+    from health_tools.commands.api_support import CliExecution, invoke_api
 
-    if not rule_path.exists():
-        console.print(f"[red]错误: 文件不存在: {rule_file}[/red]")
-        raise SystemExit(1)
-
-    if rule_path.suffix not in (".yaml", ".yml"):
-        console.print(f"[red]错误: 文件必须是YAML格式: {rule_file}[/red]")
-        raise SystemExit(1)
-
-    try:
-        with open(rule_path, "r", encoding="utf-8") as f:
-            rule = yaml.safe_load(f)
-
-        if not isinstance(rule, dict):
-            console.print("[red]错误: 规则文件必须是一个字典结构[/red]")
-            raise SystemExit(1)
-
-        errors = _validate_rule(rule, rule_path, strict)
-
-        if errors:
-            console.print(f"\n[red]验证失败，发现 {len(errors)} 个错误:[/red]\n")
-            for error in errors:
-                console.print(f"  [red]✗[/red] {error}")
-            raise SystemExit(1)
-        else:
-            console.print(f"[green]✓[/green] 规则文件验证通过: {rule_file}")
-
-    except yaml.YAMLError as e:
-        console.print(f"[red]YAML解析错误: {e}[/red]")
-        raise SystemExit(1)
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_validate(ValidateRequest(Path(rule_file), strict=strict), context=context)
+        )
+    if not result.valid:
+        raise click.ClickException("规则验证失败: " + "; ".join(result.errors))
+    console.print(f"[green]OK[/green] 规则文件验证通过: {rule_file}")
+    return
 
 
 def _validate_rule(rule: dict, rule_path: Path, strict: bool) -> list:

@@ -3,8 +3,6 @@ from typing import Optional
 
 import click
 from rich.console import Console
-from health_tools.utils.errors import REASON_PROCESS_FAILED, normalize_reason
-from health_tools.utils.reporting import ResultCollector, print_summary
 
 console = Console()
 
@@ -33,48 +31,24 @@ def process_cmd(
     verbose: bool,
 ) -> None:
     """批量处理命令"""
-    from health_tools.core.processor import BatchProcessor
-    from health_tools.rules.loader import RuleLoader
+    from health_tools.api import ProcessRequest, run_process
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    chip_rule = None
-    if chip_name:
-        chip_rule = RuleLoader.load_chip_rule(chip_name)
-
-    processor = BatchProcessor(chip_rule)
-
-    input_path_obj = Path(input_path)
-    output_path_obj = Path(output_path)
-
-    if not input_path_obj.is_dir():
-        console.print(f"[red]错误: 输入路径必须是目录: {input_path}[/red]")
-        raise SystemExit(1)
-
-    results = processor.process_directory(
-        input_path_obj,
-        output_path_obj,
-        pattern=pattern,
-        recursive=True,
-        max_workers=max_workers,
-        frame_split=frame_split,
-        frame_column=frame_column,
-        filter_name=filter_name,
-        verbose=verbose,
-    )
-
-    collector = ResultCollector()
-    for result in results:
-        if result.get("success"):
-            collector.add_ok(
-                result.get("input", input_path_obj),
-                output=result.get("output", output_path_obj),
-                rows=int(result.get("rows", 0) or 0),
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_process(
+                ProcessRequest(
+                    Path(input_path),
+                    Path(output_path),
+                    chip_name=chip_name,
+                    frame_split=frame_split,
+                    frame_column=frame_column,
+                    max_workers=max_workers,
+                    pattern=pattern,
+                    filter_name=filter_name,
+                ),
+                context=context,
             )
-        else:
-            collector.add_fail(
-                result.get("input", input_path_obj),
-                reason=normalize_reason(result.get("reason") or REASON_PROCESS_FAILED),
-                output=result.get("output", output_path_obj),
-                detail=str(result.get("error") or ""),
-            )
-
-    print_summary("处理结果", collector, console=console, verbose=verbose)
+        )
+    print_batch("处理结果", result, console, verbose)
+    return

@@ -4,8 +4,7 @@ from typing import List, Optional
 
 import click
 from rich.console import Console
-from health_tools.utils.progress import progress_track
-from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
+from health_tools.utils.reporting import FileResult, ResultCollector
 
 console = Console()
 
@@ -65,118 +64,39 @@ def plot_cmd(
     verbose: bool,
 ) -> None:
     """绘制PPG数据的时域、频域、AC/PI、FFT和时频图"""
-    valid_types = {"time", "freq", "stft", "psd", "ac", "fft", "both"}
-    if plot_type not in valid_types:
-        console.print(f"[red]错误: 不支持的图表类型: {plot_type}[/red]")
-        console.print("支持的类型: time, freq, stft, psd, ac, fft, both")
-        raise SystemExit(1)
+    from health_tools.api import PlotRequest, run_plot
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    if channels and plot_type != "ac" and ";" in channels:
-        console.print("[red]错误: 分号通道分组仅支持 --type ac[/red]")
-        raise SystemExit(1)
-
-    try:
-        ac_channel_groups = _parse_ac_channel_groups(channels) if plot_type == "ac" else None
-    except ValueError as exc:
-        console.print(f"[red]错误: {exc}[/red]")
-        raise SystemExit(1) from exc
-
-    input_path_obj = Path(input_path)
-    output_path_obj = Path(output_path)
-    output_path_obj.mkdir(parents=True, exist_ok=True)
-
-    if plot_type == "psd":
-        _plot_psd_dir(input_path_obj, output_path_obj, psd_acc)
-        return
-
-    from health_tools.core.plotter import DataPlotter
-    from health_tools.rules.loader import RuleLoader
-
-    chip_rule = None
-    if chip_name:
-        chip_rule = RuleLoader.load_chip_rule(chip_name)
-    elif rule_file:
-        convert_rule = RuleLoader.load_convert_rule(rule_file)
-        csv_config = convert_rule.csv
-        from health_tools.models.rules import ChipRule as _ChipRule
-
-        chip_rule = _ChipRule(chip="", csv=csv_config, columns=[])
-
-    channel_list = None
-    if channels and plot_type != "ac":
-        channel_list = [item.strip() for item in channels.split(",") if item.strip()]
-
-    if plot_type in {"ac", "fft"}:
-        from health_tools.core.ppg_analysis import SignalAnalysisError, validate_bandpass
-
-        try:
-            lowcut, highcut = map(float, bandpass.split("-"))
-            validate_bandpass(sample_rate, lowcut, highcut)
-        except (ValueError, SignalAnalysisError) as exc:
-            console.print(f"[red]错误: 非法带通范围 {bandpass}: {exc}[/red]")
-            raise SystemExit(1) from exc
-
-    try:
-        freq_min, freq_max = map(float, freq_range.split("-"))
-    except (ValueError, AttributeError):
-        freq_min, freq_max = 30.0, 240.0
-
-    plotter = DataPlotter(
-        sample_rate=sample_rate,
-        window=window,
-        overlap=overlap,
-        fmt=fmt,
-        dpi=dpi,
-        bandpass=bandpass,
-        remove_baseline=remove_baseline,
-        baseline_method=baseline_method,
-        freq_bpm=freq_bpm,
-        freq_range=(freq_min, freq_max),
-    )
-
-    if input_path_obj.is_file():
-        collector = ResultCollector()
-        collector.add(
-            _plot_file(
-                input_path_obj,
-                output_path_obj,
-                plotter,
-                plot_type,
-                channel_list,
-                ref_column,
-                no_show,
-                verbose,
-                chip_rule,
-                ac_channel_groups,
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_plot(
+                PlotRequest(
+                    Path(input_path),
+                    Path(output_path),
+                    chip_name=chip_name,
+                    rule_file=rule_file,
+                    plot_type=plot_type,
+                    channels=channels,
+                    sample_rate=sample_rate,
+                    window=window,
+                    overlap=overlap,
+                    fmt=fmt,
+                    dpi=dpi,
+                    bandpass=bandpass,
+                    remove_baseline=remove_baseline,
+                    baseline_method=baseline_method,
+                    freq_bpm=freq_bpm,
+                    freq_range=freq_range,
+                    ref_column=ref_column,
+                    psd_acc=psd_acc,
+                    no_show=no_show,
+                    filter_name=filter_name,
+                ),
+                context=context,
             )
         )
-        print_summary("绘图结果", collector, console=console, verbose=verbose)
-    elif input_path_obj.is_dir():
-        files = sorted(input_path_obj.rglob("*.csv"))
-        if filter_name:
-            files = [f for f in files if filter_name in f.name]
-        collector = ResultCollector()
-        for file in progress_track(files, "绘制图表...", console=console):
-            result = _plot_file(
-                file,
-                output_path_obj,
-                plotter,
-                plot_type,
-                channel_list,
-                ref_column,
-                no_show,
-                verbose,
-                chip_rule,
-                ac_channel_groups,
-            )
-            if result is None:
-                collector.add_ok(file)
-            else:
-                collector.add(result)
-        print_summary("绘图结果", collector, console=console, verbose=verbose)
-    else:
-        console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
-        raise SystemExit(1)
+    print_batch("绘图结果", result, console, verbose)
+    return
 
 
 def _plot_psd_dir(input_dir: Path, output_dir: Path, acc_mode: str = "axis") -> None:

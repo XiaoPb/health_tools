@@ -30,7 +30,6 @@ ghealth_tool --help
 | 查看 CSV/规则结构 | [`info`](cmd_info.md) | `validate` |
 | 验证规则格式 | [`validate`](cmd_validate.md) | 对应业务命令 |
 | 管理用户规则和离线版本 | [`config`](cmd_config.md) | `offline` |
-| 使用图形界面 | [`ui`](cmd_ui.md) | 对应 CLI 命令 |
 
 ## 全部命令
 
@@ -49,7 +48,6 @@ ghealth_tool --help
 | [`evaluate`](cmd_evaluate.md) | `eval` | 结果目录 | 明细、异常和准确度汇总 |
 | [`offline`](cmd_offline.md) | 无 | 芯片 CSV 目录 | 版本目录、PSD、准确度报告 |
 | [`check`](cmd_check.md) | `chk` | CSV 或检查报告 | `check_report.csv` 或分拣目录 |
-| [`ui`](cmd_ui.md) | 无 | 端口配置 | Streamlit 页面 |
 
 ## 批量命令约定
 

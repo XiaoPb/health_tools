@@ -4,7 +4,6 @@ from pathlib import Path
 
 import click
 from rich.console import Console
-from health_tools.utils.reporting import print_summary
 
 console = Console()
 
@@ -47,63 +46,32 @@ def evaluate_cmd(
     verbose,
 ):
     """批量准确度评估（心率/血氧）"""
-    from health_tools.core.evaluator import BatchEvaluator
-    from health_tools.rules.loader import RuleLoader
+    from health_tools.api import EvaluateRequest, run_evaluate
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    if not rule_file:
-        rule_file = f"evaluate_{eval_type}.yaml"
-
-    rule = RuleLoader.load_evaluate_rule(rule_file)
-
-    if ref_column:
-        rule.ref_column = ref_column
-    if pred_column:
-        rule.pred_column = pred_column
-    if diff_threshold is not None:
-        rule.anomaly["diff_threshold"] = diff_threshold
-    if stale_minutes is not None:
-        rule.anomaly["stale_minutes"] = stale_minutes
-
-    chip_rule = None
-    if chip:
-        chip_rule = RuleLoader.load_chip_rule(chip)
-
-    evaluator = BatchEvaluator(
-        rule, chip_rule, ref_column_col=ref_column_col, pred_column_col=pred_column_col
-    )
-
-    input_dir = Path(input_path)
-    output_dir = Path(output_path)
-
-    console.print(f"评估类型: {eval_type.upper()}")
-    if ref_column_col:
-        console.print(f"参考列索引: {ref_column_col} (1-based)")
-    elif rule.ref_column:
-        console.print(f"参考列: {rule.ref_column}")
-    if pred_column_col:
-        console.print(f"预测列索引: {pred_column_col} (1-based)")
-    elif rule.pred_column:
-        console.print(f"预测列: {rule.pred_column}")
-    console.print(f"异常检测: diff>{rule.diff_threshold}, stale>{rule.stale_minutes}min")
-    console.print(f"输入: {input_dir}")
-    console.print(f"输出: {output_dir}")
-    console.print("")
-
-    output_paths = evaluator.evaluate_directory(
-        input_dir,
-        output_dir,
-        filter_name=filter_name,
-        verbose=verbose,
-        show_progress=True,
-    )
-
-    if hasattr(evaluator, "last_collector"):
-        print_summary("评估结果", evaluator.last_collector, console=console, verbose=verbose)
-
-    if output_paths:
-        console.print("")
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_evaluate(
+                EvaluateRequest(
+                    Path(input_path),
+                    Path(output_path),
+                    eval_type=eval_type,
+                    ref_column=ref_column,
+                    pred_column=pred_column,
+                    ref_column_col=ref_column_col,
+                    pred_column_col=pred_column_col,
+                    chip=chip,
+                    rule_file=rule_file,
+                    diff_threshold=diff_threshold,
+                    stale_minutes=stale_minutes,
+                    filter_name=filter_name,
+                ),
+                context=context,
+            )
+        )
+    print_batch("评估结果", result, console, verbose)
+    if result.artifacts:
         console.print("输出文件:")
-        for name, path in output_paths.items():
-            console.print(f"  {name}: {path}")
-    else:
-        console.print("[yellow]未找到有效数据文件[/yellow]")
+        for path in result.artifacts:
+            console.print(f"  {path}")
+    return

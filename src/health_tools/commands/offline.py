@@ -73,94 +73,45 @@ def offline_cmd(
     verbose: bool,
 ) -> None:
     """离线跑库（调用TEE_Algorithm.exe）"""
+    from health_tools.api import OfflineRequest, run_offline
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
+
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_offline(
+                OfflineRequest(
+                    input_path=Path(input_path) if input_path else None,
+                    output_path=Path(output_path) if output_path else None,
+                    chip_name=chip_name,
+                    ver=ver,
+                    versions=versions,
+                    all_versions=all_versions,
+                    hba_fs=hba_fs,
+                    scene_en=scene_en,
+                    ch_num=ch_num,
+                    ref_col=ref_col,
+                    ppg_offset=ppg_offset,
+                    ppg_maps=ppg_maps,
+                    no_accuracy=no_accuracy,
+                    no_plot=no_plot,
+                    no_run=no_run,
+                    do_list=do_list,
+                    timeout=timeout,
+                    settle_timeout=settle_timeout,
+                ),
+                context=context,
+            )
+        )
     if do_list:
-        _show_versions(chip_name)
-        return
-
-    if not input_path:
-        console.print("[red]错误: 需要指定 --input 参数[/red]")
-        raise SystemExit(1)
-
-    input_dir = Path(input_path)
-    if not input_dir.exists():
-        console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
-        raise SystemExit(1)
-
-    if not output_path:
-        output_path = str(input_dir.parent / f"{input_dir.name}_offline_result")
-    output_dir = Path(output_path)
-
-    target_versions = _resolve_versions(chip_name, ver, versions, all_versions)
-    if no_run and target_versions == [None]:
-        discovered_versions = _discover_no_run_versions(output_dir)
-        if discovered_versions:
-            target_versions = discovered_versions
-    is_multi_version = len(target_versions) > 1
-    version_exes: Dict[Optional[str], Optional[Path]] = {}
-    prepared_runners: Dict[Optional[str], "OfflineRunner"] = {}
-    should_validate_exes = chip_name is not None and (not no_run or is_multi_version)
-    if should_validate_exes and chip_name is not None:
-        version_exes = _validate_version_exes(chip_name, target_versions)
-    elif not no_run:
-        console.print("[red]错误: 需要指定 --chip 参数[/red]")
-        raise SystemExit(1)
-
-    if is_multi_version and no_run:
-        missing_dirs = [
-            str(output_dir / str(version))
-            for version in target_versions
-            if not (output_dir / str(version)).exists()
-        ]
-        if missing_dirs:
-            console.print("[red]错误: 多版本 --no-run 缺少已有结果目录[/red]")
-            for missing in missing_dirs:
-                console.print(f"  {missing}")
-            raise SystemExit(1)
-
-    if not no_run:
-        _validate_local_cmd_configs(version_exes)
-        prepared_runners = _prepare_offline_runners(
-            version_exes=version_exes,
-            chip_name=chip_name,
-            hba_fs=hba_fs,
-            scene_en=scene_en,
-            ch_num=ch_num,
-            ref_col=ref_col,
-            ppg_offset=ppg_offset,
-            ppg_maps=ppg_maps,
-        )
-        _filter_input_files(input_dir, chip_name)
-
-    timeout = _resolve_timeout(input_dir, timeout)
-
-    reports = []
-    for version in target_versions:
-        version_output_dir = _version_output_dir(output_dir, version, version_exes.get(version))
-        report_df = _run_single_offline_version(
-            input_dir=input_dir,
-            output_dir=version_output_dir,
-            chip_name=chip_name,
-            version=version,
-            exe_path=version_exes.get(version),
-            hba_fs=hba_fs,
-            scene_en=scene_en,
-            ch_num=ch_num,
-            ref_col=ref_col,
-            ppg_offset=ppg_offset,
-            ppg_maps=ppg_maps,
-            prepared_runner=prepared_runners.get(version),
-            no_run=no_run,
-            no_plot=no_plot,
-            no_accuracy=no_accuracy,
-            timeout=timeout,
-            settle_timeout=settle_timeout,
-            verbose=verbose,
-        )
-        if is_multi_version and report_df is not None and not report_df.empty:
-            reports.append((str(version), report_df))
-
-    if is_multi_version and not no_accuracy:
-        _save_combined_accuracy(output_dir, reports)
+        for version in result.versions:
+            console.print(version)
+    else:
+        print_batch("离线跑库", result.batch, console, verbose)
+        for item in result.batch.items:
+            for line in item.detail.splitlines():
+                if line.startswith("PPG列映射"):
+                    console.print(line)
+    return
 
 
 def _version_output_dir(output_dir: Path, version: Optional[str], exe_path: Optional[Path]) -> Path:

@@ -3,7 +3,6 @@ from typing import Optional
 
 import click
 from rich.console import Console
-from health_tools.utils.reporting import ResultCollector, print_summary
 
 console = Console()
 
@@ -34,50 +33,25 @@ def split_cmd(
     verbose: bool,
 ) -> None:
     """数据分割命令"""
-    from health_tools.core.splitter import DataSplitter
-    from health_tools.rules.loader import RuleLoader
+    from health_tools.api import SplitRequest, run_split
+    from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
 
-    chip_rule = None
-    if chip_name:
-        chip_rule = RuleLoader.load_chip_rule(chip_name)
-
-    splitter = DataSplitter(chip_rule)
-
-    input_path_obj = Path(input_path)
-    output_path_obj = Path(output_path)
-
-    if input_path_obj.is_file():
-        collector = ResultCollector()
-        collector.add(
-            splitter.split_file_result(
-                input_path_obj,
-                output_path_obj,
-                by_column=by_column,
-                column_value=column_value,
-                by_size=by_size,
-                by_time=by_time,
-                time_column=time_column,
-                verbose=verbose,
+    with CliExecution(console) as context:
+        result = invoke_api(
+            lambda: run_split(
+                SplitRequest(
+                    Path(input_path),
+                    Path(output_path),
+                    chip_name=chip_name,
+                    by_column=by_column,
+                    column_value=column_value,
+                    by_size=by_size,
+                    by_time=by_time,
+                    time_column=time_column,
+                    filter_name=filter_name,
+                ),
+                context=context,
             )
         )
-        print_summary("分割结果", collector, console=console, verbose=verbose)
-    elif input_path_obj.is_dir():
-        output_files = splitter.split_directory(
-            input_path_obj,
-            output_path_obj,
-            by_column=by_column,
-            column_value=column_value,
-            by_size=by_size,
-            by_time=by_time,
-            time_column=time_column,
-            filter_name=filter_name,
-            verbose=verbose,
-            show_progress=True,
-        )
-        collector = getattr(splitter, "last_collector", ResultCollector())
-        if len(collector) == 0 and output_files:
-            collector.add_ok(input_path_obj, output=output_path_obj)
-        print_summary("分割结果", collector, console=console, verbose=verbose)
-    else:
-        console.print(f"[red]错误: 输入路径不存在: {input_path}[/red]")
-        raise SystemExit(1)
+    print_batch("分割结果", result, console, verbose)
+    return

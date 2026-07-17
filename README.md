@@ -9,9 +9,6 @@ CSV 格式转换、质量检查、绘图、分类、指标评估、产测计算�
 # 安装稳定版本
 pip install ghealth-tools
 
-# 需要图形界面时安装 UI 依赖
-pip install "ghealth-tools[ui]"
-
 # 源码开发安装
 pip install -e ".[dev]"
 ```
@@ -68,9 +65,10 @@ chip 规则列名一致；未匹配列会补 0。当前 `parse --chip` 不能替
 | `evaluate` | `eval` | 批量评估心率或血氧指标 | [evaluate](docs/cmd_evaluate.md) |
 | `offline` | 无 | 调用离线算法、整理结果并评估 | [offline](docs/cmd_offline.md) |
 | `check` | `chk` | 检查范围、帧、居中、Ipd、ACC 和时间戳 | [check](docs/cmd_check.md) |
-| `ui` | 无 | 启动 Streamlit 图形界面 | [ui](docs/cmd_ui.md) |
-
 完整命令索引见 [命令说明](docs/commands.md)。
+
+Python 项目可直接调用稳定的 `health_tools.api`，无需模拟命令行。接口、进度回调和取消
+示例见 [Python API 使用指南](docs/api_usage.md)。
 
 ## 常见工作流
 
@@ -138,6 +136,8 @@ ghealth_tool offline -i data/ -c gh3220 --versions version_a,version_b
 - [命令索引](docs/commands.md)
 - [规则文件格式](docs/rules.md)
 - [架构说明](docs/architecture.md)
+- [Python API 使用指南](docs/api_usage.md)
+- [Python API 架构](docs/api_architecture.md)
 - [变更记录](CHANGELOG.md)
 
 ## 开发
