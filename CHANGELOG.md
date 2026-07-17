@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-18
+
 ### Fixed
 - PI 按光学列语义计算：CH/Rawdata 扣除 ADC 偏置，Ipd 保持 pA；SpO2 静止分析增加最低通道 PI 门槛
 - Polar 局部异常样本从准确度中隔离并单独警告，保留全局分析原结论与关键图；仅全局不可用时停止参考归因
