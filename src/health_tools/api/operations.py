@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
+import yaml
+
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import OperationError, RequestValidationError, RuleLoadError
 from health_tools.api.models import (
@@ -165,8 +167,11 @@ def run_config(
     from health_tools.config import (
         CONFIG_DIR,
         CONFIG_FILE,
+        ConfigRevisionConflict,
         init_config_dir,
         load_config,
+        read_config_document,
+        replace_config_document,
         save_config,
         sync_builtin_rules,
     )
@@ -182,6 +187,16 @@ def run_config(
     ctx.emit(ProgressEvent("config", "config", 0, 1, "处理配置"))
     changed: List[Path] = []
     versions = {}
+
+    if request.action == ConfigAction.REPLACE:
+        if request.value is not None or request.force:
+            raise RequestValidationError("REPLACE 不能与 value 或 force 同时使用")
+        if request.source is None:
+            raise RequestValidationError("REPLACE 需要 source")
+        if not isinstance(request.source, str):
+            raise RequestValidationError("配置 source 必须是字符串")
+    elif request.source is not None or request.expected_revision is not None:
+        raise RequestValidationError("source 和 expected_revision 仅适用于 REPLACE")
 
     if request.action == ConfigAction.INIT:
         init_config_dir()
@@ -242,14 +257,39 @@ def run_config(
         )
         save_offline_config(cfg.tools_path, versions)
         changed.append(CONFIG_FILE)
+    elif request.action == ConfigAction.REPLACE:
+        try:
+            document = yaml.safe_load(request.source)
+        except yaml.YAMLError as exc:
+            raise RequestValidationError(f"配置 YAML 解析失败: {exc}") from exc
+        if not isinstance(document, dict):
+            raise RequestValidationError("配置 YAML 根节点必须是映射")
+        try:
+            replace_config_document(request.source, document, request.expected_revision)
+        except ConfigRevisionConflict as exc:
+            raise RequestValidationError(
+                f"配置 revision 冲突: expected={exc.expected}, current={exc.current}"
+            ) from exc
+        changed.append(CONFIG_FILE)
     else:  # pragma: no cover - Enum 已限制输入
         raise RequestValidationError(f"未知配置操作: {request.action}")
 
     config_snapshot = dict(load_config())
     if not versions:
         versions = config_snapshot.get("offline_versions", {})
+    try:
+        source, revision = read_config_document()
+    except (OSError, UnicodeError) as exc:
+        raise OperationError(f"读取配置文件失败: {exc}") from exc
     ctx.emit(ProgressEvent("config", "config", 1, 1, "完成"))
-    return ConfigResult(request.action, config_snapshot, tuple(changed), versions)
+    return ConfigResult(
+        request.action,
+        config_snapshot,
+        tuple(changed),
+        versions,
+        source=source,
+        revision=revision,
+    )
 
 
 def run_parse(request: ParseRequest, *, context: Optional[ExecutionContext] = None) -> BatchResult:

@@ -20,8 +20,6 @@ from health_tools.api.models import (
     RuleVariantInfo,
 )
 from health_tools.config import DEFAULT_RULES_DIR, load_config
-from health_tools.rules.loader import RuleLoader
-from health_tools.rules.validator import RuleValidator
 from health_tools.utils.atomic_file import atomic_write_text, read_text_revision
 
 _RULE_SUFFIXES = {".yaml", ".yml"}
@@ -60,6 +58,12 @@ def _user_rules_root() -> Path:
     return Path(config.get("rules_dir", str(DEFAULT_RULES_DIR))).expanduser()
 
 
+def _builtin_rules_root() -> Path:
+    from health_tools.rules.loader import RuleLoader
+
+    return RuleLoader.get_builtin_rules_path()
+
+
 def _rule_path(root: Path, rule_type: RuleType, name: str) -> Path:
     directory = (root / rule_type.value).resolve(strict=False)
     candidate = (directory / name).resolve(strict=False)
@@ -88,7 +92,7 @@ def _variant(path: Path, source: RuleSource) -> RuleVariantInfo:
 
 def _build_rule_info(rule_type: RuleType, name: str) -> Optional[RuleInfo]:
     user_path = _rule_path(_user_rules_root(), rule_type, name)
-    builtin_path = _rule_path(RuleLoader.get_builtin_rules_path(), rule_type, name)
+    builtin_path = _rule_path(_builtin_rules_root(), rule_type, name)
     variants = []
     if user_path.is_file():
         variants.append(_variant(user_path, RuleSource.USER))
@@ -111,7 +115,7 @@ def _build_rule_info(rule_type: RuleType, name: str) -> Optional[RuleInfo]:
 def _catalog(rule_types: Iterable[RuleType]) -> Tuple[RuleInfo, ...]:
     result = []
     user_root = _user_rules_root()
-    builtin_root = RuleLoader.get_builtin_rules_path()
+    builtin_root = _builtin_rules_root()
     for rule_type in rule_types:
         names: Dict[str, str] = {}
         for root in (builtin_root, user_root):
@@ -167,6 +171,8 @@ def run_read_rule(request: RuleReadRequest) -> RuleDocumentResult:
 
 
 def _validate_source(rule_type: RuleType, source: str, directory: Path) -> None:
+    from health_tools.rules.validator import RuleValidator
+
     try:
         document = yaml.safe_load(source)
     except yaml.YAMLError as exc:

@@ -7,13 +7,29 @@ from typing import Optional
 
 import yaml
 
+from health_tools.utils.atomic_file import (
+    atomic_write_text,
+    content_revision,
+    current_revision,
+    read_text_revision,
+)
+
 CONFIG_DIR = Path.home() / ".ghealth_tools"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 DEFAULT_RULES_DIR = CONFIG_DIR / "rules"
 RULE_SUBDIRS = ["chip", "parse", "classify", "convert", "evaluate"]
 
 _config_cache: Optional[dict] = None
-_config_lock = threading.Lock()
+_config_lock = threading.RLock()
+
+
+class ConfigRevisionConflict(Exception):
+    """配置文件 revision 与调用方预期不一致。"""
+
+    def __init__(self, expected: Optional[str], current: Optional[str]) -> None:
+        super().__init__(f"expected={expected}, current={current}")
+        self.expected = expected
+        self.current = current
 
 
 def _get_builtin_rules_path() -> Path:
@@ -43,11 +59,33 @@ def load_config() -> dict:
 
 def save_config(config: dict) -> None:
     global _config_cache
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    source = yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
     with _config_lock:
-        _config_cache = config
+        atomic_write_text(CONFIG_FILE, source)
+        _config_cache = dict(config)
+
+
+def read_config_document() -> tuple[str, Optional[str]]:
+    """读取配置 YAML 原文和 revision。"""
+    with _config_lock:
+        if not CONFIG_FILE.exists():
+            return "", None
+        return read_text_revision(CONFIG_FILE)
+
+
+def replace_config_document(source: str, config: dict, expected_revision: Optional[str]) -> str:
+    """校验当前 revision 后替换配置并刷新进程内缓存。"""
+    global _config_cache
+    with _config_lock:
+        current = current_revision(CONFIG_FILE)
+        if current is None:
+            if expected_revision is not None:
+                raise ConfigRevisionConflict(expected_revision, current)
+        elif expected_revision is None or current != expected_revision:
+            raise ConfigRevisionConflict(expected_revision, current)
+        atomic_write_text(CONFIG_FILE, source)
+        _config_cache = dict(config)
+        return content_revision(source.encode("utf-8"))
 
 
 def get_user_rules_dir() -> Optional[Path]:
