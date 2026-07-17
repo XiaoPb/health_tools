@@ -11,6 +11,21 @@ from health_tools.api import (
     OperationCancelled,
     ParseRequest,
     ProgressEvent,
+    ConfigAction,
+    ConfigRequest,
+    ConfigResult,
+    OfflineCatalogRequest,
+    OfflineCatalogResult,
+    OfflineVersionInfo,
+    RuleCatalogResult,
+    RuleDocumentResult,
+    RuleInfo,
+    RuleListRequest,
+    RuleReadRequest,
+    RuleSaveRequest,
+    RuleSource,
+    RuleType,
+    RuleVariantInfo,
     run_info,
 )
 
@@ -76,3 +91,39 @@ def test_run_info_returns_structured_csv_data(tmp_path: Path):
 
     with pytest.raises(TypeError):
         result.summary["rows"] = 3
+
+
+def test_rule_and_offline_catalog_models_are_immutable(tmp_path: Path):
+    variant = RuleVariantInfo(RuleSource.BUILTIN, tmp_path / "sample.yaml", False, "rev")
+    rule = RuleInfo(
+        RuleType.PARSE,
+        "sample.yaml",
+        RuleSource.BUILTIN,
+        variant.path,
+        False,
+        False,
+        (variant,),
+    )
+    catalog = RuleCatalogResult([rule])
+    document = RuleDocumentResult(rule, "version: 1\n", "rev")
+    offline = OfflineCatalogResult([OfflineVersionInfo("gh3036", "basic", "v1", True, False)])
+
+    assert catalog.rules == (rule,)
+    assert document.source == "version: 1\n"
+    assert offline.versions[0].category == "basic"
+    with pytest.raises(Exception):
+        catalog.rules = ()
+
+
+def test_new_request_defaults_and_config_compatibility():
+    assert RuleListRequest().rule_type is None
+    assert RuleReadRequest(RuleType.CHIP, "gh3036.yaml").variant == RuleSource.EFFECTIVE
+    assert RuleSaveRequest(RuleType.CHIP, "new.yaml", "chip: new\n").expected_revision is None
+    assert OfflineCatalogRequest().chip_name is None
+
+    request = ConfigRequest(ConfigAction.SHOW)
+    result = ConfigResult(ConfigAction.SHOW, {"rules_dir": "rules"}, (), {})
+    assert request.source is None
+    assert request.expected_revision is None
+    assert result.source == ""
+    assert result.revision is None

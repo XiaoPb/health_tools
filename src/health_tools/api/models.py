@@ -31,6 +31,21 @@ class ConfigAction(str, Enum):
     SET_OFFLINE_PATH = "set_offline_path"
     SET_OFFLINE_DEFAULT = "set_offline_default"
     SCAN_OFFLINE = "scan_offline"
+    REPLACE = "replace"
+
+
+class RuleType(str, Enum):
+    CHIP = "chip"
+    PARSE = "parse"
+    CLASSIFY = "classify"
+    CONVERT = "convert"
+    EVALUATE = "evaluate"
+
+
+class RuleSource(str, Enum):
+    EFFECTIVE = "effective"
+    USER = "user"
+    BUILTIN = "builtin"
 
 
 @dataclass(frozen=True)
@@ -115,6 +130,8 @@ class ConfigResult:
     config: Mapping[str, Any] = field(default_factory=dict)
     changed_paths: Tuple[Path, ...] = ()
     versions: Mapping[str, Any] = field(default_factory=dict)
+    source: str = ""
+    revision: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "config", _freeze(self.config))
@@ -142,6 +159,64 @@ class OfflineResult:
     def __post_init__(self) -> None:
         object.__setattr__(self, "versions", tuple(self.versions))
         object.__setattr__(self, "reports", tuple(Path(path) for path in self.reports))
+
+
+@dataclass(frozen=True)
+class RuleVariantInfo:
+    source: RuleSource
+    path: Path
+    writable: bool
+    revision: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", Path(self.path))
+
+
+@dataclass(frozen=True)
+class RuleInfo:
+    rule_type: RuleType
+    name: str
+    source: RuleSource
+    path: Path
+    writable: bool
+    overrides_builtin: bool
+    variants: Tuple[RuleVariantInfo, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", Path(self.path))
+        object.__setattr__(self, "variants", tuple(self.variants))
+
+
+@dataclass(frozen=True)
+class RuleCatalogResult:
+    rules: Tuple[RuleInfo, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rules", tuple(self.rules))
+
+
+@dataclass(frozen=True)
+class RuleDocumentResult:
+    rule: RuleInfo
+    source: str
+    revision: str
+
+
+@dataclass(frozen=True)
+class OfflineVersionInfo:
+    chip_name: str
+    category: Optional[str]
+    version: str
+    is_default: bool
+    exe_available: bool
+
+
+@dataclass(frozen=True)
+class OfflineCatalogResult:
+    versions: Tuple[OfflineVersionInfo, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "versions", tuple(self.versions))
 
 
 @dataclass(frozen=True)
@@ -271,6 +346,33 @@ class ConfigRequest:
     action: ConfigAction
     value: Optional[str] = None
     force: bool = False
+    source: Optional[str] = None
+    expected_revision: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RuleListRequest:
+    rule_type: Optional[RuleType] = None
+
+
+@dataclass(frozen=True)
+class RuleReadRequest:
+    rule_type: RuleType
+    name: str
+    variant: RuleSource = RuleSource.EFFECTIVE
+
+
+@dataclass(frozen=True)
+class RuleSaveRequest:
+    rule_type: RuleType
+    name: str
+    source: str
+    expected_revision: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class OfflineCatalogRequest:
+    chip_name: Optional[str] = None
 
 
 @dataclass(frozen=True)
