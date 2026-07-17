@@ -28,6 +28,7 @@ class AnalysisRecord:
     conclusion: str = "证据不足"
     confidence: float = 0.0
     notes: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
     figure: Optional[str] = None
     plot_data: Dict[str, Any] = field(default_factory=dict, repr=False)
 

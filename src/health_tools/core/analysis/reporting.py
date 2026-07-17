@@ -103,6 +103,7 @@ def _plain(record: AnalysisRecord) -> Dict[str, Any]:
         "conclusion": record.conclusion,
         "confidence": record.confidence,
         "notes": record.notes,
+        "warnings": record.warnings,
         "figure": record.figure,
     }
 
@@ -148,6 +149,7 @@ def write_structured(records: Iterable[AnalysisRecord], output_dir: Path) -> Lis
                 "confidence",
                 "cause",
                 "evidence",
+                "warnings",
                 "actions",
                 "mae",
                 "max_error",
@@ -169,6 +171,7 @@ def write_structured(records: Iterable[AnalysisRecord], output_dir: Path) -> Lis
                     "confidence": round(record.confidence, 3),
                     "cause": cause.get("title", ""),
                     "evidence": record.notes[0] if record.notes else "",
+                    "warnings": "；".join(record.warnings),
                     "actions": "；".join(cause.get("actions", [])),
                     "mae": record.metrics.get("mae", ""),
                     "max_error": record.metrics.get("max_error", ""),
@@ -258,6 +261,8 @@ def write_markdown(records: Iterable[AnalysisRecord], output: Path) -> Path:
             lines.append(f"- 可能原因：{record.cause.get('title', '')}")
         if record.notes:
             lines.append(f"- 证据：{record.notes[0]}")
+        if record.warnings:
+            lines.append(f"- 警告：{'；'.join(record.warnings)}")
         actions = (record.cause or {}).get("actions", [])
         if actions:
             lines.append(f"- 原始数据措施：{'；'.join(actions)}")
@@ -351,6 +356,26 @@ def _populate_content(slide, title_text: str, body_text: str, figure: str = "") 
             _add_picture(slide, content, figure)
         else:
             content._element.getparent().remove(content._element)
+
+
+def _populate_warning(slide, record: AnalysisRecord) -> None:
+    from pptx.enum.shapes import PP_PLACEHOLDER
+
+    title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
+    body = _placeholder(slide, PP_PLACEHOLDER.BODY)
+    content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
+    if title:
+        _set_text(title, "Polar 人工复审警告")
+    if body:
+        _set_text(
+            body,
+            f"文件：{record.file}\n\n"
+            "Polar 可能仅在局部异常。\n\n"
+            "原分析结论与关键图表保留。\n\n"
+            "警告不作为算法或原始数据错误归因。",
+        )
+    if content:
+        _set_text(content, "\n\n".join(record.warnings))
 
 
 def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
@@ -544,6 +569,7 @@ def write_ppt(records: Iterable[AnalysisRecord], output: Path) -> Path:
         for record in records
         if record.abnormal
         or record.focused
+        or bool(record.warnings)
         or (record.conclusion == "证据不足" and bool(record.figure))
     ]
     for record in detail_records:
@@ -558,6 +584,9 @@ def write_ppt(records: Iterable[AnalysisRecord], output: Path) -> Path:
             f"证据：{ppt_evidence}\n原始数据措施：{action}"
         )
         _populate_content(slide, record.file, body_text, record.figure or "")
+        if record.warnings:
+            warning_slide = _duplicate_slide(prs, content)
+            _populate_warning(warning_slide, record)
     conclusion_slide = _duplicate_slide(prs, content)
     _populate_content(
         conclusion_slide,

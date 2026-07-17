@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import health_tools.core.analysis.raw as raw_analysis
 from health_tools.api import AnalyzeRequest, RequestValidationError, run_analyze
 from health_tools.api.context import ExecutionContext
 from health_tools.api.models import BatchResult, ItemResult, ItemStatus, OfflineResult
@@ -18,9 +19,10 @@ from health_tools.core.analysis.conditions import matches
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord
 from health_tools.core.analysis.psd import analyze_psd_directory
+from health_tools.core.analysis.reference import analyze_reference
 from health_tools.core.analysis.raw import analyze_raw_file
 from health_tools.core.analysis.reporting import write_ppt
-from health_tools.models.rules import AnalysisRule
+from health_tools.models.rules import AnalysisRule, ChipRule
 from health_tools.rules.loader import RuleLoader
 
 
@@ -285,6 +287,76 @@ def test_spo2_rejects_excessive_motion_even_when_accuracy_is_normal(tmp_path: Pa
     assert decision["cause"]["id"] == "motion_excessive"
     assert decision["conclusion"] == "原始数据问题"
     assert "静止" in decision["cause"]["title"]
+
+
+@pytest.mark.parametrize(
+    ("column", "expected_min", "expected_max"),
+    [("CH0", 5.0, 10.0), ("Rawdata0", 5.0, 10.0), ("Ipd0", 0.0, 1.0)],
+)
+def test_pi_applies_adc_offset_only_to_rawdata_columns(
+    monkeypatch, tmp_path: Path, column: str, expected_min: float, expected_max: float
+):
+    count = 250
+    time = np.arange(count) / 25
+    frame = pd.DataFrame(
+        {
+            "time": time,
+            column: 1100 + np.sin(2 * np.pi * time) * 10,
+            "REF": np.full(count, 80.0),
+            "PRED": np.full(count, 80.0),
+        }
+    )
+    chip_rule = ChipRule(
+        chip="test",
+        csv={},
+        columns=list(frame.columns),
+        chip_info={"adc_offset": 1000},
+    )
+    monkeypatch.setattr(raw_analysis, "_read", lambda path, chip: (frame, chip_rule))
+    rule = AnalysisRule(
+        columns={
+            "reference": "REF",
+            "prediction": "PRED",
+            "timestamp": "time",
+            "ppg_patterns": [f"^{column}$"],
+            "acc": [],
+        },
+        sampling={"sample_rate": 25},
+        thresholds={"ref_min": 30, "ref_max": 220},
+    )
+
+    result, _, _ = analyze_raw_file(tmp_path / "sample.csv", rule, "hr", chip_name="test")
+
+    assert expected_min < result["features"]["pi"] < expected_max
+    expected_unit = "pA" if column.startswith("Ipd") else "adc_lsb"
+    assert result["features"]["pi_units"][column] == expected_unit
+
+
+def test_spo2_low_pi_requires_recollection(tmp_path: Path):
+    source = tmp_path / "spo2.csv"
+    count = 250
+    time = np.arange(count) / 25
+    pd.DataFrame(
+        {
+            "TimeStamp": time,
+            "FRAME_ID": np.arange(count),
+            "ACCX": np.zeros(count),
+            "ACCY": np.zeros(count),
+            "ACCZ": np.full(count, 512),
+            "Ipd0": 1000 + np.sin(2 * np.pi * time),
+            "Ipd1": 900 + np.sin(2 * np.pi * time) * 0.8,
+            "REF_RESULT5": np.full(count, 98.0),
+            "ALGO_RESULT5": np.full(count, 98.0),
+        }
+    ).to_csv(source, index=False)
+    rule = RuleLoader.load_analysis_rule("analysis_spo2.yaml")
+
+    result, _, _ = analyze_raw_file(source, rule, "spo2")
+    decision = diagnose({**result["features"], **result["metrics"]}, rule)
+
+    assert result["features"]["pi_low"] is True
+    assert decision["cause"]["id"] == "low_perfusion"
+    assert decision["conclusion"] == "原始数据问题"
 
 
 def test_dynamic_scene_does_not_use_pi(tmp_path: Path):
@@ -569,6 +641,69 @@ def test_existing_psd_detects_frequency_lock(tmp_path: Path):
     assert details["sample.csv"]["psd_locked"] is True
 
 
+def test_psd_polar_out_of_range_requires_manual_review(tmp_path: Path):
+    source = tmp_path / "result"
+    _write_locked_psd(source)
+    vshb = source / "sample_result.vshb"
+    frame = pd.read_csv(vshb)
+    frame["polar"] = 300
+    frame["algo_hr"] = 300
+    frame["fw_hr"] = 300
+    frame.to_csv(vshb, index=False)
+    rule = RuleLoader.load_analysis_rule("analysis_hr.yaml")
+
+    details = analyze_psd_directory(source, rule)
+    decision = diagnose(details["sample.csv"], rule)
+
+    assert details["sample.csv"]["polar_review_required"] is True
+    assert any("范围" in issue for issue in details["sample.csv"]["polar_issues"])
+    assert decision["cause"] is None
+    assert decision["conclusion"] == "证据不足"
+    assert "人工复审" in decision["evidence"]
+
+
+def test_reference_missing_and_stale_samples_reduce_global_valid_ratio():
+    values = np.array([100.0] * 130 + [np.nan] * 10 + [101.0] * 60)
+    features, mask = analyze_reference(
+        values,
+        {
+            "ref_min": 30,
+            "ref_max": 220,
+            "ref_valid_ratio": 0.8,
+            "ref_stale_seconds": 120,
+        },
+        sample_rate=1,
+    )
+
+    assert features["polar_review_required"] is True
+    assert features["reference_valid"] is False
+    assert features["reference_valid_ratio"] < 0.8
+    assert not mask[:130].any()
+
+
+def test_local_polar_issue_warns_without_replacing_global_psd_diagnosis(tmp_path: Path):
+    source = tmp_path / "result"
+    _write_locked_psd(source)
+    vshb = source / "sample_result.vshb"
+    frame = pd.read_csv(vshb)
+    frame.loc[5, "polar"] = 300
+    frame.to_csv(vshb, index=False)
+
+    result = run_analyze(
+        AnalyzeRequest(source, tmp_path / "out", report="markdown", allow_offline=False)
+    )
+
+    summary = pd.read_json(result.summary_path)
+    details = pd.read_csv(tmp_path / "out" / "file_diagnosis.csv")
+    report = result.reports[0].read_text(encoding="utf-8")
+    assert result.conclusion_counts["算法性能极限"] == 1
+    assert summary.iloc[0]["metrics"]["comparisons"]["offline"]["samples"] == 19
+    assert "Polar 警告" in details.iloc[0]["warnings"]
+    assert "Polar 警告" in report
+    assert "跟随运动主频" in report
+    assert "![证据图]" in report
+
+
 def test_existing_psd_includes_comp_comparison_when_nonzero(tmp_path: Path):
     source = tmp_path / "result"
     _write_locked_psd(source)
@@ -709,3 +844,35 @@ def test_ppt_includes_psd_page_for_evidence_insufficient(tmp_path: Path):
         for slide in deck.slides
         for shape in slide.shapes
     )
+
+
+def test_ppt_places_polar_warning_on_separate_review_page(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from PIL import Image
+    from pptx import Presentation
+
+    figure = tmp_path / "sample.png"
+    Image.new("RGB", (320, 180), "white").save(figure)
+    output = write_ppt(
+        [
+            AnalysisRecord(
+                file="sample.csv",
+                source="sample_result.vshb",
+                analysis_type="hr",
+                conclusion="算法性能极限",
+                notes=["算法出值可能跟随运动主频"],
+                warnings=["Polar 警告：参考值局部跳变，位置(前10)=5，8，13；需人工复审"],
+                figure=str(figure),
+            )
+        ],
+        tmp_path / "report.pptx",
+    )
+
+    deck = Presentation(str(output))
+    slide_text = [
+        "\n".join(getattr(shape, "text", "") for shape in slide.shapes) for slide in deck.slides
+    ]
+    warning_pages = [text for text in slide_text if "Polar 人工复审警告" in text]
+    assert len(warning_pages) == 1
+    assert "位置(前10)=5，8，13" in warning_pages[0]
+    assert "不作为算法或原始数据错误归因" in warning_pages[0]

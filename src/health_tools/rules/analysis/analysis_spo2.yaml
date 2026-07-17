@@ -5,7 +5,7 @@ columns:
   reference: REF_RESULT5
   prediction: ALGO_RESULT5
   timestamp: TimeStamp
-  ppg_patterns: ["^Ipd\\d+$", "^CH\\d+$"]
+  ppg_patterns: ["^Ipd\\d+$", "^CH\\d+$", "^Rawdata\\d+$"]
   acc: [ACCX, ACCY, ACCZ]
 detectors: [integrity, raw_signal, reference, accuracy, motion, channel_consistency]
 sampling:
@@ -16,12 +16,15 @@ thresholds:
   flat_ratio: 0.98
   saturation_ratio: 0.01
   baseline_drift_ratio: 0.50
+  pi_low: 0.5
   motion_rms: 0.10
   error: 3
   error_min_seconds: 5
   ref_min: 70
   ref_max: 100
+  ref_valid_ratio: 0.80
   ref_stale_seconds: 120
+  ref_jump_per_second: 5
   jump_per_second: 5
   channel_correlation: 0.30
 offline:
@@ -68,6 +71,15 @@ causes:
     priority: 90
     when: {feature: signal_saturated, op: eq, value: true}
     actions: [调整佩戴位置和接触压力，重新采集未饱和的双波长数据]
+  - id: low_perfusion
+    title: 静止 SpO2 光学灌注不足
+    origin: raw
+    priority: 89
+    when:
+      all:
+        - {feature: scene, op: eq, value: static}
+        - {feature: pi_low, op: eq, value: true}
+    actions: [保持末梢温暖并稳定佩戴，待 PI 恢复后重新采集]
   - id: signal_flat
     title: 光学通道平线或未有效接触
     origin: raw

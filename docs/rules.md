@@ -360,7 +360,11 @@ causes:
 
 `origin` 只能是 `raw`、`reference` 或 `algorithm`。算法原因不能声明 `actions`；条件只支持 `all`、`any`、`not` 和 `eq/ne/lt/le/gt/ge/in/not_in/between/exists`，不会执行任意表达式。`type=other` 必须通过 `--rule` 指定分析规则。
 
-`detectors` 决定允许使用的证据类型。`hr_psd` 只适用于心率；SpO2 或未声明该检测器的自定义功能不会执行心率锁频、牵引和谐波判断。SpO2 内置规则把 `motion_rms` 超限作为静止测试条件不满足，优先于准确度异常归因。
+`detectors` 决定允许使用的证据类型。`hr_psd` 只适用于心率；SpO2 或未声明该检测器的自定义功能不会执行心率锁频、牵引和谐波判断。SpO2 内置规则把 `motion_rms` 超限作为静止测试条件不满足，优先于准确度异常归因，并以 `pi_low` 检查静止双波长数据的最低通道 PI。
+
+光学列的数据语义固定如下：`CH*` 默认视为 Rawdata，和 `Rawdata*` 一样在计算 PI 前减去 chip 规则的 `chip_info.adc_offset`；`Ipd*` 单位是 pA，不能再减 ADC 偏置。内置规则会识别这三类列，结构化结果通过 `pi_by_channel` 和 `pi_units` 保留逐通道值与单位。
+
+心率 Polar 参考检查使用 `ref_min/ref_max`、`ref_valid_ratio`、`ref_stale_seconds` 和 `ref_jump_per_second`。局部越界或跳变样本从准确度中隔离，仅产生人工复审警告；它不会覆盖原始/PSD 原因、结论或证据图。只有有效比例低于 `ref_valid_ratio` 或全局无有效值时，才停止参考归因。
 
 `thresholds` 控制诊断敏感度。完整默认值、调高/调低的影响和判断流程见 [analyze 命令](cmd_analyze.md#配置判断阈值)。修改后应使用正常与异常小样本验证，不能把阈值变化解释为算法优化。
 

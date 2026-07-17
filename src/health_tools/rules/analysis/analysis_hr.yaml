@@ -5,7 +5,7 @@ columns:
   reference: REF_RESULT0
   prediction: ALGO_RESULT0
   timestamp: TimeStamp
-  ppg_patterns: ["^Ipd\\d+$", "^CH\\d+$"]
+  ppg_patterns: ["^Ipd\\d+$", "^CH\\d+$", "^Rawdata\\d+$"]
   acc: [ACCX, ACCY, ACCZ]
 detectors: [integrity, raw_signal, reference, accuracy, motion, hr_psd]
 sampling:
@@ -22,7 +22,9 @@ thresholds:
   error_min_seconds: 5
   ref_min: 30
   ref_max: 220
+  ref_valid_ratio: 0.80
   ref_stale_seconds: 120
+  ref_jump_per_second: 20
   jump_per_second: 20
   psd_clarity: 3
   psd_lock_hz: 0.20

@@ -215,6 +215,13 @@ def _refresh_diagnosis(record: AnalysisRecord, rule) -> None:
     record.notes = [decision["evidence"], *record.notes[1:]]
 
 
+def _polar_warnings(features: Dict[str, object]) -> List[str]:
+    issues = features.get("polar_issues")
+    if not features.get("polar_review_required") or not isinstance(issues, list):
+        return []
+    return [f"Polar 警告：{issue}；需人工复审，不据此进行错误归因" for issue in issues]
+
+
 def _acc_detail_label(column: str) -> str:
     replacements = {
         "ACC全零次数": "全零异常次数",
@@ -365,6 +372,7 @@ def _raw_records(
                 conclusion=decision["conclusion"],
                 confidence=decision["confidence"],
                 notes=[decision["evidence"]],
+                warnings=_polar_warnings(features),
                 plot_data=_plot_data(
                     frame,
                     features,
@@ -389,7 +397,12 @@ def _raw_records(
 
 def _merge_psd(record: AnalysisRecord, psd: Dict[str, object], rule) -> None:
     record.psd = psd
+    raw_reference_valid = record.features.get("reference_valid")
     record.features.update(psd)
+    if raw_reference_valid is False:
+        record.features["reference_valid"] = False
+    merged_warnings = [*record.warnings, *_polar_warnings(psd)]
+    record.warnings = list(dict.fromkeys(merged_warnings))
     comparisons = psd.get("comparisons")
     if isinstance(comparisons, dict):
         record.metrics["comparisons"] = comparisons
@@ -511,7 +524,7 @@ def _generate_raw_plots(
     for index, record in enumerate(records):
         if record.figure or record.psd or not Path(record.source).is_file():
             continue
-        if record.conclusion == "未发现异常" and not record.focused:
+        if record.conclusion == "未发现异常" and not record.focused and not record.warnings:
             continue
         if record.conclusion == "证据不足" and request.analysis_type == "hr":
             continue
@@ -614,6 +627,7 @@ def _offline_records(
                 conclusion=decision["conclusion"],
                 confidence=decision["confidence"],
                 notes=[decision["evidence"]],
+                warnings=_polar_warnings(features),
             )
         )
         comparisons = psd.get("comparisons")

@@ -46,6 +46,14 @@ def _evidence(features: Dict[str, Any], cause: Optional[Dict[str, Any]]) -> str:
 
 
 def diagnose(features: Dict[str, Any], rule: AnalysisRule) -> Dict[str, Any]:
+    if features.get("polar_review_required") and not features.get("reference_valid"):
+        return {
+            "cause": None,
+            "conclusion": "证据不足",
+            "confidence": 0.2,
+            "evidence": "Polar 全局不可用，需人工复审；不据此进行错误归因",
+            "actions": [],
+        }
     causes = sorted(rule.causes, key=lambda item: int(item.get("priority", 0)), reverse=True)
     matched = None
     for cause in causes:

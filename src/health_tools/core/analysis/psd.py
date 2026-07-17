@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from health_tools.core.vshb import read_vshb_result
+from health_tools.core.analysis.reference import analyze_reference
 from health_tools.models.rules import AnalysisRule
 
 
@@ -48,8 +49,10 @@ def _find_psd(base: Path, suffixes: List[str]) -> Optional[Path]:
     return None
 
 
-def _comparison_metrics(reference: np.ndarray, prediction: np.ndarray) -> Dict[str, Any]:
-    valid = np.isfinite(reference) & np.isfinite(prediction) & (reference > 0)
+def _comparison_metrics(
+    reference: np.ndarray, prediction: np.ndarray, reference_mask: np.ndarray
+) -> Dict[str, Any]:
+    valid = reference_mask & np.isfinite(prediction)
     errors = np.abs(reference[valid] - prediction[valid])
     if not len(errors):
         return {}
@@ -63,7 +66,9 @@ def _comparison_metrics(reference: np.ndarray, prediction: np.ndarray) -> Dict[s
     }
 
 
-def _accuracy_features(overlay, error_threshold: float) -> Dict[str, Any]:
+def _accuracy_features(
+    overlay, error_threshold: float, thresholds: Dict[str, Any]
+) -> Dict[str, Any]:
     if overlay.empty:
         return {
             "reference_valid": False,
@@ -76,22 +81,24 @@ def _accuracy_features(overlay, error_threshold: float) -> Dict[str, Any]:
             "within_15": 0.0,
             "samples": 0,
             "comparisons": {},
+            "polar_review_required": True,
+            "polar_issues": ["Polar 数据缺失，需人工复审"],
         }
     ref = np.asarray(overlay["ref"], dtype=float)
     offline = np.asarray(overlay["offline"], dtype=float)
     online = np.asarray(overlay["online"], dtype=float)
     comp = np.asarray(overlay["comp"], dtype=float)
-    valid_ref = np.isfinite(ref) & (ref > 0)
+    reference, valid_ref = analyze_reference(ref, thresholds, sample_rate=1.0)
     valid_offline = valid_ref & np.isfinite(offline)
     errors = np.abs(ref[valid_offline] - offline[valid_offline])
     comparisons = {
-        "offline": _comparison_metrics(ref, offline),
-        "online": _comparison_metrics(ref, online),
+        "offline": _comparison_metrics(ref, offline, valid_ref),
+        "online": _comparison_metrics(ref, online, valid_ref),
     }
     if np.any(np.isfinite(comp) & (comp > 0)):
-        comparisons["comp"] = _comparison_metrics(ref, comp)
+        comparisons["comp"] = _comparison_metrics(ref, comp, valid_ref)
     return {
-        "reference_valid": bool(np.any(valid_ref)),
+        **reference,
         "algorithm_abnormal": bool(len(errors) and np.any(errors > error_threshold)),
         "mae": float(np.mean(errors)) if len(errors) else 0.0,
         "max_error": float(np.max(errors)) if len(errors) else 0.0,
@@ -123,7 +130,9 @@ def analyze_psd_directory(result_dir: Path, rule: AnalysisRule) -> Dict[str, Dic
         logical = (vshb.parent / f"{base_name}.csv").relative_to(result_dir).as_posix()
         base = vshb.parent / base_name
         overlay = read_vshb_result(vshb, positional_online_col=30)
-        accuracy = _accuracy_features(overlay, float(rule.thresholds.get("error", 10)))
+        accuracy = _accuracy_features(
+            overlay, float(rule.thresholds.get("error", 10)), rule.thresholds
+        )
         ppg_path = _find_psd(base, ["0.prepsd", ".prepsd"])
         acc_path = _find_psd(base, [".accrmspsd", ".accxpsd", ".accypsd", ".acczpsd"])
         if not ppg_path or not acc_path:

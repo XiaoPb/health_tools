@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from health_tools.core.ppg_analysis import compute_pi, prepare_signal, resolve_acc_columns
+from health_tools.core.analysis.reference import analyze_reference
 from health_tools.models.rules import AnalysisRule, ChipRule
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.csv_handler import CSVHandler
@@ -78,9 +79,15 @@ def _run_ratio(values: pd.Series, predicate) -> float:
 
 
 def _error_segments(
-    ref: pd.Series, pred: pd.Series, sample_rate: float, threshold: float
+    ref: pd.Series,
+    pred: pd.Series,
+    sample_rate: float,
+    threshold: float,
+    reference_mask: Optional[np.ndarray] = None,
 ) -> Tuple[List[dict], Dict[str, float]]:
     valid = ref.notna() & pred.notna() & (ref > 0)
+    if reference_mask is not None:
+        valid = valid & pd.Series(reference_mask, index=ref.index)
     error = (ref - pred).abs().where(valid)
     values = error.dropna().to_numpy(dtype=float)
     if len(values) == 0:
@@ -150,8 +157,22 @@ def analyze_raw_file(
     if not all(column in frame.columns for column in acc_columns):
         acc_columns = resolve_acc_columns(frame, chip_rule.acc_columns if chip_rule else None)
     threshold = float(rule.thresholds.get("error", 10 if analysis_type == "hr" else 3))
+    reference_features: Dict[str, Any] = {
+        "reference_valid": False,
+        "reference_issues": [],
+        "polar_review_required": False,
+        "polar_issues": [],
+    }
+    reference_mask: Optional[np.ndarray] = None
+    if ref is not None:
+        reference_features, reference_mask = analyze_reference(
+            ref.to_numpy(), rule.thresholds, sample_rate=rate
+        )
+        if analysis_type != "hr":
+            reference_features["polar_review_required"] = False
+            reference_features["polar_issues"] = []
     segments, metrics = (
-        _error_segments(ref, pred, rate or 1.0, threshold)
+        _error_segments(ref, pred, rate or 1.0, threshold, reference_mask)
         if ref is not None and pred is not None
         else ([], {})
     )
@@ -173,8 +194,10 @@ def analyze_raw_file(
     signal_saturated = False
     signal_flat = False
     baseline_drift = False
-    pi_values: List[float] = []
+    pi_by_channel: Dict[str, float] = {}
+    pi_units: Dict[str, str] = {}
     full_scale = float((chip_rule.chip_info if chip_rule else {}).get("adc_full_scale", 0) or 0)
+    adc_offset = float((chip_rule.chip_info if chip_rule else {}).get("adc_offset", 0) or 0)
     for column in ppg_columns:
         values = _numeric(frame, column)
         if values is None:
@@ -195,10 +218,13 @@ def analyze_raw_file(
             ) / span > float(rule.thresholds.get("baseline_drift_ratio", 0.5))
             if scene_override != "dynamic":
                 try:
-                    ac = prepare_signal(numeric)
-                    pi = compute_pi(numeric, ac - np.mean(ac), rate or 25.0).dropna()
+                    is_ipd = column.lower().startswith("ipd")
+                    pi_input = numeric if is_ipd else numeric - adc_offset
+                    pi_units[column] = "pA" if is_ipd else "adc_lsb"
+                    ac = prepare_signal(pi_input)
+                    pi = compute_pi(pi_input, ac - np.mean(ac), rate or 25.0).dropna()
                     if not pi.empty:
-                        pi_values.append(float(pi.median()))
+                        pi_by_channel[column] = float(pi.median())
                 except Exception:
                     pass
     motion = 0.0
@@ -217,20 +243,13 @@ def analyze_raw_file(
         scene == "dynamic" or motion >= float(rule.thresholds.get("motion_rms", 0.1))
     )
     if scene == "dynamic":
-        pi_values = []
-    reference_valid = bool(ref is not None and ref.notna().sum() > 0)
-    if reference_valid:
-        reference_valid = bool(
-            (
-                (ref.dropna() >= float(rule.thresholds.get("ref_min", 0)))
-                & (ref.dropna() <= float(rule.thresholds.get("ref_max", 1000)))
-            ).mean()
-            >= 0.8
-        )
-    if reference_valid and ref is not None and rate:
-        groups = ref.ne(ref.shift()).cumsum()
-        longest = int(ref.groupby(groups).size().max()) if len(ref) else 0
-        reference_valid = longest / rate < float(rule.thresholds.get("ref_stale_seconds", 120))
+        pi_by_channel = {}
+    pi_values = list(pi_by_channel.values())
+    pi_value = (
+        min(pi_values)
+        if analysis_type == "spo2" and pi_values
+        else (float(np.median(pi_values)) if pi_values else None)
+    )
     output_jump = False
     if pred is not None and rate:
         output_jump = bool(
@@ -254,14 +273,17 @@ def analyze_raw_file(
         "signal_saturated": signal_saturated,
         "signal_flat": signal_flat,
         "baseline_drift": baseline_drift,
-        "pi": float(np.median(pi_values)) if pi_values else None,
+        "pi": pi_value,
+        "pi_min": min(pi_values) if pi_values else None,
+        "pi_by_channel": pi_by_channel,
+        "pi_units": pi_units,
         "pi_low": bool(
-            pi_values and float(np.median(pi_values)) < float(rule.thresholds.get("pi_low", 0.5))
+            pi_value is not None and pi_value < float(rule.thresholds.get("pi_low", 0.5))
         ),
         "motion_rms": motion,
         "motion_excessive": motion_excessive,
         "scene": scene,
-        "reference_valid": reference_valid,
+        **reference_features,
         "output_jump": output_jump,
         "algorithm_abnormal": algorithm_abnormal,
         "raw_valid": bool(
