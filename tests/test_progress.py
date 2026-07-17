@@ -284,6 +284,226 @@ def test_plot_rejects_unknown_type(tmp_path: Path):
     assert "不支持的图表类型" in result.output
 
 
+def test_plot_ac_supports_semicolon_channel_groups(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    input_file = tmp_path / "sample.csv"
+    output_dir = tmp_path / "output"
+    pd.DataFrame(
+        {
+            "ACCX": [1, 2],
+            "ACCY": [2, 3],
+            "ACCZ": [3, 4],
+            "CH0": [10, 11],
+            "CH1": [20, 21],
+            "CH2": [30, 31],
+        }
+    ).to_csv(input_file, index=False)
+    calls = []
+
+    class FakePlotter:
+        def __init__(self, **kwargs):
+            self.fmt = kwargs["fmt"]
+
+        def plot_ac(self, df, output_file, channels, acc_columns):
+            calls.append((output_file.name, channels, acc_columns))
+
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_dir),
+            "--type",
+            "ac",
+            "--channels",
+            "CH0,CH2;CH1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [
+        ("sample_ac_CH0-CH2.png", ["CH0", "CH2"], ["ACCX", "ACCY", "ACCZ"]),
+        ("sample_ac_CH1.png", ["CH1"], ["ACCX", "ACCY", "ACCZ"]),
+    ]
+
+
+def test_plot_ac_rejects_channel_group_over_four(tmp_path: Path):
+    input_file = tmp_path / "sample.csv"
+    input_file.write_text("CH0\n1\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(tmp_path / "output"),
+            "--type",
+            "ac",
+            "--channels",
+            "CH0,CH1,CH2,CH3,CH4",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "每组最多支持 4 个通道" in result.output
+    assert "CH0,CH1,CH2,CH3,CH4" in result.output
+
+
+def test_plot_ac_auto_selects_first_four_nonzero_chip_channels(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    from health_tools.models.rules import ChipRule
+
+    input_file = tmp_path / "sample.csv"
+    output_dir = tmp_path / "output"
+    data = {"ACCX": [1, 2], "ACCY": [2, 3], "ACCZ": [3, 4]}
+    data.update({f"CH{index}": [index + 1, index + 2] for index in range(5)})
+    pd.DataFrame(data).to_csv(input_file, index=False)
+    calls = []
+
+    class FakePlotter:
+        def __init__(self, **kwargs):
+            self.fmt = kwargs["fmt"]
+
+        def plot_ac(self, df, output_file, channels, acc_columns):
+            calls.append((output_file.name, channels))
+
+    rule = ChipRule(chip="gh3220", csv={}, columns=[])
+    monkeypatch.setattr("health_tools.rules.loader.RuleLoader.load_chip_rule", lambda _name: rule)
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_dir),
+            "--type",
+            "ac",
+            "--chip",
+            "gh3220",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [("sample_ac.png", ["CH0", "CH1", "CH2", "CH3"])]
+    assert "未绘制通道: CH4" in result.output
+
+
+def test_plot_fft_creates_one_output_per_channel(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    input_file = tmp_path / "sample.csv"
+    output_dir = tmp_path / "output"
+    pd.DataFrame({"CH0": [1, 2], "CH2": [3, 4]}).to_csv(input_file, index=False)
+    calls = []
+
+    class FakePlotter:
+        def __init__(self, **kwargs):
+            self.fmt = kwargs["fmt"]
+
+        def plot_fft(self, df, output_file, channel):
+            calls.append((output_file.name, channel))
+
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_dir),
+            "--type",
+            "fft",
+            "--channels",
+            "CH0,CH2",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [("sample_fft_CH0.png", "CH0"), ("sample_fft_CH2.png", "CH2")]
+
+
+def test_plot_fft_auto_selection_is_not_limited_to_four_channels(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    from health_tools.models.rules import ChipRule
+
+    input_file = tmp_path / "sample.csv"
+    output_dir = tmp_path / "output"
+    pd.DataFrame({f"CH{index}": [index + 1, index + 2] for index in range(5)}).to_csv(
+        input_file, index=False
+    )
+    calls = []
+
+    class FakePlotter:
+        def __init__(self, **kwargs):
+            self.fmt = kwargs["fmt"]
+
+        def plot_fft(self, df, output_file, channel):
+            calls.append(channel)
+
+    rule = ChipRule(chip="gh3220", csv={}, columns=[])
+    monkeypatch.setattr("health_tools.rules.loader.RuleLoader.load_chip_rule", lambda _name: rule)
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(output_dir),
+            "--type",
+            "fft",
+            "--chip",
+            "gh3220",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == ["CH0", "CH1", "CH2", "CH3", "CH4"]
+
+
+def test_plot_analysis_rejects_bandpass_at_nyquist(tmp_path: Path):
+    input_file = tmp_path / "sample.csv"
+    input_file.write_text("CH0\n1\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_file),
+            "-o",
+            str(tmp_path / "output"),
+            "--type",
+            "fft",
+            "--channels",
+            "CH0",
+            "--sample-rate",
+            "10",
+            "--bandpass",
+            "0.5-5.0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "必须小于奈奎斯特频率" in result.output
+
+
 def test_convert_merge_uses_progress_track(monkeypatch, tmp_path: Path):
     import pandas as pd
 

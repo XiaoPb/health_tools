@@ -7,6 +7,13 @@ import numpy as np
 import pandas as pd
 from scipy import signal
 
+from health_tools.core.ppg_analysis import (
+    SignalAnalysisError,
+    bandpass_signal,
+    compute_pi,
+    compute_single_sided_fft,
+    prepare_signal,
+)
 from health_tools.core.stft import STFTPlotter
 
 MAX_PLOT_POINTS = 50000
@@ -126,6 +133,105 @@ class DataPlotter:
             axes[-1].set_xlabel("Frequency (Hz)")
             plt.tight_layout()
             plt.savefig(output_file, dpi=self.dpi)
+        finally:
+            plt.close(fig)
+
+    def plot_ac(
+        self,
+        df: pd.DataFrame,
+        output_file: Path,
+        channels: List[str],
+        acc_columns: List[str],
+    ) -> None:
+        """绘制原始 ACC、滤波后 PPG 和 PI。"""
+        if not channels:
+            raise SignalAnalysisError("AC 绘图至少需要 1 个 PPG 通道")
+        if len(channels) > 4:
+            raise SignalAnalysisError("每张 AC 图最多支持 4 个 PPG 通道")
+        missing = [column for column in channels + acc_columns if column not in df.columns]
+        if missing:
+            raise SignalAnalysisError(f"输入缺少绘图列: {', '.join(missing)}")
+        if len(acc_columns) != 3:
+            raise SignalAnalysisError("AC 绘图需要完整的 ACC X/Y/Z 三轴")
+
+        time = np.arange(len(df), dtype=float) / self.sample_rate
+        fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+        try:
+            for column in acc_columns:
+                acc = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+                axes[0].plot(time, acc, linewidth=0.6, label=column)
+            axes[0].set_ylabel("ACC")
+            axes[0].legend(loc="upper right")
+            axes[0].grid(True, alpha=0.3)
+
+            for index, channel in enumerate(channels):
+                raw = prepare_signal(df[channel])
+                filtered = bandpass_signal(
+                    raw,
+                    self.sample_rate,
+                    self.lowcut,
+                    self.highcut,
+                    remove_baseline=self.remove_baseline_flag,
+                    baseline_method=self.baseline_method,
+                )
+                pi = compute_pi(raw, filtered, self.sample_rate)
+                color = colors[index % len(colors)]
+                axes[1].plot(time, filtered, linewidth=0.7, color=color, label=channel)
+                axes[2].plot(time, pi, linewidth=0.8, color=color, label=channel)
+
+            axes[1].set_ylabel("Filtered PPG")
+            axes[2].set_ylabel("PI (%)")
+            axes[2].set_xlabel("Time (s)")
+            for ax in axes[1:]:
+                ax.legend(loc="upper right")
+                ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(output_file, dpi=self.dpi)
+        finally:
+            plt.close(fig)
+
+    def plot_fft(self, df: pd.DataFrame, output_file: Path, channel: str) -> None:
+        """使用独立 Y 轴叠加原始与带通后 PPG 的单边 FFT。"""
+        if channel not in df.columns:
+            raise SignalAnalysisError(f"输入缺少 PPG 通道: {channel}")
+        raw = prepare_signal(df[channel])
+        filtered = bandpass_signal(
+            raw,
+            self.sample_rate,
+            self.lowcut,
+            self.highcut,
+            remove_baseline=self.remove_baseline_flag,
+            baseline_method=self.baseline_method,
+        )
+        raw_freqs, raw_amplitude = compute_single_sided_fft(raw, self.sample_rate)
+        filtered_freqs, filtered_amplitude = compute_single_sided_fft(filtered, self.sample_rate)
+
+        fig, raw_axis = plt.subplots(figsize=(12, 5))
+        filtered_axis = raw_axis.twinx()
+        try:
+            raw_line = raw_axis.plot(
+                raw_freqs, raw_amplitude, color="#2563EB", linewidth=0.8, label="Raw FFT"
+            )[0]
+            filtered_line = filtered_axis.plot(
+                filtered_freqs,
+                filtered_amplitude,
+                color="#DC2626",
+                linewidth=0.8,
+                label="Filtered FFT",
+            )[0]
+            raw_axis.set_xlabel("Frequency (Hz)")
+            raw_axis.set_ylabel("Raw amplitude", color=raw_line.get_color())
+            filtered_axis.set_ylabel("Filtered amplitude", color=filtered_line.get_color())
+            raw_axis.set_xlim(0, self.sample_rate / 2)
+            raw_axis.grid(True, alpha=0.3)
+            raw_axis.set_title(f"FFT - {channel}")
+            raw_axis.legend(
+                [raw_line, filtered_line], ["Raw FFT", "Filtered FFT"], loc="upper right"
+            )
+            fig.tight_layout()
+            fig.savefig(output_file, dpi=self.dpi)
         finally:
             plt.close(fig)
 

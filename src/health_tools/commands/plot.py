@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,8 +15,10 @@ console = Console()
 @click.option("-o", "--output", "output_path", required=True, help="输出图片目录")
 @click.option("-c", "--chip", "chip_name", help="芯片类型（指定CSV格式）")
 @click.option("-r", "--rule", "rule_file", help="转换规则文件（指定CSV格式）")
-@click.option("--type", "plot_type", default="both", help="图表类型: time|freq|stft|psd|both")
-@click.option("--channels", help="指定绘制的通道（如: red,ir,green）")
+@click.option(
+    "--type", "plot_type", default="both", help="图表类型: time|freq|stft|psd|ac|fft|both"
+)
+@click.option("--channels", help="指定绘制的通道；AC模式用分号分组（如: CH0,CH2;CH1）")
 @click.option("--sample-rate", type=int, default=25, help="采样率（Hz，默认: 25）")
 @click.option("--window", type=int, default=25, help="STFT窗口大小（秒，默认: 25）")
 @click.option("--overlap", type=float, default=0.96, help="窗口重叠率（0-1，默认: 0.96）")
@@ -61,12 +64,22 @@ def plot_cmd(
     filter_name: Optional[str],
     verbose: bool,
 ) -> None:
-    """绘制PPG数据的时域/频域/时频图"""
-    valid_types = {"time", "freq", "stft", "psd", "both"}
+    """绘制PPG数据的时域、频域、AC/PI、FFT和时频图"""
+    valid_types = {"time", "freq", "stft", "psd", "ac", "fft", "both"}
     if plot_type not in valid_types:
         console.print(f"[red]错误: 不支持的图表类型: {plot_type}[/red]")
-        console.print("支持的类型: time, freq, stft, psd, both")
+        console.print("支持的类型: time, freq, stft, psd, ac, fft, both")
         raise SystemExit(1)
+
+    if channels and plot_type != "ac" and ";" in channels:
+        console.print("[red]错误: 分号通道分组仅支持 --type ac[/red]")
+        raise SystemExit(1)
+
+    try:
+        ac_channel_groups = _parse_ac_channel_groups(channels) if plot_type == "ac" else None
+    except ValueError as exc:
+        console.print(f"[red]错误: {exc}[/red]")
+        raise SystemExit(1) from exc
 
     input_path_obj = Path(input_path)
     output_path_obj = Path(output_path)
@@ -89,7 +102,19 @@ def plot_cmd(
 
         chip_rule = _ChipRule(chip="", csv=csv_config, columns=[])
 
-    channel_list = channels.split(",") if channels else None
+    channel_list = None
+    if channels and plot_type != "ac":
+        channel_list = [item.strip() for item in channels.split(",") if item.strip()]
+
+    if plot_type in {"ac", "fft"}:
+        from health_tools.core.ppg_analysis import SignalAnalysisError, validate_bandpass
+
+        try:
+            lowcut, highcut = map(float, bandpass.split("-"))
+            validate_bandpass(sample_rate, lowcut, highcut)
+        except (ValueError, SignalAnalysisError) as exc:
+            console.print(f"[red]错误: 非法带通范围 {bandpass}: {exc}[/red]")
+            raise SystemExit(1) from exc
 
     try:
         freq_min, freq_max = map(float, freq_range.split("-"))
@@ -122,6 +147,7 @@ def plot_cmd(
                 no_show,
                 verbose,
                 chip_rule,
+                ac_channel_groups,
             )
         )
         print_summary("绘图结果", collector, console=console, verbose=verbose)
@@ -141,6 +167,7 @@ def plot_cmd(
                 no_show,
                 verbose,
                 chip_rule,
+                ac_channel_groups,
             )
             if result is None:
                 collector.add_ok(file)
@@ -171,6 +198,28 @@ def _plot_psd_dir(input_dir: Path, output_dir: Path, acc_mode: str = "axis") -> 
         console.print("[yellow]WARN[/yellow] 未找到PSD数据文件")
 
 
+def _parse_ac_channel_groups(channels: Optional[str]) -> Optional[List[List[str]]]:
+    if channels is None:
+        return None
+    groups = []
+    for raw_group in channels.split(";"):
+        group = [item.strip() for item in raw_group.split(",") if item.strip()]
+        if not group:
+            raise ValueError("AC 通道分组不能为空")
+        if len(group) > 4:
+            raise ValueError(f"AC 每组最多支持 4 个通道，超限分组: {','.join(group)}")
+        groups.append(group)
+    return groups
+
+
+def _safe_channel_suffix(channels: List[str]) -> str:
+    safe_names = []
+    for channel in channels:
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", channel).strip("._")
+        safe_names.append(safe_name or "channel")
+    return "-".join(safe_names)
+
+
 def _plot_file(
     input_file: Path,
     output_dir: Path,
@@ -181,6 +230,7 @@ def _plot_file(
     no_show: bool,
     verbose: bool,
     chip_rule=None,
+    ac_channel_groups: Optional[List[List[str]]] = None,
 ) -> FileResult:
     try:
         from health_tools.utils.csv_handler import read_csv_df
@@ -215,6 +265,53 @@ def _plot_file(
                 output_files.append(str(output_file))
                 if verbose:
                     console.print(f"[green]OK[/green] 时频图: {output_file}")
+
+        if plot_type == "ac":
+            from health_tools.core.ppg_analysis import (
+                SignalAnalysisError,
+                resolve_acc_columns,
+                resolve_ppg_channels,
+            )
+
+            acc_mapping = chip_rule.acc_columns if chip_rule else None
+            acc_columns = resolve_acc_columns(df, acc_mapping)
+            if len(acc_columns) != 3:
+                raise SignalAnalysisError("无法识别完整的 ACC X/Y/Z 三轴")
+
+            groups = ac_channel_groups
+            automatic = groups is None
+            if automatic:
+                chip_name = chip_rule.chip if chip_rule else ""
+                detected = resolve_ppg_channels(df, chip_name)
+                groups = [detected[:4]]
+                if len(detected) > 4:
+                    console.print(
+                        "[yellow]WARN[/yellow] AC 自动模式最多绘制前 4 个通道；"
+                        f"未绘制通道: {', '.join(detected[4:])}"
+                    )
+
+            for group in groups or []:
+                suffix = "" if automatic else f"_{_safe_channel_suffix(group)}"
+                output_file = output_dir / f"{input_file.stem}_ac{suffix}.{plotter.fmt}"
+                plotter.plot_ac(df, output_file, group, acc_columns)
+                output_files.append(str(output_file))
+                if verbose:
+                    console.print(f"[green]OK[/green] AC/PI图: {output_file}")
+
+        if plot_type == "fft":
+            from health_tools.core.ppg_analysis import resolve_ppg_channels
+
+            fft_channels = channels
+            if fft_channels is None:
+                chip_name = chip_rule.chip if chip_rule else ""
+                fft_channels = resolve_ppg_channels(df, chip_name)
+            for channel in fft_channels:
+                suffix = _safe_channel_suffix([channel])
+                output_file = output_dir / f"{input_file.stem}_fft_{suffix}.{plotter.fmt}"
+                plotter.plot_fft(df, output_file, channel)
+                output_files.append(str(output_file))
+                if verbose:
+                    console.print(f"[green]OK[/green] FFT图: {output_file}")
 
         return FileResult(
             status="OK",
