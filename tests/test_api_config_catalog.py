@@ -36,6 +36,14 @@ def test_config_show_returns_source_and_revision(isolated_config: Path):
     assert len(result.revision or "") == 64
 
 
+def test_config_show_without_file_returns_empty_document(isolated_config: Path):
+    result = run_config(ConfigRequest(ConfigAction.SHOW))
+
+    assert result.config == {}
+    assert result.source == ""
+    assert result.revision is None
+
+
 def test_config_replace_creates_then_requires_matching_revision(isolated_config: Path):
     created = run_config(ConfigRequest(ConfigAction.REPLACE, source="rules_dir: first\n"))
 

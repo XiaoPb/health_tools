@@ -3,7 +3,7 @@
 import tempfile
 import threading
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Iterable, Optional, Set, Tuple
 
 import yaml
 
@@ -117,11 +117,11 @@ def _catalog(rule_types: Iterable[RuleType]) -> Tuple[RuleInfo, ...]:
     user_root = _user_rules_root()
     builtin_root = _builtin_rules_root()
     for rule_type in rule_types:
-        names: Dict[str, str] = {}
+        names: Set[str] = set()
         for root in (builtin_root, user_root):
             for path in _files(root / rule_type.value):
-                names.setdefault(path.name.casefold(), path.name)
-        for name in sorted(names.values(), key=str.casefold):
+                names.add(path.name)
+        for name in sorted(names, key=str.casefold):
             info = _build_rule_info(rule_type, name)
             if info is not None:
                 result.append(info)

@@ -147,6 +147,38 @@ def test_importing_public_api_does_not_load_terminal_frameworks():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_rule_api_calls_do_not_load_terminal_frameworks():
+    import subprocess
+    import sys
+
+    script = """
+import sys
+from health_tools.api import (
+    RequestValidationError,
+    RuleListRequest,
+    RuleSaveRequest,
+    RuleType,
+    run_list_rules,
+    run_save_rule,
+)
+run_list_rules(RuleListRequest())
+try:
+    run_save_rule(RuleSaveRequest(RuleType.PARSE, "__api_import_check__.yaml", "[]"))
+except RequestValidationError:
+    pass
+assert "click" not in sys.modules
+assert "rich" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_offline_runner_terminates_cancellable_process(monkeypatch, tmp_path: Path):
     from health_tools.core import offline
 

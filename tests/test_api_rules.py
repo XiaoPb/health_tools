@@ -23,6 +23,29 @@ regex: '(\\d+)'
 columns: [value]
 """
 
+VALID_SOURCES = {
+    RuleType.CHIP: """version: '1.0'
+chip: demo
+csv:
+  header_row: 0
+  data_start_row: 1
+columns: [value]
+""",
+    RuleType.PARSE: PARSE_SOURCE,
+    RuleType.CLASSIFY: """version: '1.0'
+structure: {source: filename}
+rules: []
+""",
+    RuleType.CONVERT: """version: '1.0'
+column_mapping: {}
+""",
+    RuleType.EVALUATE: """type: hr
+ref_column: REF
+pred_column: PRED
+methods: [mae]
+""",
+}
+
 
 @pytest.fixture
 def rule_roots(monkeypatch, tmp_path: Path):
@@ -119,6 +142,16 @@ def test_save_new_rule_and_update_with_matching_revision(rule_roots):
     assert updated.revision != created.revision
 
 
+@pytest.mark.parametrize("rule_type", tuple(RuleType))
+def test_save_supports_all_public_rule_types(rule_roots, rule_type: RuleType):
+    result = run_save_rule(
+        RuleSaveRequest(rule_type, f"{rule_type.value}.yaml", VALID_SOURCES[rule_type])
+    )
+
+    assert result.rule.rule_type == rule_type
+    assert result.rule.source == RuleSource.USER
+
+
 def test_save_builtin_rule_creates_user_override(rule_roots):
     builtin, user = rule_roots
     _write(builtin, "parse", "shared.yaml")
@@ -157,6 +190,18 @@ def test_save_requires_revision_and_detects_external_change(rule_roots):
             )
         )
     assert "external" in (user / "parse" / "shared.yaml").read_text(encoding="utf-8")
+
+
+def test_save_new_rule_rejects_nonempty_expected_revision(rule_roots):
+    with pytest.raises(RequestValidationError, match="current=None"):
+        run_save_rule(
+            RuleSaveRequest(
+                RuleType.PARSE,
+                "new.yaml",
+                PARSE_SOURCE,
+                expected_revision="missing",
+            )
+        )
 
 
 @pytest.mark.parametrize("source", ["- item\n", "null\n", "key: [\n"])

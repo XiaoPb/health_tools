@@ -96,6 +96,10 @@ src/health_tools/rules/
 `ExecutionContext` 提供进度与协作式取消。API 不依赖 Click 或 Rich，也不直接写终端。
 接口的完整边界见 [Python API 架构](api_architecture.md)。
 
+规则管理 API 合并用户和内置来源，只允许原子写入当前用户规则目录；配置 REPLACE 使用
+revision 检测外部编辑冲突。离线资源目录 API 提供芯片、分类、版本、默认标记和 EXE
+可用性，UI 不读取内部配置结构。
+
 ## 配置与规则查找
 
 `config.py` 管理 `~/.ghealth_tools/config.yaml`、用户规则目录和离线算法工具目录。相对规则

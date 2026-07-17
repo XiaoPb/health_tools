@@ -120,6 +120,107 @@ run_config(ConfigRequest(ConfigAction.SET_OFFLINE_DEFAULT, value="gh3036=version
 run_config(ConfigRequest(ConfigAction.SCAN_OFFLINE))
 ```
 
+## 规则管理
+
+规则管理 API 只接受规则类型和单个 YAML 文件名，不接受任意路径。列表会合并包内规则和当前
+用户规则目录中的同名文件；用户版本优先生效，`variants` 保留两个来源供 UI 对照显示。
+
+```python
+from health_tools.api import (
+    RuleListRequest,
+    RuleReadRequest,
+    RuleSaveRequest,
+    RuleSource,
+    RuleType,
+    run_list_rules,
+    run_read_rule,
+    run_save_rule,
+)
+
+catalog = run_list_rules(RuleListRequest(RuleType.PARSE))
+document = run_read_rule(
+    RuleReadRequest(RuleType.PARSE, "default.yaml", RuleSource.EFFECTIVE)
+)
+
+# 编辑 document.source 后，携带读取时的 revision 保存。
+saved = run_save_rule(
+    RuleSaveRequest(
+        RuleType.PARSE,
+        "default.yaml",
+        document.source,
+        expected_revision=document.revision,
+    )
+)
+print(saved.rule.path, saved.revision)
+```
+
+内置规则只读。保存内置规则时不会修改安装包，而是在当前用户规则目录中生成同名覆盖。
+已有有效规则必须提供 `expected_revision`；只有全新名称允许省略。外部修改导致 revision 不匹配
+时抛出 `RequestValidationError`，调用方应重新读取并让用户决定如何合并。
+
+## 可视化配置编辑
+
+`ConfigAction.REPLACE` 用于保存 UI 中编辑的完整配置 YAML。配置文件已存在时必须携带 SHOW
+返回的 revision；首次创建可以省略。
+
+```python
+shown = run_config(ConfigRequest(ConfigAction.SHOW))
+updated_source = shown.source or "rules_dir: ~/.ghealth_tools/rules\n"
+replaced = run_config(
+    ConfigRequest(
+        ConfigAction.REPLACE,
+        source=updated_source,
+        expected_revision=shown.revision,
+    )
+)
+```
+
+REPLACE 要求 YAML 根节点为映射，成功后原子替换配置文件并刷新进程内缓存。`source` 和
+`expected_revision` 不能用于其他配置 action。
+
+## 离线资源目录
+
+UI 应通过目录 API 构建芯片、分类和版本选择器，不应调用 `core.offline.find_exe` 或解析
+`ConfigResult.config` 中的内部结构。
+
+```python
+from health_tools.api import OfflineCatalogRequest, run_offline_catalog
+
+all_versions = run_offline_catalog(OfflineCatalogRequest())
+gh3036_versions = run_offline_catalog(OfflineCatalogRequest("gh3036"))
+for version in gh3036_versions.versions:
+    print(
+        version.chip_name,
+        version.category,
+        version.version,
+        version.is_default,
+        version.exe_available,
+    )
+```
+
+目录查询只读取当前配置和文件系统。需要重新扫描工具目录时，先调用
+`run_config(ConfigRequest(ConfigAction.SCAN_OFFLINE))`。
+
+<!-- api-contract-example -->
+```python
+from health_tools.api import (
+    ConfigAction,
+    ConfigRequest,
+    OfflineCatalogRequest,
+    RuleListRequest,
+    RuleReadRequest,
+    RuleSaveRequest,
+    RuleSource,
+    RuleType,
+)
+
+rule_list_request = RuleListRequest()
+rule_read_request = RuleReadRequest(RuleType.CHIP, "gh3036.yaml", RuleSource.BUILTIN)
+rule_save_request = RuleSaveRequest(RuleType.CHIP, "custom.yaml", "chip: custom\n")
+config_request = ConfigRequest(ConfigAction.REPLACE, source="rules_dir: rules\n")
+offline_request = OfflineCatalogRequest("gh3036")
+```
+
 ## 安全提示
 
 分类默认复制文件。只有明确需要移动时才设置：

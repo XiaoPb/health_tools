@@ -96,3 +96,16 @@ def test_environment_inspector_reports_workspace_install():
     assert report["cli_path"]
     assert report["package_version"]
     assert report["package_version"] in report["cli_version"]
+
+
+def test_api_usage_contract_example_executes():
+    content = (DOCS_DIR / "api_usage.md").read_text(encoding="utf-8")
+    marker = "<!-- api-contract-example -->"
+    example = content.split(marker, 1)[1].split("```python", 1)[1].split("```", 1)[0]
+
+    namespace = {}
+    exec(example, namespace)
+
+    assert namespace["rule_list_request"].rule_type is None
+    assert namespace["config_request"].action.value == "replace"
+    assert namespace["offline_request"].chip_name == "gh3036"

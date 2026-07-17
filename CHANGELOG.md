@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.56] - 2026-07-17
+
+### Added
+- 新增稳定规则目录、读取和保存 API，支持用户覆盖、来源变体和 SHA-256 revision 冲突检测
+- 新增配置 YAML 原文替换 API，以及芯片、分类、版本和 EXE 可用性离线资源目录 API
+
+### Changed
+- 配置与规则保存使用同目录临时文件和原子替换，配置写入后同步刷新进程内缓存
+- 公共规则调用不再加载 Click 或 Rich，评估规则纳入统一结构校验
+
+## [0.4.55] - 2026-07-17
+
 ### Added
 - 新增覆盖全部 13 个 CLI 能力的同步 `health_tools.api`，支持结构化结果、进度回调和取消
 - 新增 Python API 架构说明与使用指南

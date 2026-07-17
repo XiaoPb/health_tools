@@ -26,6 +26,10 @@ from health_tools.api import (
     RuleSource,
     RuleType,
     RuleVariantInfo,
+    run_list_rules,
+    run_offline_catalog,
+    run_read_rule,
+    run_save_rule,
     run_info,
 )
 
@@ -127,3 +131,7 @@ def test_new_request_defaults_and_config_compatibility():
     assert request.expected_revision is None
     assert result.source == ""
     assert result.revision is None
+    assert all(
+        callable(function)
+        for function in (run_list_rules, run_read_rule, run_save_rule, run_offline_catalog)
+    )

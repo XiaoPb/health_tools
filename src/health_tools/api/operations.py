@@ -258,14 +258,17 @@ def run_config(
         save_offline_config(cfg.tools_path, versions)
         changed.append(CONFIG_FILE)
     elif request.action == ConfigAction.REPLACE:
+        source = request.source
+        if not isinstance(source, str):  # 已在通用请求校验中拦截
+            raise RequestValidationError("配置 source 必须是字符串")
         try:
-            document = yaml.safe_load(request.source)
+            document = yaml.safe_load(source)
         except yaml.YAMLError as exc:
             raise RequestValidationError(f"配置 YAML 解析失败: {exc}") from exc
         if not isinstance(document, dict):
             raise RequestValidationError("配置 YAML 根节点必须是映射")
         try:
-            replace_config_document(request.source, document, request.expected_revision)
+            replace_config_document(source, document, request.expected_revision)
         except ConfigRevisionConflict as exc:
             raise RequestValidationError(
                 f"配置 revision 冲突: expected={exc.expected}, current={exc.current}"
