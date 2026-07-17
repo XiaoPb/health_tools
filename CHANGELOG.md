@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-17
+
+### Added
+- 新增 `analyze` 命令与公共 API，支持原始数据/PSD 证据归因、强制文件 glob 和 Markdown/PPT 报告
+- 新增 `analysis` 规则类型及内置心率、血氧分析规则
+- 新增基于利尔达模板的品牌化分析 PPT，包含异常归类、准确度对比和逐文件关键证据页
+
+### Changed
+- 分析流程复用 `check`、`evaluate`、`plot` 和 `offline`，关键图优先使用现有 plot 产物
+- 心率准确度按 Online/Offline/可选 Comp 对比 Polar，显示 ±5/±10/±15 bpm 占比
+- SpO2 限制为静止测试，运动幅度超限时报告具体原因和重新采集措施
+- ACC 异常结论包含异常次数、最长连续帧和前 10 个异常帧位置
+- 离线准确度报告新增 `±15BPM` 指标，Comp 缺失或全零时不显示 Comp 指标
+
 ## [0.4.58] - 2026-07-17
 
 ### Fixed

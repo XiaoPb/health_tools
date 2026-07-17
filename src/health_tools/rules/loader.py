@@ -5,6 +5,7 @@ import yaml
 
 from health_tools.config import get_user_rules_dir
 from health_tools.models.rules import (
+    AnalysisRule,
     ChipRule,
     ClassifyRule,
     ConvertRule,
@@ -234,5 +235,20 @@ class RuleLoader:
             thresholds=data.get("thresholds", []),
             first_output_time=data.get("first_output_time", False),
             default_category=data.get("default_category", "other"),
+            description=data.get("description", ""),
+        )
+
+    @classmethod
+    def load_analysis_rule(cls, rule_file: str) -> AnalysisRule:
+        rule_path = cls._resolve_rule_path(rule_file, "analysis")
+        data = cls._load_yaml(rule_path)
+        return AnalysisRule(
+            type=data.get("type", "hr"),
+            columns=data.get("columns", {}),
+            detectors=data.get("detectors", []),
+            thresholds=data.get("thresholds", {}),
+            causes=data.get("causes", []),
+            sampling=data.get("sampling", {}),
+            offline=data.get("offline", {}),
             description=data.get("description", ""),
         )

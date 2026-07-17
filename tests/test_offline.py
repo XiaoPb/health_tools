@@ -1235,6 +1235,22 @@ def test_offline_accuracy_uses_online_vs_offline_when_polar_missing(tmp_path):
     assert "MAE(online)" not in report.columns
 
 
+def test_offline_accuracy_includes_15_bpm_and_hides_zero_comp(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    (result_dir / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n" "1,100,104,0,103\n" "2,100,112,0,108\n",
+        encoding="utf-8",
+    )
+
+    report = offline.calculate_offline_accuracy(result_dir)
+
+    assert report is not None
+    assert "±15BPM(online)" in report.columns
+    assert "±15BPM(offline)" in report.columns
+    assert not any(column.endswith("(comp)") for column in report.columns)
+
+
 def test_offline_accuracy_summarizes_mixed_reference_metrics_separately(tmp_path):
     result_dir = tmp_path / "result"
     result_dir.mkdir()

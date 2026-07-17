@@ -12,6 +12,7 @@
 | 文件如何提取标签并放入目录 | `classify` |
 | 第三方 CSV 如何映射、计算、填充或合并金标 | `convert` |
 | 心率/血氧使用哪些列、阈值、分类和指标 | `evaluate` |
+| 自动分析使用哪些特征、原因和原始数据措施 | `analysis` |
 
 ## 编写步骤
 
@@ -34,6 +35,6 @@
 
 ## 验证限制
 
-`validate` 只对 chip、单 pattern parse、classify、convert 做基础结构检查。evaluate 和多
+`validate` 对 chip、parse、classify、convert、evaluate、analysis 做基础结构检查。多
 pattern parse 必须通过目标命令验证；分类条件、计算公式、外部数据对齐也只有读取真实样本
 才能证明正确。验证后检查输出列、行数、非零值和跳过原因。

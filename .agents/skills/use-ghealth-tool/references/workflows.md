@@ -74,3 +74,13 @@ ghealth_tool offline -i data/ -o existing_result/ -c gh3220 \
 ```
 
 `--no-run` 不检查或移动输入 CSV，也不调用外部算法。
+
+## 自动分析
+
+```bash
+ghealth_tool analyze -i data/ -o analysis/ --type hr --report all --focus "动态/**/*.csv"
+```
+
+分析命令先运行检查和准确度阶段。`--focus` 命中的文件即使正常也会继续深度分析；证据不足时才在输出工作区副本上升级离线 PSD。结果目录也可以直接作为输入。验证 `analysis_summary.json`、`file_diagnosis.csv`、证据图和报告中的结论、证据及跳过原因。
+
+基础问题以 `check` 的 FAIL 为准，准确度指标优先合并 `evaluate` 明细。证据图统一复用 `plot`：心率原始证据使用 time/ac，血氧默认使用 ac，离线时频图使用 psd。无法归因或不确定应附哪张图时，心率优先附 `plot psd` 产物；显式禁用离线时确认报告记录了未执行原因。汇总应分别展示 `Online vs Polar`、`Offline vs Polar` 的 MAE 和 ±5/±10/±15 bpm 占比；Comp 非零有效时才显示 `Comp vs Polar`。异常原始归类可与准确度表拆页，普通正常文件不堆叠证据图。

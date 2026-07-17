@@ -20,7 +20,7 @@
 | `evaluate` (`eval`) | 结果目录 | 评估报告 | `--type hr|spo2`；列索引为 1-based 且优先于列名 |
 | `offline` | 芯片 CSV 目录 | 版本结果、PSD、准确度 | 会调用 exe 并移动不合规输入；支持多版本和 `--no-run` |
 | `check` (`chk`) | CSV/目录或报告 | 检查报告/分拣目录 | 普通检查需 `-i`；`--sort` 需 `--sort-output` |
-| `ui` | 端口 | Streamlit 服务 | 需要 `ghealth-tools[ui]` |
+| `analyze` (`ana`) | CSV/目录或 offline 结果 | 诊断报告和证据图 | `--focus` 强制深度分析；`--report` 选择 Markdown/PPT |
 
 ## 高影响参数
 

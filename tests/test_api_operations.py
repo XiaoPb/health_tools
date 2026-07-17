@@ -125,7 +125,7 @@ def test_distribution_has_no_ui_or_streamlit_dependency():
     assert importlib.util.find_spec("health_tools.ui") is None
     assert "streamlit" not in source_text.lower()
     assert "streamlit" not in project.lower()
-    assert len(PRIMARY_COMMANDS) == 13
+    assert len(PRIMARY_COMMANDS) == 14
 
 
 def test_importing_public_api_does_not_load_terminal_frameworks():

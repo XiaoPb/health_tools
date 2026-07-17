@@ -30,6 +30,7 @@ ghealth_tool --help
 | 查看 CSV/规则结构 | [`info`](cmd_info.md) | `validate` |
 | 验证规则格式 | [`validate`](cmd_validate.md) | 对应业务命令 |
 | 管理用户规则和离线版本 | [`config`](cmd_config.md) | `offline` |
+| 自动定位数据或算法异常原因 | [`analyze`](cmd_analyze.md) | `check`、`evaluate`、`offline` |
 
 ## 全部命令
 
@@ -48,6 +49,7 @@ ghealth_tool --help
 | [`evaluate`](cmd_evaluate.md) | `eval` | 结果目录 | 明细、异常和准确度汇总 |
 | [`offline`](cmd_offline.md) | 无 | 芯片 CSV 目录 | 版本目录、PSD、准确度报告 |
 | [`check`](cmd_check.md) | `chk` | CSV 或检查报告 | `check_report.csv` 或分拣目录 |
+| [`analyze`](cmd_analyze.md) | `ana` | CSV 或 offline 结果目录 | JSON/CSV、证据图、Markdown/PPT |
 
 ## 批量命令约定
 
@@ -58,6 +60,6 @@ ghealth_tool --help
 
 ## 规则与配置
 
-- 五类 YAML 规则及查找顺序见 [规则文件格式](rules.md)。
+- 六类 YAML 规则及查找顺序见 [规则文件格式](rules.md)。
 - 用户目录、离线算法版本和参数模板见 [config 命令](cmd_config.md)。
 - 模块职责和数据流见 [架构说明](architecture.md)。

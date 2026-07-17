@@ -73,6 +73,17 @@ ref_column: REF
 pred_column: PRED
 methods: [mae]
 """,
+    RuleType.ANALYSIS: """version: '1.0'
+type: other
+columns: {reference: REF, prediction: PRED}
+detectors: [integrity, accuracy]
+thresholds: {error: 5}
+causes:
+  - id: raw_missing
+    title: data missing
+    origin: raw
+    when: {feature: data_complete, op: eq, value: false}
+""",
 }
 
 
@@ -308,3 +319,27 @@ def test_evaluate_validator_supports_valid_and_invalid_rules(tmp_path: Path):
 
     assert RuleValidator.validate_file(valid) == []
     assert "评估规则 'type' 必须是 hr 或 spo2" in RuleValidator.validate_file(invalid)
+
+
+def test_analysis_validator_rejects_algorithm_actions(tmp_path: Path):
+    invalid = _write(
+        tmp_path,
+        "analysis",
+        "invalid.yaml",
+        """version: '1.0'
+type: other
+columns: {reference: REF, prediction: PRED}
+detectors: [accuracy]
+thresholds: {}
+causes:
+  - id: algorithm_issue
+    title: algorithm issue
+    origin: algorithm
+    when: {feature: algorithm_abnormal, op: eq, value: true}
+    actions: [tune algorithm]
+""",
+    )
+
+    assert any(
+        "算法原因不能提供 actions" in error for error in RuleValidator.validate_file(invalid)
+    )

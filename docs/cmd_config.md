@@ -97,7 +97,8 @@ offline_cmd:
 │   ├── parse/                     # 解析规则
 │   ├── classify/                  # 分类规则
 │   ├── convert/                   # 转换规则
-│   └── evaluate/                  # 评估规则
+│   ├── evaluate/                  # 评估规则
+│   └── analysis/                  # 数据分析规则
 └── offline_algorithm_tools/       # 离线算法工具目录
     ├── gh3036/
     │   └── <category>/            # exclusive/premium/medium/basic

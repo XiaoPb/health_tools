@@ -44,6 +44,7 @@ parse 规则中的 `chip/target_chip` 决定。`parse --dry-run` 只加载并打
 | 心率/血氧准确度 | `evaluate` | rules、workflows |
 | 离线算法跑库 | `config` + `offline` | commands、workflows、troubleshooting |
 | SNR/CTR/Noise | `factory` | commands |
+| 自动数据诊断与报告 | `analyze` | commands、workflows、troubleshooting |
 | 编写或修正规则 | `validate` + 目标命令 | rules |
 
 ## 安全边界

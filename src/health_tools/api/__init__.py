@@ -1,6 +1,7 @@
 """GHealth Tools 稳定的公共 Python API。"""
 
 from health_tools.api.check_operation import run_check
+from health_tools.api.analysis_operation import run_analyze
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import (
     CallbackError,
@@ -18,6 +19,8 @@ from health_tools.api.file_operations import (
 )
 from health_tools.api.models import (
     BatchResult,
+    AnalyzeRequest,
+    AnalyzeResult,
     CheckRequest,
     CheckResult,
     ClassifyRequest,
@@ -67,6 +70,8 @@ from health_tools.api.offline_catalog import run_offline_catalog
 from health_tools.api.rule_operations import run_list_rules, run_read_rule, run_save_rule
 
 __all__ = [
+    "AnalyzeRequest",
+    "AnalyzeResult",
     "BatchResult",
     "CallbackError",
     "CheckRequest",
@@ -107,6 +112,7 @@ __all__ = [
     "RuleType",
     "RuleVariantInfo",
     "run_check",
+    "run_analyze",
     "run_classify",
     "run_config",
     "run_convert",

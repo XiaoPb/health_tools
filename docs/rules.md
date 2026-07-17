@@ -1,6 +1,6 @@
 # 规则文件格式
 
-GHealth Tools 使用 YAML 描述 CSV、日志解析、转换、分类和评估行为。规则把设备差异和
+GHealth Tools 使用 YAML 描述 CSV、日志解析、转换、分类、评估和分析行为。规则把设备差异和
 项目配置从 Python 代码中分离出来，便于复用和审查。
 
 ## 规则目录与查找顺序
@@ -13,7 +13,8 @@ src/health_tools/rules/
 ├── parse/
 ├── classify/
 ├── convert/
-└── evaluate/
+├── evaluate/
+└── analysis/
 ```
 
 运行 `ghealth_tool config --init` 后，可在 `~/.ghealth_tools/rules/` 中放置同样的目录。
@@ -337,6 +338,32 @@ default_category: other
 | `first_output_time` | 是否统计首次有效输出时间 |
 | `default_category` | 未匹配场景分类 |
 
+## analysis 规则
+
+路径：`rules/analysis/<name>.yaml`。分析规则声明功能类型、输入列、启用的内置检测器、阈值和结构化原因条件。
+
+```yaml
+version: "1.0"
+type: hr
+columns:
+  reference: REF_RESULT0
+  prediction: ALGO_RESULT0
+detectors: [integrity, raw_signal, reference, accuracy, motion, hr_psd]
+thresholds: {error: 10}
+causes:
+  - id: example
+    title: 原始数据示例
+    origin: raw
+    when: {feature: data_complete, op: eq, value: false}
+    actions: [检查采集链路并重新采集]
+```
+
+`origin` 只能是 `raw`、`reference` 或 `algorithm`。算法原因不能声明 `actions`；条件只支持 `all`、`any`、`not` 和 `eq/ne/lt/le/gt/ge/in/not_in/between/exists`，不会执行任意表达式。`type=other` 必须通过 `--rule` 指定分析规则。
+
+`detectors` 决定允许使用的证据类型。`hr_psd` 只适用于心率；SpO2 或未声明该检测器的自定义功能不会执行心率锁频、牵引和谐波判断。SpO2 内置规则把 `motion_rms` 超限作为静止测试条件不满足，优先于准确度异常归因。
+
+`thresholds` 控制诊断敏感度。完整默认值、调高/调低的影响和判断流程见 [analyze 命令](cmd_analyze.md#配置判断阈值)。修改后应使用正常与异常小样本验证，不能把阈值变化解释为算法优化。
+
 ## 验证能力与限制
 
 ```bash
@@ -344,12 +371,12 @@ ghealth_tool validate path/to/rules/convert/custom.yaml
 ghealth_tool validate path/to/rules/parse/custom.yaml --strict
 ```
 
-当前验证器根据路径中是否包含 `chip`、`parse`、`classify`、`convert` 判断类型，因此建议
+当前验证器根据路径中是否包含 `chip`、`parse`、`classify`、`convert`、`evaluate`、`analysis` 判断类型，因此建议
 自定义文件也保留类型目录。它执行基础结构检查，但不会证明表达式在真实数据上有结果。
 
 已知限制：
 
-- `evaluate` 尚无专用结构验证；使用 `ghealth_tool evaluate --rule ...` 对小样本验证。
+- `evaluate` 和 `analysis` 支持结构验证，但仍需使用目标命令对小样本验证列和阈值。
 - `classify` 的条件表达式、提取函数和扩展 patterns 需要实际分类运行验证。
 - `computed` 公式和 `extra_source` 对齐是否正确只能通过实际转换与输出报告确认。
 - `--strict` 当前只额外要求单 pattern parse 规则包含 `description`。

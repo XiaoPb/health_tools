@@ -873,7 +873,7 @@ class VshbParser:
         return read_vshb_result(vshb_path, positional_online_col=self.COL_ONLINE)
 
 
-ACCURACY_METHODS = ["mae", "within_5", "within_10", "rmse", "correlation"]
+ACCURACY_METHODS = ["mae", "within_5", "within_10", "within_15", "rmse", "correlation"]
 
 
 def _has_valid_ref(df: pd.DataFrame) -> bool:

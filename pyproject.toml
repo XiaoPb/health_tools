@@ -33,6 +33,7 @@ dependencies = [
     "scipy>=1.10.0",
     "rich>=13.0.0",
     "chardet>=5.0.0",
+    "python-pptx>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -56,7 +57,7 @@ Homepage = "https://github.com/XiaoPb/health_tools"
 where = ["src"]
 
 [tool.setuptools.package-data]
-health_tools = ["rules/**/*.yaml", "rules/**/*.yml"]
+health_tools = ["rules/**/*.yaml", "rules/**/*.yml", "templates/*.pptx"]
 
 [tool.black]
 line-length = 100

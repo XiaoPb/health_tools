@@ -196,3 +196,17 @@ class EvaluateRule:
     @property
     def sample_rate(self) -> float:
         return float(self.anomaly.get("sample_rate", 25))
+
+
+@dataclass
+class AnalysisRule:
+    """受限的数据分析规则，不执行任意表达式。"""
+
+    type: str = "hr"
+    columns: Dict[str, Any] = field(default_factory=dict)
+    detectors: List[str] = field(default_factory=list)
+    thresholds: Dict[str, Any] = field(default_factory=dict)
+    causes: List[Dict[str, Any]] = field(default_factory=list)
+    sampling: Dict[str, Any] = field(default_factory=dict)
+    offline: Dict[str, Any] = field(default_factory=dict)
+    description: str = ""

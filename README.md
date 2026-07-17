@@ -65,6 +65,7 @@ chip 规则列名一致；未匹配列会补 0。当前 `parse --chip` 不能替
 | `evaluate` | `eval` | 批量评估心率或血氧指标 | [evaluate](docs/cmd_evaluate.md) |
 | `offline` | 无 | 调用离线算法、整理结果并评估 | [offline](docs/cmd_offline.md) |
 | `check` | `chk` | 检查范围、帧、居中、Ipd、ACC 和时间戳 | [check](docs/cmd_check.md) |
+| `analyze` | `ana` | 编排检查、评估、PSD 诊断并生成报告 | [analyze](docs/cmd_analyze.md) |
 完整命令索引见 [命令说明](docs/commands.md)。
 
 Python 项目可直接调用稳定的 `health_tools.api`，无需模拟命令行。接口覆盖 CLI、规则管理、
@@ -114,6 +115,7 @@ ghealth_tool offline -i data/ -c gh3220 --versions version_a,version_b
 | `classify` | 文件名/数据提取、目录分类和准确度配置 |
 | `convert` | 列映射、计算列、前值填充、频率扩展和外部数据合并 |
 | `evaluate` | 心率/血氧列、异常阈值、分类和准确度方法 |
+| `analysis` | 功能列、检测器、阈值、原因条件和原始数据措施 |
 
 格式、字段和示例见 [规则文件说明](docs/rules.md)。修改规则后使用 `validate` 验证，再用
 小样本运行目标命令。

@@ -162,6 +162,27 @@ print(saved.rule.path, saved.revision)
 的 `structure/rules`、`extract/classify` 和纯 `patterns` 关键词库。Parse 使用单捕获组时可
 通过 `separator` 拆分到多个 columns，适合 UI 根据样本日志生成规则。
 
+## 数据分析
+
+```python
+from pathlib import Path
+
+from health_tools.api import AnalyzeRequest, run_analyze
+
+result = run_analyze(
+    AnalyzeRequest(
+        input_path=Path("data"),
+        output_path=Path("analysis"),
+        analysis_type="hr",
+        focus=("动态/**/*.csv",),
+        report="all",
+    )
+)
+print(result.conclusion_counts)
+```
+
+输入可以是原始 CSV 或已有 offline 结果目录。自动离线升级使用输出工作区中的副本；`AnalyzeResult` 返回报告、结构化明细、升级文件和结论计数。
+
 ## 可视化配置编辑
 
 `ConfigAction.REPLACE` 用于保存 UI 中编辑的完整配置 YAML。配置文件已存在时必须携带 SHOW

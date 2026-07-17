@@ -17,7 +17,7 @@ from health_tools.utils.atomic_file import (
 CONFIG_DIR = Path.home() / ".ghealth_tools"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 DEFAULT_RULES_DIR = CONFIG_DIR / "rules"
-RULE_SUBDIRS = ["chip", "parse", "classify", "convert", "evaluate"]
+RULE_SUBDIRS = ["chip", "parse", "classify", "convert", "evaluate", "analysis"]
 
 _config_cache: Optional[dict] = None
 _config_lock = threading.RLock()

@@ -1,0 +1,127 @@
+version: "1.0"
+type: hr
+description: 心率原始数据、准确度与动态 PSD 诊断
+columns:
+  reference: REF_RESULT0
+  prediction: ALGO_RESULT0
+  timestamp: TimeStamp
+  ppg_patterns: ["^Ipd\\d+$", "^CH\\d+$"]
+  acc: [ACCX, ACCY, ACCZ]
+detectors: [integrity, raw_signal, reference, accuracy, motion, hr_psd]
+sampling:
+  sample_rate: 25
+  infer_timestamp_unit: auto
+thresholds:
+  missing_ratio: 0.01
+  flat_ratio: 0.98
+  saturation_ratio: 0.01
+  baseline_drift_ratio: 0.50
+  pi_low: 0.5
+  motion_rms: 0.10
+  error: 10
+  error_min_seconds: 5
+  ref_min: 30
+  ref_max: 220
+  ref_stale_seconds: 120
+  jump_per_second: 20
+  psd_clarity: 3
+  psd_lock_hz: 0.20
+  psd_pull_hz: 0.50
+  psd_presence: 0.60
+offline:
+  enabled: true
+causes:
+  - id: reference_invalid
+    title: 参考心率无效或时间轴异常
+    origin: reference
+    priority: 100
+    when: {feature: reference_valid, op: eq, value: false}
+  - id: data_incomplete
+    title: 原始数据缺失、断帧或时间戳异常
+    origin: raw
+    priority: 95
+    when: {feature: data_complete, op: eq, value: false}
+    actions: [检查采集链路和传输缓存，重新采集完整且时间连续的数据]
+  - id: data_range_invalid
+    title: check 检测到原始数据范围异常
+    origin: raw
+    priority: 93
+    when: {feature: check_range_failed, op: eq, value: true}
+    actions: [核对芯片量程、数据格式和采集状态后重新采集]
+  - id: acc_invalid
+    title: check 检测到 ACC 全零、静止或循环异常
+    origin: raw
+    priority: 92
+    when: {feature: check_acc_failed, op: eq, value: true}
+    actions: [检查 ACC 传感器和数据链路后重新采集]
+  - id: signal_conversion_invalid
+    title: check 检测到数据居中或 Ipd 转换异常
+    origin: raw
+    priority: 91
+    when: {feature: check_signal_failed, op: eq, value: true}
+    actions: [核对原始码、Ipd 转换和芯片规则后重新采集]
+  - id: signal_saturated
+    title: PPG 信号饱和或削顶
+    origin: raw
+    priority: 90
+    when: {feature: signal_saturated, op: eq, value: true}
+    actions: [调整佩戴位置和接触压力，重新采集未触及 ADC 上下限的数据]
+  - id: signal_flat
+    title: PPG 通道平线或传感器未有效接触
+    origin: raw
+    priority: 88
+    when: {feature: signal_flat, op: eq, value: true}
+    actions: [确认传感器贴肤和有效通道状态后重新采集]
+  - id: low_perfusion
+    title: 静态场景灌注不足
+    origin: raw
+    priority: 82
+    when:
+      all:
+        - {feature: scene, op: eq, value: static}
+        - {feature: pi_low, op: eq, value: true}
+    actions: [保持末梢温暖并稳定佩戴，待灌注恢复后重新测量]
+  - id: motion_artifact
+    title: 运动或佩戴松动导致原始 PPG 受扰
+    origin: raw
+    priority: 80
+    when:
+      all:
+        - {feature: scene, op: eq, value: dynamic}
+        - {feature: psd_noisy, op: eq, value: true}
+    actions: [固定佩戴位置并减少传感器相对皮肤滑动后重新采集]
+  - id: baseline_drift
+    title: PPG 原始信号存在明显基线漂移
+    origin: raw
+    priority: 78
+    when: {feature: baseline_drift, op: eq, value: true}
+    actions: [检查佩戴松动、缓慢位移和遮光条件后重新采集]
+  - id: frequency_lock
+    title: 算法出值可能跟随运动主频
+    origin: algorithm
+    priority: 75
+    when: {feature: psd_locked, op: eq, value: true}
+  - id: frequency_pull
+    title: 算法出值可能受到邻近运动频率牵引
+    origin: algorithm
+    priority: 72
+    when: {feature: psd_pulled, op: eq, value: true}
+  - id: harmonic_selection
+    title: 算法出值可能对应运动或 PPG 谐波
+    origin: algorithm
+    priority: 70
+    when: {feature: psd_harmonic, op: eq, value: true}
+  - id: output_jump
+    title: 算法结果存在异常跳变
+    origin: algorithm
+    priority: 65
+    when: {feature: output_jump, op: eq, value: true}
+  - id: unexplained_algorithm_error
+    title: 原始数据与参考有效但算法结果持续异常
+    origin: algorithm
+    priority: 50
+    when:
+      all:
+        - {feature: raw_valid, op: eq, value: true}
+        - {feature: reference_valid, op: eq, value: true}
+        - {feature: algorithm_abnormal, op: eq, value: true}

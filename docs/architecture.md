@@ -61,7 +61,8 @@ src/health_tools/rules/
 ├── parse/
 ├── classify/
 ├── convert/
-└── evaluate/
+├── evaluate/
+└── analysis/
 ```
 
 ### core
@@ -78,6 +79,7 @@ src/health_tools/rules/
 | `evaluator.py` | 心率/血氧批量评估 |
 | `offline.py` | 算法版本扫描、命令构建、跑库、整理和准确度 |
 | `offline_input_filter.py` | 跑库前严格检查表头并隔离不合规 CSV |
+| `analysis/` | 原始/PSD 特征、原因匹配、结论和报告数据 |
 | `splitter.py`, `processor.py` | 文件分割和批处理 |
 
 ### commands
@@ -120,6 +122,8 @@ check:    CSV -> ChipRule -> DataChecker -> check_report.csv -> optional sort
 evaluate: CSV directory -> EvaluateRule -> BatchEvaluator -> reports
 offline:  chip CSV -> strict input filter -> TEE_Algorithm.exe
           -> reorganized results -> PSD + accuracy reports
+analyze:  raw CSV -> check/evaluate -> feature diagnosis
+          -> optional copied offline run -> PSD evidence -> Markdown/PPT
 ```
 
 ## 列展开

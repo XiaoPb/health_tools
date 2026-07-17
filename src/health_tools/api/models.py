@@ -40,6 +40,7 @@ class RuleType(str, Enum):
     CLASSIFY = "classify"
     CONVERT = "convert"
     EVALUATE = "evaluate"
+    ANALYSIS = "analysis"
 
 
 class RuleSource(str, Enum):
@@ -411,6 +412,45 @@ class OfflineRequest:
     do_list: bool = False
     timeout: int = 300
     settle_timeout: int = 10
+
+
+@dataclass(frozen=True)
+class AnalyzeRequest:
+    input_path: Path
+    output_path: Path
+    analysis_type: str = "hr"
+    rule_file: Optional[str] = None
+    chip_name: Optional[str] = None
+    scene: str = "auto"
+    sample_rate: Optional[float] = None
+    ref_column: Optional[str] = None
+    pred_column: Optional[str] = None
+    timestamp_column: Optional[str] = None
+    focus: Tuple[str, ...] = ()
+    report: str = "all"
+    offline_version: Optional[str] = None
+    allow_offline: bool = True
+    workers: int = 4
+
+
+@dataclass(frozen=True)
+class AnalyzeResult:
+    batch: BatchResult
+    output_dir: Path
+    reports: Tuple[Path, ...] = ()
+    summary_path: Optional[Path] = None
+    detail_paths: Tuple[Path, ...] = ()
+    escalated_files: Tuple[Path, ...] = ()
+    conclusion_counts: Mapping[str, int] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "output_dir", Path(self.output_dir))
+        object.__setattr__(self, "reports", tuple(Path(path) for path in self.reports))
+        object.__setattr__(self, "detail_paths", tuple(Path(path) for path in self.detail_paths))
+        object.__setattr__(
+            self, "escalated_files", tuple(Path(path) for path in self.escalated_files)
+        )
+        object.__setattr__(self, "conclusion_counts", _freeze(self.conclusion_counts))
 
 
 @dataclass(frozen=True)

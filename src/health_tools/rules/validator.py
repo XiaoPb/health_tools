@@ -39,6 +39,8 @@ class RuleValidator:
             errors.extend(RuleValidator._validate_convert_rule(rule, strict))
         elif rule_type == "evaluate":
             errors.extend(RuleValidator._validate_evaluate_rule(rule, strict))
+        elif rule_type == "analysis":
+            errors.extend(RuleValidator._validate_analysis_rule(rule, strict))
         else:
             errors.append("无法识别的规则类型")
 
@@ -57,6 +59,8 @@ class RuleValidator:
             return "convert"
         elif "evaluate" in parts:
             return "evaluate"
+        elif "analysis" in parts:
+            return "analysis"
         return "unknown"
 
     @staticmethod
@@ -262,6 +266,40 @@ class RuleValidator:
                 errors.append(f"评估规则缺少有效的 '{key}' 字段")
         if "methods" in rule and not isinstance(rule.get("methods"), list):
             errors.append("评估规则 'methods' 必须是列表")
+        if strict and "description" not in rule:
+            errors.append("[严格模式] 缺少 'description' 字段")
+        return errors
+
+    @staticmethod
+    def _validate_analysis_rule(rule: dict, strict: bool) -> List[str]:
+        errors = []
+        if "version" not in rule:
+            errors.append("缺少 'version' 字段")
+        if rule.get("type") not in {"hr", "spo2", "other"}:
+            errors.append("分析规则 'type' 必须是 hr、spo2 或 other")
+        if not isinstance(rule.get("columns"), dict):
+            errors.append("分析规则缺少有效的 'columns' 映射")
+        if not isinstance(rule.get("detectors"), list) or not rule.get("detectors"):
+            errors.append("分析规则 'detectors' 必须是非空列表")
+        if not isinstance(rule.get("thresholds", {}), dict):
+            errors.append("分析规则 'thresholds' 必须是映射")
+        causes = rule.get("causes")
+        if not isinstance(causes, list) or not causes:
+            errors.append("分析规则 'causes' 必须是非空列表")
+        else:
+            for index, cause in enumerate(causes):
+                prefix = f"causes[{index}]"
+                if not isinstance(cause, dict):
+                    errors.append(f"{prefix} 必须是映射")
+                    continue
+                if not cause.get("id") or not cause.get("title"):
+                    errors.append(f"{prefix} 需要 id 和 title")
+                if cause.get("origin") not in {"raw", "reference", "algorithm"}:
+                    errors.append(f"{prefix}.origin 必须是 raw、reference 或 algorithm")
+                if not isinstance(cause.get("when"), dict):
+                    errors.append(f"{prefix}.when 必须是结构化条件")
+                if cause.get("origin") == "algorithm" and cause.get("actions"):
+                    errors.append(f"{prefix} 算法原因不能提供 actions")
         if strict and "description" not in rule:
             errors.append("[严格模式] 缺少 'description' 字段")
         return errors
