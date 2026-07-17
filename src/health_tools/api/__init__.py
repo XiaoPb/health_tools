@@ -63,6 +63,7 @@ from health_tools.api.operations import (
     run_validate,
 )
 from health_tools.api.offline_operation import run_offline
+from health_tools.api.rule_operations import run_list_rules, run_read_rule, run_save_rule
 
 __all__ = [
     "BatchResult",
@@ -111,10 +112,13 @@ __all__ = [
     "run_evaluate",
     "run_factory",
     "run_info",
+    "run_list_rules",
     "run_offline",
     "run_parse",
     "run_plot",
     "run_process",
+    "run_read_rule",
+    "run_save_rule",
     "run_split",
     "run_validate",
     "SplitRequest",

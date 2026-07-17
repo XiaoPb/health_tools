@@ -37,6 +37,8 @@ class RuleValidator:
             errors.extend(RuleValidator._validate_classify_rule(rule, strict))
         elif rule_type == "convert":
             errors.extend(RuleValidator._validate_convert_rule(rule, strict))
+        elif rule_type == "evaluate":
+            errors.extend(RuleValidator._validate_evaluate_rule(rule, strict))
         else:
             errors.append("无法识别的规则类型")
 
@@ -53,6 +55,8 @@ class RuleValidator:
             return "classify"
         elif "convert" in parts:
             return "convert"
+        elif "evaluate" in parts:
+            return "evaluate"
         return "unknown"
 
     @staticmethod
@@ -179,6 +183,20 @@ class RuleValidator:
             else:
                 errors.append("'extra_source' 必须是字典或列表")
 
+        return errors
+
+    @staticmethod
+    def _validate_evaluate_rule(rule: dict, strict: bool) -> List[str]:
+        errors = []
+        if rule.get("type") not in {"hr", "spo2"}:
+            errors.append("评估规则 'type' 必须是 hr 或 spo2")
+        for key in ("ref_column", "pred_column"):
+            if not isinstance(rule.get(key), str) or not rule.get(key):
+                errors.append(f"评估规则缺少有效的 '{key}' 字段")
+        if "methods" in rule and not isinstance(rule.get("methods"), list):
+            errors.append("评估规则 'methods' 必须是列表")
+        if strict and "description" not in rule:
+            errors.append("[严格模式] 缺少 'description' 字段")
         return errors
 
     @staticmethod
