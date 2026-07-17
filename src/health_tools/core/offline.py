@@ -132,7 +132,14 @@ class OfflineRunResult:
 
 def get_offline_config() -> OfflineConfig:
     config = load_config()
-    tools_path = Path(config.get("offline_tools_path", str(OFFLINE_TOOLS_DIR)))
+    configured_path = str(config.get("offline_tools_path", "")).strip()
+    if configured_path in {"", "."}:
+        tools_path = OFFLINE_TOOLS_DIR
+    else:
+        tools_path = Path(configured_path).expanduser()
+        if not tools_path.is_absolute():
+            tools_path = CONFIG_DIR / tools_path
+        tools_path = tools_path.resolve()
     versions = config.get("offline_versions", {})
     commands = config.get("offline_cmd", {})
     return OfflineConfig(tools_path=tools_path, versions=versions, commands=commands)
@@ -152,6 +159,7 @@ def scan_versions(tools_path: Optional[Path] = None) -> Dict[str, dict]:
         chip_name = chip_dir.name
         categories: Dict[str, List[str]] = {}
         last_version = ""
+        last_category = ""
 
         for category_dir in sorted(chip_dir.iterdir()):
             if not category_dir.is_dir():
@@ -167,13 +175,13 @@ def scan_versions(tools_path: Optional[Path] = None) -> Dict[str, dict]:
             if versions:
                 categories[category_name] = versions
                 last_version = versions[-1]
+                last_category = category_name
 
         if categories:
-            first_category = next(iter(categories))
             result[chip_name] = {
                 "versions": categories,
                 "default": last_version,
-                "default_category": first_category,
+                "default_category": last_category,
             }
 
     return result

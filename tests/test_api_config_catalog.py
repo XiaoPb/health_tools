@@ -106,6 +106,18 @@ def test_existing_config_action_remains_compatible_and_atomic(
     assert result.revision is not None
 
 
+def test_set_offline_path_persists_absolute_path(
+    isolated_config: Path, tmp_path: Path, monkeypatch
+):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = run_config(ConfigRequest(ConfigAction.SET_OFFLINE_PATH, value="tools"))
+
+    assert result.config["offline_tools_path"] == str(tools.resolve())
+
+
 def test_offline_catalog_returns_sorted_versions_and_exe_availability(monkeypatch, tmp_path: Path):
     tools = tmp_path / "tools"
     available = tools / "gh3036" / "basic" / "v2" / EXE_NAME

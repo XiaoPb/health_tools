@@ -20,6 +20,34 @@ from health_tools.core.vshb import read_vshb_result
 from health_tools.rules.loader import RuleLoader
 
 
+def test_offline_config_migrates_dot_to_default_tools_path(monkeypatch):
+    monkeypatch.setattr(offline, "load_config", lambda: {"offline_tools_path": "."})
+
+    config = offline.get_offline_config()
+
+    assert config.tools_path == offline.OFFLINE_TOOLS_DIR
+
+
+def test_offline_config_resolves_relative_path_from_config_dir(monkeypatch):
+    monkeypatch.setattr(offline, "load_config", lambda: {"offline_tools_path": "tools"})
+
+    config = offline.get_offline_config()
+
+    assert config.tools_path == (offline.CONFIG_DIR / "tools").resolve()
+
+
+def test_scan_versions_keeps_default_version_category_together(tmp_path):
+    for category, version in (("exclusive", "v1"), ("medium", "v2")):
+        executable = tmp_path / "gh3300" / category / version / offline.EXE_NAME
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"exe")
+
+    result = offline.scan_versions(tmp_path)
+
+    assert result["gh3300"]["default"] == "v2"
+    assert result["gh3300"]["default_category"] == "medium"
+
+
 def _make_runner(
     monkeypatch,
     tmp_path: Path,

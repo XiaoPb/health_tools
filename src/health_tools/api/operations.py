@@ -214,7 +214,7 @@ def run_config(
     elif request.action == ConfigAction.SET_OFFLINE_PATH:
         if not request.value:
             raise RequestValidationError("设置离线工具目录需要 value")
-        tools_path = _require_path(Path(request.value), "离线工具目录")
+        tools_path = _require_path(Path(request.value).expanduser().resolve(), "离线工具目录")
         config = load_config()
         versions = merge_scanned_versions(
             scan_versions(tools_path), config.get("offline_versions", {})

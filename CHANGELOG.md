@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.57] - 2026-07-17
+
+### Fixed
+- 修复 `offline_tools_path: .` 随进程工作目录漂移并导致离线版本目录为空的问题
+- 修复多分类扫描时默认版本与默认分类不匹配的问题
+- 设置离线工具目录时统一保存展开后的绝对路径
+
 ## [0.4.56] - 2026-07-17
 
 ### Added

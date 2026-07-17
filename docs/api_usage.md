@@ -201,6 +201,10 @@ for version in gh3036_versions.versions:
 目录查询只读取当前配置和文件系统。需要重新扫描工具目录时，先调用
 `run_config(ConfigRequest(ConfigAction.SCAN_OFFLINE))`。
 
+设置离线工具目录时 API 会展开 `~` 和相对路径，并把绝对路径写入配置。历史配置中的空路径
+或 `.` 按 `~/.ghealth_tools/offline_algorithm_tools` 迁移解释，避免 CLI 与 UI 因启动目录
+不同而扫描不同位置。
+
 <!-- api-contract-example -->
 ```python
 from health_tools.api import (
