@@ -23,6 +23,35 @@ regex: '(\\d+)'
 columns: [value]
 """
 
+MULTI_PARSE_SOURCE = """version: '1.0'
+patterns:
+  hr:
+    regex: '^\\[HR\\],(.+)$'
+    columns: [timestamp, frame, acc_x]
+    separator: ','
+  hrv:
+    regex: '^\\[HRV\\] rri0:(\\d+), rri1:(\\d+)$'
+    columns: [rri0, rri1]
+"""
+
+CLASSIFY_PATTERNS_SOURCE = """version: '1.0'
+description: posture keywords
+patterns:
+  sit: [静坐, sitting]
+  supine: [平躺]
+"""
+
+CLASSIFY_PIPELINE_SOURCE = """version: '1.0'
+extract:
+  - name: spo2_median
+    function: calculate_median
+    params: {column: REF_RESULT5, samples: 50}
+classify:
+  - target: normal
+    condition: spo2_median >= 95
+default: unclassified
+"""
+
 VALID_SOURCES = {
     RuleType.CHIP: """version: '1.0'
 chip: demo
@@ -152,6 +181,21 @@ def test_save_supports_all_public_rule_types(rule_roots, rule_type: RuleType):
     assert result.rule.source == RuleSource.USER
 
 
+@pytest.mark.parametrize(
+    ("rule_type", "name", "source"),
+    [
+        (RuleType.PARSE, "multi.yaml", MULTI_PARSE_SOURCE),
+        (RuleType.CLASSIFY, "patterns.yaml", CLASSIFY_PATTERNS_SOURCE),
+        (RuleType.CLASSIFY, "pipeline.yaml", CLASSIFY_PIPELINE_SOURCE),
+    ],
+)
+def test_save_supports_public_rule_variants(rule_roots, rule_type, name, source):
+    saved = run_save_rule(RuleSaveRequest(rule_type, name, source))
+
+    assert saved.source == source
+    assert saved.rule.rule_type == rule_type
+
+
 def test_save_builtin_rule_creates_user_override(rule_roots):
     builtin, user = rule_roots
     _write(builtin, "parse", "shared.yaml")
@@ -213,6 +257,42 @@ def test_save_rejects_invalid_yaml_roots(rule_roots, source: str):
 def test_save_rejects_structurally_invalid_rule(rule_roots):
     with pytest.raises(RuleLoadError, match="规则校验失败"):
         run_save_rule(RuleSaveRequest(RuleType.PARSE, "new.yaml", "version: '1.0'\n"))
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (
+            "version: '1.0'\npatterns:\n  broken:\n    regex: '('\n    columns: [value]\n",
+            "正则表达式错误",
+        ),
+        (
+            "version: '1.0'\npatterns:\n  broken:\n    regex: '(a)(b)'\n" "    columns: [value]\n",
+            "捕获组数量",
+        ),
+        (
+            "version: '1.0'\npatterns:\n  broken:\n    regex: '(.*)'\n"
+            "    columns: [a, b]\n    separator: ''\n",
+            "separator",
+        ),
+    ],
+)
+def test_save_rejects_invalid_multi_parse_patterns(rule_roots, source: str, message: str):
+    with pytest.raises(RuleLoadError, match=message):
+        run_save_rule(RuleSaveRequest(RuleType.PARSE, "invalid.yaml", source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "version: '1.0'\npatterns: {}\n",
+        "version: '1.0'\npatterns:\n  sit: sit\n",
+        "version: '1.0'\npatterns:\n  sit: [静坐, 1]\n",
+    ],
+)
+def test_save_rejects_invalid_classify_pattern_libraries(rule_roots, source: str):
+    with pytest.raises(RuleLoadError, match="patterns"):
+        run_save_rule(RuleSaveRequest(RuleType.CLASSIFY, "invalid.yaml", source))
 
 
 def test_evaluate_validator_supports_valid_and_invalid_rules(tmp_path: Path):

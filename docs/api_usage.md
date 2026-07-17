@@ -158,6 +158,10 @@ print(saved.rule.path, saved.revision)
 已有有效规则必须提供 `expected_revision`；只有全新名称允许省略。外部修改导致 revision 不匹配
 时抛出 `RequestValidationError`，调用方应重新读取并让用户决定如何合并。
 
+规则验证与保存支持 Parse 的单 pattern 和顶层 `patterns` 多 pattern 结构，也支持 Classify
+的 `structure/rules`、`extract/classify` 和纯 `patterns` 关键词库。Parse 使用单捕获组时可
+通过 `separator` 拆分到多个 columns，适合 UI 根据样本日志生成规则。
+
 ## 可视化配置编辑
 
 `ConfigAction.REPLACE` 用于保存 UI 中编辑的完整配置 YAML。配置文件已存在时必须携带 SHOW

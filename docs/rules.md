@@ -121,8 +121,8 @@ columns: [timestamp, red, ir, green, aux]
 separator: ','
 ```
 
-`regex` 的捕获组数量必须等于展开后的 `columns` 数量。`chip` 或兼容字段 `target_chip`
-可给解析命令提供默认目标芯片。
+`regex` 的捕获组数量可以等于展开后的 `columns` 数量；也可以只使用一个捕获组，再按
+`separator` 拆分为多列。`chip` 或兼容字段 `target_chip` 可给解析命令提供默认目标芯片。
 
 多 pattern 规则可从同一日志分别生成多组 CSV：
 
@@ -140,7 +140,8 @@ patterns:
     separator: ','
 ```
 
-多 pattern 模式以 pattern 名区分输出。每个 pattern 的捕获组仍须与自己的列一一对应。
+多 pattern 模式以 pattern 名区分输出。每个 pattern 都支持捕获组逐列映射或单捕获组按
+separator 拆列，`validate` 和规则保存 API 会逐项检查。
 
 ## classify 规则
 
@@ -349,8 +350,6 @@ ghealth_tool validate path/to/rules/parse/custom.yaml --strict
 已知限制：
 
 - `evaluate` 尚无专用结构验证；使用 `ghealth_tool evaluate --rule ...` 对小样本验证。
-- 多 pattern parse 的旧验证路径仍期待顶层 `regex` 和 `columns`；使用
-  `ghealth_tool parse --dry-run` 并用小日志验证各 pattern。
 - `classify` 的条件表达式、提取函数和扩展 patterns 需要实际分类运行验证。
 - `computed` 公式和 `extra_source` 对齐是否正确只能通过实际转换与输出报告确认。
 - `--strict` 当前只额外要求单 pattern parse 规则包含 `description`。

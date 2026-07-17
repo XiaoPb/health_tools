@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.58] - 2026-07-17
+
+### Fixed
+- 规则验证与保存 API 支持多 Pattern Parse、单捕获组分隔多列和纯 Classify 关键词库
+- Classify 验证兼容 `extract/classify` 条件分类流程，不再错误要求 legacy `structure`
+
 ## [0.4.57] - 2026-07-17
 
 ### Fixed
