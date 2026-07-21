@@ -167,19 +167,9 @@ def run_config(
     from health_tools.config import (
         CONFIG_DIR,
         CONFIG_FILE,
-        ConfigRevisionConflict,
-        init_config_dir,
         load_config,
         read_config_document,
-        replace_config_document,
         save_config,
-        sync_builtin_rules,
-    )
-    from health_tools.core.offline import (
-        get_offline_config,
-        merge_scanned_versions,
-        save_offline_config,
-        scan_versions,
     )
 
     ctx = _context(context)
@@ -199,6 +189,8 @@ def run_config(
         raise RequestValidationError("source 和 expected_revision 仅适用于 REPLACE")
 
     if request.action == ConfigAction.INIT:
+        from health_tools.config import init_config_dir, sync_builtin_rules
+
         init_config_dir()
         sync_builtin_rules(force=request.force)
         changed.extend([CONFIG_DIR, CONFIG_FILE])
@@ -212,6 +204,12 @@ def run_config(
         save_config(config)
         changed.append(CONFIG_FILE)
     elif request.action == ConfigAction.SET_OFFLINE_PATH:
+        from health_tools.core.offline import (
+            merge_scanned_versions,
+            save_offline_config,
+            scan_versions,
+        )
+
         if not request.value:
             raise RequestValidationError("设置离线工具目录需要 value")
         tools_path = _require_path(Path(request.value).expanduser().resolve(), "离线工具目录")
@@ -248,6 +246,13 @@ def run_config(
         save_config(config)
         changed.append(CONFIG_FILE)
     elif request.action == ConfigAction.SCAN_OFFLINE:
+        from health_tools.core.offline import (
+            get_offline_config,
+            merge_scanned_versions,
+            save_offline_config,
+            scan_versions,
+        )
+
         cfg = get_offline_config()
         if not cfg.tools_path.exists():
             raise RequestValidationError(f"离线工具路径不存在: {cfg.tools_path}")
@@ -258,6 +263,8 @@ def run_config(
         save_offline_config(cfg.tools_path, versions)
         changed.append(CONFIG_FILE)
     elif request.action == ConfigAction.REPLACE:
+        from health_tools.config import ConfigRevisionConflict, replace_config_document
+
         source = request.source
         if not isinstance(source, str):  # 已在通用请求校验中拦截
             raise RequestValidationError("配置 source 必须是字符串")

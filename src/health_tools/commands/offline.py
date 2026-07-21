@@ -103,8 +103,34 @@ def offline_cmd(
             )
         )
     if do_list:
-        for version in result.versions:
-            console.print(version)
+        from health_tools.core.offline import get_category_label, get_offline_config, list_versions
+
+        versions = list_versions(chip_name)
+        if not versions:
+            cfg = get_offline_config()
+            console.print("[yellow]未发现已配置的版本[/yellow]")
+            console.print(f"工具路径: {cfg.tools_path}")
+            console.print("请先配置: ghealth_tool cfg --offline-path <路径>")
+        else:
+            table = Table(title="离线工具版本", show_header=True)
+            table.add_column("芯片", style="bold")
+            table.add_column("类别")
+            table.add_column("版本")
+            table.add_column("默认", style="green")
+            for chip_name_ver, info in versions.items():
+                default_ver = info.get("default", "")
+                categories = info.get("versions", {})
+                if isinstance(categories, dict):
+                    for cat, ver_list in categories.items():
+                        cat_label = get_category_label(cat)
+                        for v in ver_list:
+                            is_default = "*" if v == default_ver else ""
+                            table.add_row(chip_name_ver, cat_label, v, is_default)
+                else:
+                    for v in categories:
+                        is_default = "*" if v == default_ver else ""
+                        table.add_row(chip_name_ver, "", v, is_default)
+            console.print(table)
     else:
         print_batch("离线跑库", result.batch, console, verbose)
         for item in result.batch.items:

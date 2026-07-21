@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np  # noqa: F401
+    import pandas as pd  # noqa: F401
+
 import fnmatch
 import re
 import shutil
@@ -9,8 +15,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-import numpy as np
-import pandas as pd
 
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import GHealthError, RequestValidationError
@@ -90,6 +94,9 @@ def _plot_data(
     pred_column: Optional[str],
     timestamp_column: Optional[str],
 ) -> Dict[str, object]:
+    import numpy as np
+    import pandas as pd
+
     rate_value = features.get("sample_rate")
     rate = float(rate_value) if isinstance(rate_value, (int, float, str)) else 1.0
     time = np.arange(len(frame), dtype=float) / rate
@@ -238,6 +245,8 @@ def _acc_detail_label(column: str) -> str:
 
 
 def _specific_acc_title(values: pd.Series) -> str:
+    import numpy as np
+
     kinds = []
     for column, title in (
         ("ACC全零次数", "全零"),
@@ -254,6 +263,8 @@ def _specific_acc_title(values: pd.Series) -> str:
 
 
 def _apply_check_results(records: List[AnalysisRecord], report_path: Optional[Path], rule) -> None:
+    import pandas as pd
+
     if report_path is None or not report_path.exists():
         return
     report = pd.read_csv(report_path, encoding="utf-8-sig")
@@ -309,6 +320,8 @@ def _apply_check_results(records: List[AnalysisRecord], report_path: Optional[Pa
 def _apply_evaluate_results(
     records: List[AnalysisRecord], detail_path: Optional[Path], rule
 ) -> None:
+    import pandas as pd
+
     if detail_path is None or not detail_path.exists():
         return
     details = pd.read_csv(detail_path)

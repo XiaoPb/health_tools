@@ -7,27 +7,16 @@ from typing import TYPE_CHECKING, Optional
 
 import click
 from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
 
 if TYPE_CHECKING:
-    import pandas as pd
 
-    from health_tools.core.factory import FactoryCalculator
+    pass
 
 console = Console()
 
 
-def _get_channel_list(channels: Optional[str], chip_rule, df: pd.DataFrame):
-    if channels:
-        return channels.split(",")
-    if chip_rule and chip_rule.factory_columns:
-        return [c for c in chip_rule.factory_columns if c in df.columns]
-    return None
-
-
 def _parse_metric_cfg(value: Optional[str]) -> Optional[dict]:
-    """解析 'skip_head,skip_tail,min_duration' 格式为配置字典"""
+    """解析 skip_head,skip_tail,min_duration 格式为配置字典"""
     if not value:
         return None
     parts = [float(x.strip()) for x in value.split(",")]
@@ -40,56 +29,20 @@ def _parse_metric_cfg(value: Optional[str]) -> Optional[dict]:
     }
 
 
-def _build_calculator(
-    chip_rule,
-    gain,
-    current,
-    sample_rate,
-    snr_override,
-    ctr_override,
-    noise_override,
-    adc_offset_override=None,
-) -> FactoryCalculator:
-    """从 chip_rule 构建 FactoryCalculator"""
-    from health_tools.core.factory import FactoryCalculator
-
-    fc = chip_rule.factory_config if chip_rule else {}
-    calc_sample_rate = sample_rate or fc.get("sample_rate", 100.0)
-
-    adc_full_scale = 8388608.0
-    adc_offset = 0.0
-    adc_vref = 1.8
-    tia_ratio = 2.0
-    if chip_rule and chip_rule.chip_info:
-        adc_full_scale = float(chip_rule.chip_info.get("adc_full_scale", 8388608))
-        adc_offset = float(chip_rule.chip_info.get("adc_offset", 0))
-        adc_vref = float(chip_rule.chip_info.get("adc_vref", 1.8))
-        tia_ratio = float(chip_rule.chip_info.get("tia_ratio", 2.0))
-
-    if adc_offset_override is not None:
-        adc_offset = adc_offset_override
-
-    return FactoryCalculator(
-        gain=gain,
-        current=current,
-        sample_rate=calc_sample_rate,
-        adc_full_scale=adc_full_scale,
-        adc_offset=adc_offset,
-        adc_vref=adc_vref,
-        tia_ratio=tia_ratio,
-        snr_config=snr_override or fc.get("snr"),
-        ctr_config=ctr_override or fc.get("ctr"),
-        noise_config=noise_override or fc.get("noise"),
-    )
-
-
-def _print_adc_info(calculator: FactoryCalculator):
+def _print_adc_params(chip_rule, adc_offset_override: Optional[float] = None) -> None:
     """输出 ADC 参数和计算公式"""
+    ci = chip_rule.chip_info if chip_rule else {}
+    adc_full_scale = float(ci.get("adc_full_scale", 8388608))
+    adc_offset = (
+        adc_offset_override if adc_offset_override is not None else float(ci.get("adc_offset", 0))
+    )
+    adc_vref = float(ci.get("adc_vref", 1.8))
+    tia_ratio = float(ci.get("tia_ratio", 2.0))
     console.print(
-        f"[green]adc_full_scale: {calculator.adc_full_scale:.0f}  "
-        f"adc_offset: {calculator.adc_offset:.0f}  "
-        f"adc_vref: {calculator.adc_vref}  "
-        f"tia_ratio: {calculator.tia_ratio}[/green]"
+        f"[green]adc_full_scale: {adc_full_scale:.0f}  "
+        f"adc_offset: {adc_offset:.0f}  "
+        f"adc_vref: {adc_vref}  "
+        f"tia_ratio: {tia_ratio}[/green]"
     )
     console.print("[green]SNR(dB) = 20 * log10((Mean - adc_offset) / Std_filtered)[/green]")
     console.print("[green]Noise(uV) = 6 * Std_filtered * adc_vref * 1e6 / adc_full_scale[/green]")
@@ -98,24 +51,6 @@ def _print_adc_info(calculator: FactoryCalculator):
     )
     console.print("[green]ipd_pA = rawdata_uv / (tia_ratio * RF) * 1000[/green]")
     console.print("[green]CTR(nA/mA) = ipd_pA / 1000 / iled[/green]")
-
-
-def _print_chip_info(results, file_name: str):
-    """输出文件的通道级 chip_info（gain、current）"""
-    info_rows = [(m.channel, m.gain, m.current) for m in results if m.gain or m.current]
-    if not info_rows:
-        return
-    tbl = Table(show_header=True, header_style="bold")
-    tbl.add_column("CH")
-    tbl.add_column("Gain(KΩ)")
-    tbl.add_column("Current(mA)")
-    for ch, g, c in info_rows:
-        tbl.add_row(
-            ch,
-            f"{g:.1f}" if g is not None else "-",
-            f"{c:.1f}" if c is not None else "-",
-        )
-    console.print(Panel(tbl, title=f"chip_info: {file_name}", border_style="dim"))
 
 
 @click.command()
@@ -154,6 +89,13 @@ def factory_cmd(
     """计算SNR/CTR/Noise（产测）"""
     from health_tools.api import FactoryRequest, run_factory
     from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
+
+    # 加载芯片配置以显示 ADC 参数和计算公式
+    if chip_name:
+        from health_tools.rules.loader import RuleLoader
+
+        chip_rule = RuleLoader.load_chip_rule(chip_name)
+        _print_adc_params(chip_rule, adc_offset)
 
     with CliExecution(console) as context:
         result = invoke_api(
