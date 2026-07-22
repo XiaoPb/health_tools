@@ -247,7 +247,7 @@ patterns:
 
 ## classify 规则
 
-路径：`rules/classify/<name>.yaml`。分类支持两套兼容结构：简单的 `filename/data_columns/structure/rules`，以及功能更完整的 `extract/classify` 流程。两套可共存于同一规则，按 `extract/classify` 优先执行。
+路径：`rules/classify/<name>.yaml`。分类支持两套结构：简单的 `filename/data_columns/structure/rules`，以及功能更完整的 `extract/classify` 流程。两套可共存于同一规则文件；存在 `classify` 时独占执行（`rules` 被跳过，未命中返回 `default`），否则使用简单 `rules`。
 
 ### 简单分类
 
@@ -273,7 +273,7 @@ structure:
 rules:
   - target: '{motion}'
     use_filename: true
-  - target: '{posture}/{motion}'
+  - target: 'posture/{level}'   # {level} 必须出现在 target 中，conditions 才会求值
     conditions:
       level:
         normal: "spo2_median >= 95"
@@ -282,19 +282,21 @@ rules:
 default: unclassified
 ```
 
+`conditions` 的键（如 `level`）是占位符名，必须出现在对应 `target` 中（如 `{level}`）才会求值；条件表达式引用 `extract` 或 `data_columns` 提取的变量（上例 `spo2_median` 见下文提取示例）。
+
 ### 提取与条件分类
 
 ```yaml
 version: "1.0"
 extends: posture_patterns.yaml   # 递归合并基础规则
-target_chip: gh3036              # 可选，仅记录目标芯片
+target_chip: gh3036              # 可选，指定芯片规则以决定 CSV 读取格式（info_row/header_row/delimiter/columns）
 
 extract:                          # 提取变量供 classify 条件使用
   - name: spo2_median
     function: calculate_median
     params:
       column: REF_RESULT5
-      column_col: 51             # 列名找不到时回退的 1-based 索引
+      column_col: 50             # 列名找不到时回退的 0-based 位置索引
       samples: 50
   - name: posture
     function: extract_from_path
@@ -303,17 +305,15 @@ extract:                          # 提取变量供 classify 条件使用
         sit: [静坐]
         supine: [平躺]
 
-classify:                         # 按条件匹配，命中即返回 target
+classify:                         # 按条件匹配，命中即返回 target；存在时 rules 被跳过
   - target: '{posture}/normalSpO2'
     condition: 'spo2_median >= 95'
   - target: '{posture}/lowspo2'
     condition: 'spo2_median < 95'
 
 accuracy:                         # 可选；启用 --accuracy 时计算准确度
-  ref_column: REF_RESULT5
-  ref_column_col: 51
-  pred_column: ALGO_RESULT0
-  pred_column_col: 62
+  ref_column: REF_RESULT5         # 参考列名（classify 仅按列名读取）
+  pred_column: ALGO_RESULT0       # 预测列名
   methods: [std, rmse, mae, within_3, correlation]
   thresholds:
     - { name: within_0.5, value: 0.5 }
@@ -324,27 +324,29 @@ default: unclassified
 
 `extends` 递归合并基础规则；命令行 `--extend <patterns.yaml>` 可多次追加 patterns 到 `extract` 中含 `params.patterns` 的项。分类 `target` 是相对于输出目录的路径，`{变量名}` 会被提取值替换。`--copy`（默认）、`--move`、`--symlink` 决定文件落盘方式。
 
+classify 的准确度按列名读取 `ref_column`/`pred_column`；如参考列名不在 CSV 中，请用命令行 `--ref-column`/`--pred-column` 指定，或改用 evaluate 规则（其 chip 规则的 `hr_ref_column`/`spo_ref_column` 支持按 1-based 索引回退）。
+
 ### 字段说明
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `version` | string | 规则版本 |
 | `extends` | string | 基础规则文件名，递归合并 |
-| `target_chip` | string | 可选，仅记录目标芯片 |
+| `target_chip` | string | 可选，指定芯片规则以决定 CSV 读取格式 |
 | `filename` | object | 文件名正则与字段 |
 | `filename.regex` | string | 文件名正则 |
 | `filename.fields` | list | 捕获组对应的字段名 |
 | `data_columns` | list | 数据列定义，见下 |
 | `structure` | object | 目录结构；值为 `""` 或 `|` 分隔的子目录名 |
-| `rules` | list | 简单分类规则 |
+| `rules` | list | 简单分类规则（存在 `classify` 时被跳过） |
 | `rules[].target` | string | 分类目标路径，支持 `{变量}` |
 | `rules[].use_filename` | bool | 使用文件名字段 |
-| `rules[].conditions` | object | 条件占位符 |
+| `rules[].conditions` | object | 条件占位符，键须出现在 target 中 |
 | `extract` | list | 提取变量定义 |
 | `extract[].name` | string | 变量名 |
 | `extract[].function` | string | 提取函数名，见下表 |
 | `extract[].params` | object | 函数参数 |
-| `classify` | list | 条件分类规则 |
+| `classify` | list | 条件分类规则（存在时独占执行） |
 | `classify[].target` | string | 分类目标路径 |
 | `classify[].condition` | string | 条件表达式 |
 | `accuracy` | object | 准确度配置，见下 |
@@ -368,29 +370,37 @@ default: unclassified
 
 ### extract 函数
 
-`params` 含 `patterns` 时按路径匹配；含 `column` 时按列计算（`column_col` 为列名找不到时的 1-based 索引回退）；否则透传全部 params。
+`CLASSIFY_FUNCTIONS` 注册的全部函数：
 
-| function | params | 说明 |
+| function | 签名 | 说明 |
 |---|---|---|
-| `calculate_median` | `column`, `column_col`(可选), `samples`(默认 50) | 指定列最后 N 个值的中位数 |
-| `calculate_mean` | `column`, `column_col`(可选) | 指定列均值 |
-| `calculate_std` | `column`, `column_col`(可选) | 指定列标准差 |
-| `calculate_percentile` | `column`, `column_col`(可选), `percentile`(默认 50) | 指定列百分位数 |
-| `get_column_value` | `column`, `column_col`(可选), `row`(默认 -1) | 指定列某行值 |
-| `count_values` | `column`, `column_col`(可选) | 指定列值计数字典 |
-| `extract_from_path` | `patterns` | 按路径关键词匹配类别，未匹配返回 `other` |
-| `classify_by_range` | `ranges` | 按范围分类（一般不直接用作 extract） |
+| `calculate_median` | `(df, column, samples=50)` | 指定列最后 N 个值的中位数 |
+| `calculate_mean` | `(df, column)` | 指定列均值 |
+| `calculate_std` | `(df, column)` | 指定列标准差 |
+| `calculate_percentile` | `(df, column, percentile=50)` | 指定列百分位数 |
+| `get_column_value` | `(df, column, row=-1)` | 指定列某行值 |
+| `count_values` | `(df, column)` | 指定列值计数字典 |
+| `extract_from_path` | `(file_path, patterns)` | 按路径关键词匹配类别，未匹配返回 `other` |
+| `classify_by_range` | `(value, ranges)` | 按范围分类（一般不直接用作 extract） |
+
+调用约定（`classifier._extract_values` 的分发逻辑）：
+
+- `params` 含 `patterns` → 调用 `extract_from_path(file_path, patterns)`。
+- `params` 含 `column` → 先按列名取列；列名不存在时用 `column_col`（0-based 位置索引）回退；随后以 `func(df, column, params.get("samples", 50))` 调用。该第三参数仅与 `calculate_median` 的 `samples` 形参匹配，因此：
+  - `calculate_median` 正常工作（`samples` 默认 50）。
+  - `calculate_percentile` 的第三参数落到 `percentile`（恒 50，显式 `percentile` 不生效）。
+  - `get_column_value` 的第三参数落到 `row`（恒 50，显式 `row` 不生效）。
+  - `calculate_mean`、`calculate_std`、`count_values` 不接收第三参数，column 分支会抛错并被跳过，当前不可用。
+- 否则 → `func(df, **params)` 透传。
 
 ### accuracy 块
 
-`--accuracy` 启用时计算准确度。`methods` 与 `thresholds` 的可用取值与 evaluate 规则完全一致（见 [evaluate 规则](#evaluate-规则)）。
+`--accuracy` 启用时按列名读取参考列与预测列计算准确度。`methods` 与 `thresholds` 的可用取值与 evaluate 规则完全一致（见 [evaluate 规则](#evaluate-规则)）。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `ref_column` | string | 参考列名 |
-| `ref_column_col` | int | 参考列 1-based 索引，优先于列名 |
 | `pred_column` | string | 预测列名 |
-| `pred_column_col` | int | 预测列 1-based 索引，优先于列名 |
 | `methods` | list | 准确度方法列表 |
 | `thresholds` | list | 自定义阈值指标 |
 
