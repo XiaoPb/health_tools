@@ -514,8 +514,7 @@ extra_source:
 
 ## evaluate 规则
 
-路径：`rules/evaluate/<name>.yaml`。评估规则定义参考列、预测列、异常阈值、场景分类和
-准确度方法。
+路径：`rules/evaluate/<name>.yaml`。评估规则定义参考列、预测列、异常阈值、场景分类和准确度方法。`--type` 默认随 `hr`/`spo2` 选内置 `evaluate_hr.yaml`/`evaluate_spo2.yaml`，可用 `--rule` 覆盖。
 
 ```yaml
 description: 心率准确度评估
@@ -535,24 +534,68 @@ classify:
   by_filename:
     run: [run, 跑步]
 
-methods: [mae, within_5, within_10, std, rmse, correlation]
+methods: [mae, within_5, within_10, within_15, std, rmse, correlation]
+thresholds:
+  - { name: within_0.5, value: 0.5 }
+  - { name: within_10_percent, percent: 10 }
+
 first_output_time: true
 default_category: other
 ```
 
-| 字段 | 说明 |
+### 字段说明
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `description` | string | 说明；`--strict` 要求存在 |
+| `type` | string | `hr` 或 `spo2` |
+| `ref_column` / `pred_column` | string | 默认参考列和预测列；CLI `--ref-column/--pred-column` 可覆盖 |
+| `anomaly` | object | 参考值异常检测阈值，见下 |
+| `classify` | object | 按目录和文件名关键词分类，见下 |
+| `classify_rule` | string | 保留字段，当前 evaluate 不会读取；场景分类请用 `by_directory`/`by_filename` |
+| `methods` | list | 准确度方法，见下 |
+| `thresholds` | list | 自定义阈值指标，见下 |
+| `first_output_time` | bool | 是否统计首次有效输出时间 |
+| `default_category` | string | 未匹配场景分类，默认 `other` |
+
+### anomaly 字段与默认值
+
+参考列与预测列解析优先级：CLI `--ref-column-col/--pred-column-col` > 规则列名 > chip 规则 `hr_ref_column`/`spo_ref_column`（按 `type` 选择：先取同名列的 1-based 索引；列名不在映射中时取第一个有效索引）。
+
+| 字段 | hr 默认 | spo2 默认 | 说明 |
+|---|---:|---:|---|
+| `diff_threshold` | 30 | 5 | 相邻结果差分异常阈值 |
+| `stale_minutes` | 2 | 2 | 结果长时间不变的判定时长（分钟） |
+| `sample_rate` | 25 | 25 | 异常时长换算使用的采样率 |
+
+### classify 匹配规则
+
+`classify` 配置 `by_directory` 与 `by_filename` 两个关键词映射（`{类别: [关键词]}`）。`by_directory` 按父目录名（转小写）子串匹配；未命中再按 `by_filename`（文件名 stem 转小写）子串匹配；仍未命中用 `default_category`。
+
+### methods 可用取值
+
+| method | 说明 |
 |---|---|
-| `type` | `hr` 或 `spo2` |
-| `ref_column` / `pred_column` | 默认参考列和预测列；CLI 可覆盖 |
-| `anomaly.diff_threshold` | 相邻结果差分异常阈值 |
-| `anomaly.stale_minutes` | 结果长时间不变的判定时长 |
-| `anomaly.sample_rate` | 异常时长换算使用的采样率 |
-| `classify` | 按目录和文件名关键词分类 |
-| `classify_rule` | 可选的 classify 规则名 |
-| `methods` | 输出的准确度方法 |
-| `thresholds` | 自定义固定值或百分比阈值 |
-| `first_output_time` | 是否统计首次有效输出时间 |
-| `default_category` | 未匹配场景分类 |
+| `std` | 误差标准差 |
+| `rmse` | 均方根误差 |
+| `mae` | 平均绝对误差 |
+| `mape` | 平均绝对百分比误差（%） |
+| `bias` | 偏差（平均误差） |
+| `correlation` | 相关系数 |
+| `r2` | 决定系数 R² |
+| `within_N` | 误差 `|ref-pred| <= N` 的样本占比（%），如 `within_5`、`within_10` |
+
+未指定 `methods` 时默认 `[mae, rmse, std]`。
+
+### thresholds 自定义指标
+
+`thresholds` 是列表，每项至少含 `name`，并二选一提供阈值来源：
+
+```yaml
+thresholds:
+  - { name: within_0.5, value: 0.5 }          # 固定阈值：|ref-pred| <= value 的占比(%)
+  - { name: within_10_percent, percent: 10 }   # 百分比阈值：|ref-pred| <= |ref|*percent/100 的占比(%)
+```
 
 ## analysis 规则
 
