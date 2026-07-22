@@ -599,29 +599,152 @@ thresholds:
 
 ## analysis 规则
 
-路径：`rules/analysis/<name>.yaml`。分析规则声明功能类型、输入列、启用的内置检测器、阈值和结构化原因条件。
+路径：`rules/analysis/<name>.yaml`。分析规则声明功能类型、输入列、启用的内置检测器、阈值、采样与离线策略，以及结构化原因条件。`type=other` 时必须通过 `--rule` 指定分析规则。
 
 ```yaml
 version: "1.0"
 type: hr
+description: 心率原始数据、准确度与动态 PSD 诊断
+
 columns:
   reference: REF_RESULT0
   prediction: ALGO_RESULT0
+  timestamp: TimeStamp
+  ppg_patterns: ["^Ipd\\d+$", "^CH\\d+$", "^Rawdata\\d+$"]
+  acc: [ACCX, ACCY, ACCZ]
+
 detectors: [integrity, raw_signal, reference, accuracy, motion, hr_psd]
-thresholds: {error: 10}
+
+sampling:
+  sample_rate: 25
+  infer_timestamp_unit: auto
+
+offline:
+  enabled: true
+
+thresholds:
+  error: 10
+  pi_low: 0.5
+  ref_min: 30
+  ref_max: 220
+
 causes:
-  - id: example
-    title: 原始数据示例
+  - id: data_incomplete
+    title: 原始数据缺失、断帧或时间戳异常
     origin: raw
+    priority: 95
     when: {feature: data_complete, op: eq, value: false}
-    actions: [检查采集链路并重新采集]
+    actions: [检查采集链路和传输缓存，重新采集完整且时间连续的数据]
+  - id: low_perfusion
+    title: 静态场景灌注不足
+    origin: raw
+    priority: 82
+    when:
+      all:
+        - {feature: scene, op: eq, value: static}
+        - {feature: pi_low, op: eq, value: true}
+    actions: [保持末梢温暖并稳定佩戴，待灌注恢复后重新测量]
+  - id: frequency_lock
+    title: 算法出值可能跟随运动主频
+    origin: algorithm
+    priority: 75
+    when: {feature: psd_locked, op: eq, value: true}
 ```
 
-`origin` 只能是 `raw`、`reference` 或 `algorithm`。算法原因不能声明 `actions`；条件只支持 `all`、`any`、`not` 和 `eq/ne/lt/le/gt/ge/in/not_in/between/exists`，不会执行任意表达式。`type=other` 必须通过 `--rule` 指定分析规则。
+### 字段说明
 
-`detectors` 决定允许使用的证据类型。`hr_psd` 只适用于心率；SpO2 或未声明该检测器的自定义功能不会执行心率锁频、牵引和谐波判断。SpO2 内置规则把 `motion_rms` 超限作为静止测试条件不满足，优先于准确度异常归因，并以 `pi_low` 检查静止双波长数据的最低通道 PI。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `version` | string | 规则版本（校验必填，加载后不保留） |
+| `type` | string | `hr` / `spo2` / `other` |
+| `description` | string | 说明；`--strict` 要求存在 |
+| `columns` | object | 输入列映射，见下 |
+| `detectors` | list | 启用的内置检测器，见下 |
+| `sampling` | object | 采样配置，见下 |
+| `offline` | object | 离线策略，见下 |
+| `thresholds` | object | 诊断阈值，见 [analyze 命令](cmd_analyze.md#配置判断阈值) |
+| `causes` | list | 结构化原因条件，见下 |
+
+### columns 字段
+
+| 键 | 类型 | 说明 |
+|---|---|---|
+| `reference` | string | 参考列 |
+| `prediction` | string | 预测列 |
+| `timestamp` | string | 时间戳列（可选） |
+| `ppg_patterns` | list | PPG 列正则列表，匹配 `Ipd*`/`CH*`/`Rawdata*` |
+| `acc` | list | 三轴 ACC 列 |
 
 光学列的数据语义固定如下：`CH*` 默认视为 Rawdata，和 `Rawdata*` 一样在计算 PI 前减去 chip 规则的 `chip_info.adc_offset`；`Ipd*` 单位是 pA，不能再减 ADC 偏置。内置规则会识别这三类列，结构化结果通过 `pi_by_channel` 和 `pi_units` 保留逐通道值与单位。
+
+### detectors 可用取值
+
+| detector | 适用 | 说明 |
+|---|---|---|
+| `integrity` | hr/spo2 | 完整性（缺失、断帧、时间戳） |
+| `raw_signal` | hr/spo2 | 原始信号质量（平线、饱和、基线漂移、PI） |
+| `reference` | hr/spo2 | 参考值范围、有效比例、跳变、停滞 |
+| `accuracy` | hr/spo2 | 准确度与异常分段 |
+| `motion` | hr/spo2 | 运动幅度；SpO2 超限直接判测试条件不满足 |
+| `hr_psd` | 仅 hr | 心率锁频、牵引、谐波判断 |
+| `channel_consistency` | 仅 spo2 | 双波长一致性 |
+
+`hr_psd` 只适用于心率；SpO2 或未声明该检测器的自定义功能不会执行心率锁频、牵引和谐波判断。SpO2 内置规则把 `motion_rms` 超限作为静止测试条件不满足，优先于准确度异常归因，并以 `pi_low` 检查静止双波长数据的最低通道 PI。
+
+### sampling 字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `sample_rate` | int | 默认采样率；`--sample-rate` 优先，其次从时间戳推导 |
+| `infer_timestamp_unit` | string | 保留字段，当前未读取；时间戳单位由代码按量级自动推断 |
+
+### offline 字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `enabled` | bool | 是否允许自动调用离线算法升级（仅 `hr` 生效；`--no-offline` 强制关闭） |
+
+### causes 字段
+
+```yaml
+causes:
+  - id: data_incomplete          # 唯一标识
+    title: 原始数据缺失           # 显示标题
+    origin: raw                  # raw | reference | algorithm
+    priority: 95                 # 优先级，数值越大越先匹配
+    when: {feature: data_complete, op: eq, value: false}  # 结构化条件
+    actions: [检查采集链路]       # 改善措施；仅 raw 写入报告，algorithm 不能声明
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | 唯一标识 |
+| `title` | string | 显示标题 |
+| `origin` | string | `raw` / `reference` / `algorithm`；`algorithm` 不能声明 `actions` |
+| `priority` | int | 优先级，数值越大越优先匹配 |
+| `when` | object | 结构化条件，见下 |
+| `actions` | list | 改善措施；`algorithm` 不能声明，运行时仅 `raw` 来源的措施写入报告 |
+
+### when 条件结构
+
+`when` 是结构化条件，**不会执行任意表达式**。基本形式：
+
+```yaml
+when: {feature: <特征名>, op: <操作>, value: <值>}
+```
+
+组合形式：
+
+```yaml
+when:
+  all: [<条件>, <条件>]   # 全部满足
+when:
+  any: [<条件>, <条件>]   # 任一满足
+when:
+  not: <条件>             # 取反
+```
+
+`origin` 只能是 `raw`、`reference` 或 `algorithm`。可用 `op`：`eq`、`ne`、`lt`、`le`、`gt`、`ge`、`in`、`not_in`、`between`、`exists`。
 
 心率 Polar 参考检查使用 `ref_min/ref_max`、`ref_valid_ratio`、`ref_stale_seconds` 和 `ref_jump_per_second`。局部越界或跳变样本从准确度中隔离，仅产生人工复审警告；它不会覆盖原始/PSD 原因、结论或证据图。只有有效比例低于 `ref_valid_ratio` 或全局无有效值时，才停止参考归因。
 
