@@ -188,7 +188,7 @@ gain_tia_map:
 
 ### hr_ref_column / spo_ref_column
 
-`evaluate` 解析参考列与预测列时优先级为：命令行 `--ref-column-col/--pred-column-col` > 规则 `ref_column/pred_column` 列名 > chip 规则的 `hr_ref_column`/`spo_ref_column`（按 `type` 选择）中同名列的 1-based 索引。因此即使输出 CSV 改了列顺序，只要索引正确，evaluate 仍能定位参考列。
+`evaluate` 解析参考列与预测列时优先级为：命令行 `--ref-column-col/--pred-column-col` > 规则 `ref_column/pred_column` 列名 > chip 规则的 `hr_ref_column`/`spo_ref_column`（按 `type` 选择：先取同名列的 1-based 索引；列名不在映射中时取第一个有效索引）。因此即使输出 CSV 改了列顺序，只要索引正确，evaluate 仍能定位参考列。
 
 ## parse 规则
 
@@ -338,7 +338,7 @@ classify 的准确度按列名读取 `ref_column`/`pred_column`；如参考列�
 | `filename.fields` | list | 捕获组对应的字段名 |
 | `data_columns` | list | 数据列定义，见下 |
 | `structure` | object | 目录结构；值为 `""` 或 `|` 分隔的子目录名 |
-| `rules` | list | 简单分类规则（存在 `classify` 时被跳过） |
+| `rules` | list | 简单分类规则（存在 `classify` 时被跳过；`--strict` 简单结构要求存在） |
 | `rules[].target` | string | 分类目标路径，支持 `{变量}` |
 | `rules[].use_filename` | bool | 使用文件名字段 |
 | `rules[].conditions` | object | 条件占位符，键须出现在 target 中 |
@@ -733,13 +733,19 @@ causes:
 when: {feature: <特征名>, op: <操作>, value: <值>}
 ```
 
-组合形式：
+组合形式（`when` 的值可取以下任一）：
 
 ```yaml
 when:
   all: [<条件>, <条件>]   # 全部满足
+```
+
+```yaml
 when:
   any: [<条件>, <条件>]   # 任一满足
+```
+
+```yaml
 when:
   not: <条件>             # 取反
 ```
