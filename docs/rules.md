@@ -192,25 +192,31 @@ gain_tia_map:
 
 ## parse 规则
 
-路径：`rules/parse/<name>.yaml`。单 pattern 规则用一个正则把日志行转换为一组列：
+路径：`rules/parse/<name>.yaml`。把日志行用正则转换为一组列，输出 CSV。
+
+### 单 pattern 规则
 
 ```yaml
 version: "1.0"
 description: GH3220 日志
-chip: gh3220
+chip: gh3220            # 等价于 target_chip；指定后输出完整芯片列格式
 regex: '^\[(.+?)\]\s+GH3220:\s*(\d+),(\d+),(\d+),(\d+)$'
 columns: [timestamp, red, ir, green, aux]
-separator: ','
+separator: ','          # 默认逗号
 ```
 
-`regex` 的捕获组数量可以等于展开后的 `columns` 数量；也可以只使用一个捕获组，再按
-`separator` 拆分为多列。`chip` 或兼容字段 `target_chip` 可给解析命令提供默认目标芯片。
+`regex` 捕获组数量可以等于展开后的 `columns` 数量（逐列映射）；也可以只用一个捕获组，再按 `separator` 拆分为多列。`chip` 与 `target_chip` 互为兼容字段，给解析命令提供默认目标芯片。
 
-多 pattern 规则可从同一日志分别生成多组 CSV：
+指定 `chip`/`target_chip` 后，输出按目标芯片 `columns` 的完整列顺序，未匹配列填 0，并写入 info 行 + header 行（与 chip 规则一致）。命令行 `-c/--chip` 不会覆盖规则里的 `chip/target_chip`。
+
+### 多 pattern 规则
+
+同一日志分别生成多组 CSV：
 
 ```yaml
 version: "1.0"
 description: 同时解析 PPG 和算法输出
+target_chip: gh3036
 patterns:
   ppg:
     regex: '^PPG:(\d+),(\d+)$'
@@ -222,8 +228,22 @@ patterns:
     separator: ','
 ```
 
-多 pattern 模式以 pattern 名区分输出。每个 pattern 都支持捕获组逐列映射或单捕获组按
-separator 拆列，`validate` 和规则保存 API 会逐项检查。
+多 pattern 模式以 pattern 名区分输出，每个 pattern 输出文件名为 `{原文件名}_{pattern名}.csv`。每个 pattern 都支持捕获组逐列映射或单捕获组按 `separator` 拆列。`validate` 和规则保存 API 会逐项检查捕获组与列数是否匹配。
+
+### 字段说明
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `version` | string | 规则版本 |
+| `description` | string | 说明；`--strict` 要求存在 |
+| `regex` | string | 单 pattern 的正则 |
+| `columns` | list | 单 pattern 的输出列名（支持 `{start-end}` 展开） |
+| `separator` | string | 单捕获组拆分多列的分隔符，默认 `,` |
+| `chip` / `target_chip` | string | 目标芯片；指定后输出完整芯片列格式 |
+| `patterns` | dict | 多 pattern 配置，键为 pattern 名 |
+| `patterns.<name>.regex` | string | 该 pattern 的正则 |
+| `patterns.<name>.columns` | list | 该 pattern 的输出列名 |
+| `patterns.<name>.separator` | string | 该 pattern 的分隔符，默认 `,` |
 
 ## classify 规则
 
