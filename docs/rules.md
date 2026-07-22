@@ -247,8 +247,7 @@ patterns:
 
 ## classify 规则
 
-路径：`rules/classify/<name>.yaml`。分类支持两套兼容结构：简单的
-`filename/data_columns/structure/rules`，以及功能更完整的 `extract/classify` 流程。
+路径：`rules/classify/<name>.yaml`。分类支持两套兼容结构：简单的 `filename/data_columns/structure/rules`，以及功能更完整的 `extract/classify` 流程。两套可共存于同一规则，按 `extract/classify` 优先执行。
 
 ### 简单分类
 
@@ -269,10 +268,16 @@ data_columns:
 structure:
   sit: ''
   walk: ''
+  posture: "sit|stand|walk"   # posture/ 及其下 sit/stand/walk 子目录（| 分隔多个子目录）
 
 rules:
   - target: '{motion}'
     use_filename: true
+  - target: '{posture}/{motion}'
+    conditions:
+      level:
+        normal: "spo2_median >= 95"
+        low: "spo2_median < 95"
 
 default: unclassified
 ```
@@ -281,15 +286,15 @@ default: unclassified
 
 ```yaml
 version: "1.0"
-extends: posture_patterns.yaml
-target_chip: gh3036
+extends: posture_patterns.yaml   # 递归合并基础规则
+target_chip: gh3036              # 可选，仅记录目标芯片
 
-extract:
+extract:                          # 提取变量供 classify 条件使用
   - name: spo2_median
     function: calculate_median
     params:
       column: REF_RESULT5
-      column_col: 51
+      column_col: 51             # 列名找不到时回退的 1-based 索引
       samples: 50
   - name: posture
     function: extract_from_path
@@ -298,22 +303,108 @@ extract:
         sit: [静坐]
         supine: [平躺]
 
-classify:
+classify:                         # 按条件匹配，命中即返回 target
   - target: '{posture}/normalSpO2'
     condition: 'spo2_median >= 95'
   - target: '{posture}/lowspo2'
     condition: 'spo2_median < 95'
 
-accuracy:
+accuracy:                         # 可选；启用 --accuracy 时计算准确度
   ref_column: REF_RESULT5
+  ref_column_col: 51
   pred_column: ALGO_RESULT0
-  methods: [rmse, mae, correlation]
+  pred_column_col: 62
+  methods: [std, rmse, mae, within_3, correlation]
+  thresholds:
+    - { name: within_0.5, value: 0.5 }
+    - { name: within_10_percent, percent: 10 }
 
 default: unclassified
 ```
 
-`extends` 递归合并基础规则；命令行可多次使用 `--extend` 扩展 patterns。分类目标是相对于
-输出目录的路径。`--copy`、`--move`、`--symlink` 决定文件落盘方式。
+`extends` 递归合并基础规则；命令行 `--extend <patterns.yaml>` 可多次追加 patterns 到 `extract` 中含 `params.patterns` 的项。分类 `target` 是相对于输出目录的路径，`{变量名}` 会被提取值替换。`--copy`（默认）、`--move`、`--symlink` 决定文件落盘方式。
+
+### 字段说明
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `version` | string | 规则版本 |
+| `extends` | string | 基础规则文件名，递归合并 |
+| `target_chip` | string | 可选，仅记录目标芯片 |
+| `filename` | object | 文件名正则与字段 |
+| `filename.regex` | string | 文件名正则 |
+| `filename.fields` | list | 捕获组对应的字段名 |
+| `data_columns` | list | 数据列定义，见下 |
+| `structure` | object | 目录结构；值为 `""` 或 `|` 分隔的子目录名 |
+| `rules` | list | 简单分类规则 |
+| `rules[].target` | string | 分类目标路径，支持 `{变量}` |
+| `rules[].use_filename` | bool | 使用文件名字段 |
+| `rules[].conditions` | object | 条件占位符 |
+| `extract` | list | 提取变量定义 |
+| `extract[].name` | string | 变量名 |
+| `extract[].function` | string | 提取函数名，见下表 |
+| `extract[].params` | object | 函数参数 |
+| `classify` | list | 条件分类规则 |
+| `classify[].target` | string | 分类目标路径 |
+| `classify[].condition` | string | 条件表达式 |
+| `accuracy` | object | 准确度配置，见下 |
+| `default` | string | 未匹配时的目录名 |
+
+### data_columns 字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | string | 变量名，供 target/condition 引用 |
+| `source` | string | `filename` / `parent_dir` / `data`（默认 `data`） |
+| `type` | string | `string`（默认）或 `int`（int 会转数值再统计） |
+| `column` | string | `source=data` 时读取的列名 |
+| `column_index` | int | 或 0-based 列索引，与 `column` 二选一 |
+| `match` | object | 关键词匹配 → 类别名 `{类别: [关键词]}` |
+| `regex` | string | 正则提取 |
+| `group` | int | 捕获组序号（1-based） |
+| `ranges` | object | 按列均值落入区间分类 `{类别: [最小, 最大]}` |
+| `values` | list | 按列众数是否在列表中判定 |
+| `compute` | string | 计算表达式（保留字段） |
+
+### extract 函数
+
+`params` 含 `patterns` 时按路径匹配；含 `column` 时按列计算（`column_col` 为列名找不到时的 1-based 索引回退）；否则透传全部 params。
+
+| function | params | 说明 |
+|---|---|---|
+| `calculate_median` | `column`, `column_col`(可选), `samples`(默认 50) | 指定列最后 N 个值的中位数 |
+| `calculate_mean` | `column`, `column_col`(可选) | 指定列均值 |
+| `calculate_std` | `column`, `column_col`(可选) | 指定列标准差 |
+| `calculate_percentile` | `column`, `column_col`(可选), `percentile`(默认 50) | 指定列百分位数 |
+| `get_column_value` | `column`, `column_col`(可选), `row`(默认 -1) | 指定列某行值 |
+| `count_values` | `column`, `column_col`(可选) | 指定列值计数字典 |
+| `extract_from_path` | `patterns` | 按路径关键词匹配类别，未匹配返回 `other` |
+| `classify_by_range` | `ranges` | 按范围分类（一般不直接用作 extract） |
+
+### accuracy 块
+
+`--accuracy` 启用时计算准确度。`methods` 与 `thresholds` 的可用取值与 evaluate 规则完全一致（见 [evaluate 规则](#evaluate-规则)）。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ref_column` | string | 参考列名 |
+| `ref_column_col` | int | 参考列 1-based 索引，优先于列名 |
+| `pred_column` | string | 预测列名 |
+| `pred_column_col` | int | 预测列 1-based 索引，优先于列名 |
+| `methods` | list | 准确度方法列表 |
+| `thresholds` | list | 自定义阈值指标 |
+
+### 条件表达式语法
+
+`classify[].condition` 与 `rules[].conditions` 中的条件使用安全 AST 求值器（非 `eval`，禁止代码注入）：
+
+- 比较：`< <= > >= == !=`，支持链式 `a < b < c`
+- 逻辑：`and` `or`（可组合）
+- 算术：`+ - * / // % **`
+- 常量：`True` `False` `None`
+- 变量：`extract` 与 `data_columns` 提取的值
+
+不支持函数调用、下标、属性访问；未定义变量求值失败记 warning 并判 `False`。示例：`spo2_median >= 90 and spo2_median < 95`。
 
 ## convert 规则
 
