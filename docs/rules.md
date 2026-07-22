@@ -40,7 +40,7 @@ src/health_tools/rules/
 
 ## chip 规则
 
-路径：`rules/chip/<chip>.yaml`。chip 规则定义标准 CSV 的读取方式、完整列顺序，以及检查、产测、离线算法和评估所需的芯片信息。`check`/`factory`/`offline`/`evaluate`/`analyze` 通过 `-c/--chip` 加载；`parse`/`convert` 通过 `target_chip` 间接引用。
+路径：`rules/chip/<chip>.yaml`。chip 规则定义标准 CSV 的读取方式、完整列顺序，以及检查、产测、离线算法和评估所需的芯片信息。`check`/`factory`/`offline` 通过 `-c/--chip` 加载，`evaluate`/`analyze` 通过 `--chip` 加载；`parse`/`convert` 通过 `target_chip` 间接引用。
 
 ```yaml
 version: "1.0"
