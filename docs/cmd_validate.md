@@ -22,22 +22,25 @@ ghealth_tool val <rule_file> [options]
 
 根据规则类型（通过路径自动检测）验证：
 
-| 规则类型 | 必需字段 |
-|----------|----------|
-| chip | version, chip, csv.header_row, csv.data_start_row, columns |
-| parse | regex, columns |
-| classify | version, structure |
-| convert | source_columns + target_columns 或 column_mapping |
+| 类型 | 必需字段 | `--strict` 额外要求 |
+|---|---|---|
+| chip | `version`、`chip`、`csv`（为 dict 时含 `header_row`/`data_start_row`）、非空 `columns` | 无 |
+| parse | `version`；单 pattern：`regex`、`columns`；多 pattern：非空 `patterns` 字典，每项含 `regex`/`columns` | `description` |
+| classify | `version`；非空 `structure`，或同时提供 `extract`/`classify` 列表，或纯 `patterns` 关键词库 | 简单结构需 `rules` |
+| convert | `version`；`column_mapping` 或同时提供 `source_columns`/`target_columns`（等长） | 无 |
+| evaluate | `type` ∈ {hr, spo2}、`ref_column`、`pred_column` | `description` |
+| analysis | `version`、`type` ∈ {hr, spo2, other}、`columns`、非空 `detectors`、`thresholds`（可选）、非空 `causes` | `description` |
 
-规则类型通过文件路径中的 `chip`、`parse`、`classify`、`convert` 目录名判断。`--strict`
-当前只额外要求 parse 规则包含 `description`。
+规则类型通过文件路径中的 `chip`/`parse`/`classify`/`convert`/`evaluate`/`analysis`
+目录名判断，建议自定义文件保留类型目录。parse 会额外校验正则可编译、捕获组与 `columns`
+数量匹配；convert 会校验 `source_columns`/`target_columns` 等长。
 
 ## 输出与限制
 
-验证成功返回 0，文件不存在、扩展名错误、YAML 语法错误或结构错误返回非零状态。当前没有
-evaluate 专用结构验证，多 pattern parse 也不适用旧的顶层 `regex/columns` 检查；这些规则
-必须使用目标命令和小样本继续验证。验证器不会读取真实数据，因此不能发现列名不匹配、
-分类条件无结果或外部数据无法对齐。
+验证成功返回 0，文件不存在、扩展名错误、YAML 语法错误或结构错误返回非零状态。验证器
+不读取真实数据，因此不能发现列名不匹配、分类条件无结果或外部数据无法对齐；多 pattern
+parse 不适用旧的顶层 `regex/columns` 检查。`evaluate` 和 `analysis` 支持结构验证，但
+仍需使用目标命令对小样本验证列和阈值。
 
 ## 示例
 

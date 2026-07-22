@@ -108,7 +108,7 @@ spo_ref_column:                # 血氧参考列（列名: 1-based 列索引）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `version` | string | 规则版本，`validate` 要求存在 |
+| `version` | string | 规则版本 |
 | `chip` | string | 芯片标识，`-c/--chip` 即取此名 |
 | `csv` | object | CSV 行号、分隔符、编码与可选 `info` 文本 |
 | `csv.info_row` | int | 信息所在行，`0` 表示无信息行 |
@@ -655,7 +655,7 @@ causes:
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `version` | string | 规则版本（校验必填，加载后不保留） |
+| `version` | string | 规则版本 |
 | `type` | string | `hr` / `spo2` / `other` |
 | `description` | string | 说明；`--strict` 要求存在 |
 | `columns` | object | 输入列映射，见下 |
@@ -775,6 +775,8 @@ ghealth_tool validate path/to/rules/parse/custom.yaml --strict
 | `analysis` | `version`、`type` ∈ {hr, spo2, other}、`columns`、非空 `detectors`、`thresholds`（可选，为映射）、非空 `causes`（每项含 `id`/`title`/`origin`/`when`，`algorithm` 不能有 `actions`） | `description` |
 
 parse 会额外校验正则可编译、捕获组数量与 `columns` 数量匹配（单捕获组多列时要求 `separator` 非空）。convert 会校验 `source_columns`/`target_columns` 等长、`extra_source` 结构与 `align.left_on`/`right_on` 配对。
+
+`version` 字段除 `chip` 外仅用于 `validate` 校验，加载后不保留在规则对象中；`chip` 加载时缺省为 `1.0`。
 
 已知限制：
 
