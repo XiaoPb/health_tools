@@ -418,8 +418,7 @@ classify 的准确度按列名读取 `ref_column`/`pred_column`；如参考列�
 
 ## convert 规则
 
-路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入、合并 `extra_source`、映射列、
-计算列、频率扩展、前值填充、补齐并按目标芯片列排序。
+路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入 → 合并 `extra_source` → 映射列 → 计算 `computed` 列 → `expand_repeat` 频率扩展 → `forward_fill` 前值填充 → 按目标芯片列补 0 并排序。
 
 ```yaml
 version: "1.0"
@@ -436,10 +435,10 @@ csv:
 column_mapping:
   time: TimeStamp
   frame: FRAME_ID
-  acc[0]: ACCX
+  acc[0]: ACCX          # [] 是字面量，acc[0] 即源列名
   acc[1]: ACCY
   acc[2]: ACCZ
-  rawdata[{0-1}]: Rawdata{0-1}
+  rawdata[{0-1}]: Rawdata{0-1}   # 仅展开花括号，得 rawdata[0] -> Rawdata0
   polar_hr: REF_RESULT0
 
 computed:
@@ -447,56 +446,71 @@ computed:
   TEMP: 'raw_temp / 100'
 
 expand_repeat:
-  polar_hr: 25
+  polar_hr: 25          # 每个值重复 25 次对齐高采样率列
 
 forward_fill:
   - polar_hr
 ```
 
-也可使用等长的 `source_columns` 和 `target_columns` 代替 `column_mapping`。公式只支持按
-空白/运算符拆分的列、数字与 `+ - * /`；无法解析的 token 按 0 处理。映射后缺失的目标
-芯片列补 0，多余列被丢弃。
+也可用等长的 `source_columns` 和 `target_columns` 代替 `column_mapping`。映射后缺失的目标芯片列补 0，多余列被丢弃。
+
+### 字段说明
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `version` | string | 规则版本 |
+| `description` | string | 说明 |
+| `target_chip` | string | 目标芯片，输出按其 `columns` 排序与补列 |
+| `csv` | object | 输入 CSV 解析配置（`info_row`/`header_row`/`data_start_row`/`delimiter`/`encoding`） |
+| `column_mapping` | object | 源列 → 目标列映射（支持 `{start-end}` 展开） |
+| `source_columns` / `target_columns` | list | 等长列表，与 `column_mapping` 二选一 |
+| `computed` | object | 计算列，见下 |
+| `expand_repeat` | object | 列重复扩展 `{列: 次数}` |
+| `forward_fill` | list | 前值填充列 |
+| `extra_source` | object/list | 外部参考文件合并，见下 |
+
+### computed 公式
+
+公式按空白与 `+ - * /` 切分为 token：列名取该列数值，数字字面量取字面值，**无法识别的 token 按 0**，除零时把除数的 0 替换为 1。**不支持括号、函数或 `**`**。例如 `'raw_temp / 100'`、`'status * 1'`。解析失败整列填 0 并记 warning。
 
 ### extra_source
 
-`extra_source` 可为一个对象或对象列表，用于把同目录下的金标等外部 CSV 按键左连接到
-主文件：
+`extra_source` 可为单个对象或对象列表，把同目录下的金标等外部 CSV 按键左连接到主文件：
 
 ```yaml
 extra_source:
-  - name: spo2_ref
-    pattern: '*.csv'
-    required_columns: [时间]
-    any_required_columns: [SpO2, O2 饱和度]
+  - name: spo2_ref            # 名称，用于对齐错误报告（缺省时回退到 description）
+    pattern: '*.csv'           # glob 匹配（与 suffix/path 三选一）
+    required_columns: [时间]   # 候选文件必须包含全部列
+    any_required_columns: [SpO2, O2 饱和度]  # 至少命中其中一列
     csv:
       header_row: 1
       data_start_row: 2
       delimiter: ','
       encoding: utf-8
     align:
-      left_on: time
-      right_on: 时间
-      right_extract: '(\d{2}:\d{2}:\d{2})'
+      left_on: time           # 主文件对齐列
+      right_on: 时间          # 外部文件对齐列
+      right_extract: '(\d{2}:\d{2}:\d{2})'  # 用第一个捕获组归一化右侧键
     column_mapping:
-      SpO2: ref_spo2
-      O2 饱和度: ref_spo2
+      SpO2: ref_spo2          # 外部列 -> 合并后中间列
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `path` | 固定文件；相对路径以主文件目录为基准 |
+| `name` | 来源名称，用于对齐错误报告 |
+| `description` | `name` 缺省时回退使用 |
+| `path` | 固定文件；相对路径以主文件目录为基准，优先级高于 `suffix`/`pattern` |
 | `suffix` | 在主文件同目录匹配文件名后缀 |
 | `pattern` | 在主文件同目录使用 glob 匹配 |
 | `required_columns` | 候选文件必须包含全部列 |
 | `any_required_columns` | 候选文件至少包含其中一列 |
 | `csv` | 外部文件的表头、数据行、分隔符和编码 |
-| `align.left_on/right_on` | 主文件与外部文件的对齐列 |
-| `align.left_extract/right_extract` | 可选正则；用第一个捕获组归一化键 |
+| `align.left_on` / `right_on` | 主文件与外部文件的对齐列（必须同时提供） |
+| `align.left_extract` / `right_extract` | 可选正则；用第一个捕获组归一化对齐键 |
 | `column_mapping` | 外部列到合并后中间列的映射 |
 
-解析时排除主文件自身，按排序后的第一个合规候选文件合并；外部键重复时保留最后一行。
-没有匹配的数据补 0。如果找到外部文件但所有映射列均无有效数据，`convert` 会写出
-`extra_source_align_errors.csv`。
+解析时排除主文件自身，按排序后的第一个合规候选文件合并；外部键重复时保留最后一行。没有匹配的数据补 0。如果找到外部文件但所有映射列均无有效数据，`convert` 会写出 `extra_source_align_errors.csv`，记录原始文件、对比文件、来源名和失败原因。
 
 ## evaluate 规则
 
