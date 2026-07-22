@@ -9,28 +9,33 @@ GHealth Tools 使用 YAML 描述 CSV、日志解析、转换、分类、评估�
 
 ```text
 src/health_tools/rules/
-├── chip/
-├── parse/
-├── classify/
-├── convert/
-├── evaluate/
-└── analysis/
+├── chip/      # gh3036.yaml、gh3036_evk.yaml、gh3220.yaml
+├── parse/     # default.yaml、gh3220.yaml
+├── classify/  # default.yaml、posture_patterns.yaml、spo2_posture.yaml
+├── convert/   # standard.yaml、template.yaml
+├── evaluate/  # evaluate_hr.yaml、evaluate_spo2.yaml
+└── analysis/  # analysis_hr.yaml、analysis_spo2.yaml
 ```
 
-运行 `ghealth_tool config --init` 后，可在 `~/.ghealth_tools/rules/` 中放置同样的目录。
-相对规则名按用户目录、内置目录、当前工作目录顺序解析；用户规则可覆盖同名内置规则。
-绝对路径直接使用。
+运行 `ghealth_tool config --init` 后，可在 `~/.ghealth_tools/rules/` 中放置同样的目录。相对规则名按 **用户目录 → 内置目录** 顺序解析，用户规则可覆盖同名内置规则；绝对路径直接使用。
 
-芯片通过 `--chip gh3220` 加载时会自动查找 `chip/gh3220.yaml`。其他规则通常通过
-`--rule` 指定文件名或路径。
+各命令引用规则的方式：
+
+| 命令 | 选项 | 说明 |
+|---|---|---|
+| `parse` | `-r/--rule` | parse 规则文件名或路径 |
+| `convert` | `-r/--rule` | convert 规则；`--init-rule` 可生成模板 |
+| `classify` | `-r/--rule` | classify 规则；`--extend` 追加 patterns |
+| `evaluate` | `--rule` | evaluate 规则，默认随 `--type` 选内置 |
+| `analyze` | `--rule` | analysis 规则；`--type other` 时必填 |
+| `check`/`factory`/`offline` | `-c/--chip` | 通过 `chip/<chip>.yaml` 加载芯片规则 |
 
 ## 通用约定
 
 - YAML 使用 UTF-8 编码。
 - 行号从 1 开始；`info_row: 0` 表示没有信息行。
-- `{start-end}` 展开数字范围，例如 `CH{0-3}` -> `CH0`、`CH1`、`CH2`、`CH3`。
-- `rawdata[{0-1}]` 只展开花括号，结果为字面列名 `rawdata[0]`、`rawdata[1]`。
-- 旧规则中的 `CH[0-3]` 仍可由通用列展开函数兼容，但新规则应使用花括号。
+- 列范围统一使用 `{start-end}` 花括号语法：`CH{0-3}` → `CH0`、`CH1`、`CH2`、`CH3`。多个花括号从左到右嵌套展开，例如 `ALGO{0-1}_CH{0-2}` → `ALGO0_CH0`、`ALGO0_CH1`、`ALGO0_CH2`、`ALGO1_CH0`、…。
+- `[]` 是字面量，不参与展开：`rawdata[{0-1}]` 只展开花括号，得到字面列名 `rawdata[0]`、`rawdata[1]`；`acc[0]`、`CH16-31` 这类不含花括号的名称原样保留。**注意** `CH16-31` 是一个名为 “CH16-31” 的列，不是 16~31 的范围；要表示范围请写 `CH{16-31}`。
 - 修改规则后先运行 `validate`（适用时），再用一个小文件执行目标命令。
 
 ## chip 规则
