@@ -761,12 +761,12 @@ ghealth_tool validate path/to/rules/parse/custom.yaml --strict
 
 | 类型 | 必需字段 | `--strict` 额外要求 |
 |---|---|---|
-| `chip` | `version`、`chip`、`csv.header_row`、`csv.data_start_row`、`columns` | 无 |
+| `chip` | `version`、`chip`、`csv`（为 dict 时含 `header_row`/`data_start_row`）、非空 `columns` | 无 |
 | `parse` | `version`；单 pattern：`regex`、`columns`；多 pattern：非空 `patterns` 字典，每项含 `regex`/`columns` | `description` |
-| `classify` | `version`；非空 `structure`，或同时提供 `extract`/`classify` 列表 | 简单结构需 `rules` |
+| `classify` | `version`；非空 `structure`，或同时提供 `extract`/`classify` 列表，或纯 `patterns` 关键词库（非空字典，每项为非空字符串列表） | 简单结构需 `rules` |
 | `convert` | `version`；`column_mapping` 或同时提供 `source_columns`/`target_columns`（等长） | 无 |
 | `evaluate` | `type` ∈ {hr, spo2}、`ref_column`、`pred_column` | `description` |
-| `analysis` | `version`、`type` ∈ {hr, spo2, other}、`columns`、非空 `detectors`、`thresholds` 为映射、非空 `causes`（每项含 `id`/`title`/`origin`/`when`，`algorithm` 不能有 `actions`） | `description` |
+| `analysis` | `version`、`type` ∈ {hr, spo2, other}、`columns`、非空 `detectors`、`thresholds`（可选，为映射）、非空 `causes`（每项含 `id`/`title`/`origin`/`when`，`algorithm` 不能有 `actions`） | `description` |
 
 parse 会额外校验正则可编译、捕获组数量与 `columns` 数量匹配（单捕获组多列时要求 `separator` 非空）。convert 会校验 `source_columns`/`target_columns` 等长、`extra_source` 结构与 `align.left_on`/`right_on` 配对。
 
