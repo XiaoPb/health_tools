@@ -757,14 +757,24 @@ ghealth_tool validate path/to/rules/convert/custom.yaml
 ghealth_tool validate path/to/rules/parse/custom.yaml --strict
 ```
 
-当前验证器根据路径中是否包含 `chip`、`parse`、`classify`、`convert`、`evaluate`、`analysis` 判断类型，因此建议
-自定义文件也保留类型目录。它执行基础结构检查，但不会证明表达式在真实数据上有结果。
+验证器根据路径中是否包含 `chip`/`parse`/`classify`/`convert`/`evaluate`/`analysis` 判断类型，因此建议自定义文件也保留类型目录。各类型校验内容：
+
+| 类型 | 必需字段 | `--strict` 额外要求 |
+|---|---|---|
+| `chip` | `version`、`chip`、`csv.header_row`、`csv.data_start_row`、`columns` | 无 |
+| `parse` | `version`；单 pattern：`regex`、`columns`；多 pattern：非空 `patterns` 字典，每项含 `regex`/`columns` | `description` |
+| `classify` | `version`；非空 `structure`，或同时提供 `extract`/`classify` 列表 | 简单结构需 `rules` |
+| `convert` | `version`；`column_mapping` 或同时提供 `source_columns`/`target_columns`（等长） | 无 |
+| `evaluate` | `type` ∈ {hr, spo2}、`ref_column`、`pred_column` | `description` |
+| `analysis` | `version`、`type` ∈ {hr, spo2, other}、`columns`、非空 `detectors`、`thresholds` 为映射、非空 `causes`（每项含 `id`/`title`/`origin`/`when`，`algorithm` 不能有 `actions`） | `description` |
+
+parse 会额外校验正则可编译、捕获组数量与 `columns` 数量匹配（单捕获组多列时要求 `separator` 非空）。convert 会校验 `source_columns`/`target_columns` 等长、`extra_source` 结构与 `align.left_on`/`right_on` 配对。
 
 已知限制：
 
+- 验证器不读取真实数据，因此不能发现列名不匹配、分类条件无结果或外部数据无法对齐。
 - `evaluate` 和 `analysis` 支持结构验证，但仍需使用目标命令对小样本验证列和阈值。
 - `classify` 的条件表达式、提取函数和扩展 patterns 需要实际分类运行验证。
 - `computed` 公式和 `extra_source` 对齐是否正确只能通过实际转换与输出报告确认。
-- `--strict` 当前只额外要求单 pattern parse 规则包含 `description`。
 
 验证通过后仍应检查输出列顺序、文件数量、报告中的跳过原因和少量数据值。
