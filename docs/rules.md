@@ -40,21 +40,21 @@ src/health_tools/rules/
 
 ## chip 规则
 
-路径：`rules/chip/<chip>.yaml`。chip 规则定义标准 CSV 的读取方式、完整列顺序，以及
-检查、产测和离线算法所需的芯片信息。
+路径：`rules/chip/<chip>.yaml`。chip 规则定义标准 CSV 的读取方式、完整列顺序，以及检查、产测、离线算法和评估所需的芯片信息。`check`/`factory`/`offline`/`evaluate`/`analyze` 通过 `-c/--chip` 加载；`parse`/`convert` 通过 `target_chip` 间接引用。
 
 ```yaml
 version: "1.0"
 chip: gh3220
 
 csv:
-  info_row: 1
-  header_row: 2
-  data_start_row: 3
-  delimiter: ","
-  encoding: utf-8
+  info_row: 1                 # 信息所在行，0 表示无
+  header_row: 2               # 列名所在行
+  data_start_row: 3           # 数据开始行
+  delimiter: ","              # 分隔符
+  encoding: utf-8             # 编码
+  info: "Version: GH3220"     # 可选，写入输出 CSV 信息行的固定文本
 
-columns:
+columns:                       # 完整列顺序（支持 {start-end} 展开）
   - TimeStamp
   - FRAME_ID
   - ACCX
@@ -62,57 +62,133 @@ columns:
   - ACCZ
   - CH{0-15}
 
-frame_column: FRAME_ID
-acc_columns:
+frame_column: FRAME_ID        # 帧号列；未配置时检查器尝试自动识别
+acc_columns:                   # X/Y/Z 三轴列；未配置时检查器尝试自动识别
   x: ACCX
   y: ACCY
   z: ACCZ
 
-check_columns:
-  data:
-    - CH{0-15}
-  agc:
-    - AGC_INFO_CH{0-15}
+check_columns:                 # 检查专用列组
+  data: [CH{0-15}]             # 原始数据列，覆盖基于列名的自动识别
+  agc: [AGC_INFO_CH{0-15}]     # AGC 列，供 check 解析位段
 
-factory_columns:
-  - CH{0-15}
+factory_columns: [CH{0-15}]    # 参与 SNR/CTR/Noise 计算的列（自动过滤全零列）
 
-factory_config:
+factory_config:                # 采样率与三个产测指标的截取时长
   sample_rate: 100
-  snr: {skip_head_seconds: 10, skip_tail_seconds: 10, min_duration_seconds: 90}
-  ctr: {skip_head_seconds: 1, skip_tail_seconds: 0, min_duration_seconds: 2}
-  noise: {skip_head_seconds: 2, skip_tail_seconds: 0, min_duration_seconds: 4}
+  snr:  {skip_head_seconds: 10, skip_tail_seconds: 10, min_duration_seconds: 90}
+  ctr:  {skip_head_seconds: 1,  skip_tail_seconds: 0,  min_duration_seconds: 2}
+  noise: {skip_head_seconds: 2, skip_tail_seconds: 0,  min_duration_seconds: 4}
 
-chip_info:
+chip_info:                     # ADC 与物理量解析参数，见下文
   adc_full_scale: 8388608
   adc_offset: 8388608
   adc_vref: 1.8
   tia_ratio: 2
+  gain:
+    source: "AGC_INFO_CH{0-15}"
+    bits: "[3:0]"
+    type: "int"
+    unit: ""
+    desc: "增益等级"
 
-hr_ref_column:
-  default: 18
-spo_ref_column:
-  default: 18
+gain_tia_map:                  # 增益等级到 TIA 电阻的映射，见下文
+  unit: "KΩ"
+  map:
+    0: 10
+    1: 25
+
+hr_ref_column:                 # 心率参考列（列名: 1-based 列索引）
+  REF_RESULT0: 30
+spo_ref_column:                # 血氧参考列（列名: 1-based 列索引）
+  REF_RESULT5: 35
 ```
+
+### 字段说明
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `version` | string | 规则版本，`validate` 要求存在 |
-| `chip` | string | 芯片标识 |
-| `csv` | object | CSV 行号、分隔符和编码 |
-| `columns` | list | 完整列顺序；转换输出和离线预检会使用 |
-| `frame_column` | string | 帧号列；未配置时检查器尝试自动识别 |
-| `acc_columns` | object | X/Y/Z 三轴列；未配置时检查器尝试自动识别 |
-| `check_columns` | object | `data`、`agc` 等检查专用列组 |
+| `chip` | string | 芯片标识，`-c/--chip` 即取此名 |
+| `csv` | object | CSV 行号、分隔符、编码与可选 `info` 文本 |
+| `csv.info_row` | int | 信息所在行，`0` 表示无信息行 |
+| `csv.header_row` | int | 列名所在行 |
+| `csv.data_start_row` | int | 数据开始行 |
+| `csv.delimiter` | string | 字段分隔符 |
+| `csv.encoding` | string | 文件编码 |
+| `csv.info` | string | 可选；写入输出 CSV 信息行的固定文本 |
+| `columns` | list | 完整列顺序；转换输出、离线预检和 parse 的 `target_chip` 输出都按此顺序 |
+| `frame_column` | string | 帧号列；未配置时 `check` 尝试自动识别 |
+| `acc_columns` | object | `x`/`y`/`z` 三轴列；未配置时 `check` 尝试自动识别 |
+| `check_columns` | object | `data`、`agc` 等检查专用列组，覆盖自动识别 |
 | `factory_columns` | list | 参与 SNR/CTR/Noise 计算的列 |
-| `factory_config` | object | 采样率和三个指标的截取时长 |
-| `chip_info` | object | ADC、TIA、增益和 LED 电流解释参数 |
-| `gain_tia_map` | object | 增益等级到 TIA 电阻的映射 |
-| `hr_ref_column` | object | 心率离线跑库参考列索引配置 |
-| `spo_ref_column` | object | 血氧离线跑库参考列索引配置 |
+| `factory_config` | object | 采样率与三个指标的截取时长 |
+| `chip_info` | object | ADC 参数与按位段解析的物理量，见下 |
+| `gain_tia_map` | object | 增益等级到 TIA 电阻的映射，见下 |
+| `hr_ref_column` | object | 心率参考列 `{列名: 1-based 索引}`，evaluate 列名找不到时回退使用 |
+| `spo_ref_column` | object | 血氧参考列 `{列名: 1-based 索引}`，同上 |
 
-`check_columns.data` 会覆盖基于常见列名的自动识别。离线输入预检要求文件表头与展开后的
-`columns` 数量、名称和顺序完全相同。
+`check_columns.data` 会覆盖基于常见列名的自动识别。离线输入预检要求文件表头与展开后的 `columns` 数量、名称和顺序完全相同。
+
+### chip_info 结构
+
+`chip_info` 顶层是 ADC 全局参数，其余每个命名条目描述一个从 AGC/LED/physics 列按位段解析的物理量：
+
+```yaml
+chip_info:
+  adc_full_scale: 8388608   # ADC 满量程
+  adc_offset: 0             # ADC 偏置；CH*/Rawdata* 计算 PI 前减去该值，Ipd* 不减
+  adc_vref: 1.8             # ADC 参考电压 (V)
+  tia_ratio: 2              # TIA 比率
+
+  gain:                     # 任意命名条目，名称即物理量名
+    source: "AGC_INFO_CH{0-31}"  # 来源列（支持 {} 展开）
+    bits: "[3:0]"           # 位段 [high:low]；null 表示整列直接使用
+    type: "int"             # int 或 float
+    unit: ""                # 单位字符串，仅用于展示
+    desc: "增益等级"         # 说明文字
+  led_current_sum:
+    source: "AGC_INFO_CH{0-31}"
+    bits: "[29:16]"
+    type: "int"
+    unit: "0.1mA"
+    desc: "LED总电流"
+  led_current_drv3:
+    optional: true          # 标记可选；芯片不支持该量时缺省
+  ipd_pA:
+    source: "Ipd{0-31}"
+    bits: null              # 整列直接使用
+    type: "float"
+    unit: "pA"
+    desc: "光电流值"
+```
+
+内置条目常见名称：`gain`、`bg_cancel_level`、`dc_cancel_level`、`dc_cancel_code`、`led_current_sum`、`led_current_drv0/1/3/4`、`ipd_pA`。物理量换算关系（`check` 与 `analyze` 据此解释光学列）：
+
+```text
+rawdata_uv = (rawdata_value - adc_offset) / adc_full_scale * adc_vref * 1_000_000
+ipd_pA     = rawdata_uv / (tia_ratio * gain_tia_map.map[gain]) * 1000
+ctr        = ipd_pA * 1000 / led_current_sum      # 单位 nA/mA
+```
+
+### gain_tia_map 结构
+
+```yaml
+gain_tia_map:
+  unit: "KΩ"   # 电阻单位，仅用于展示
+  map:          # 增益等级 -> TIA 电阻值
+    0: 10
+    1: 25
+    2: 50
+    3: 100
+    4: 250
+    5: 500
+    6: 1000
+```
+
+### hr_ref_column / spo_ref_column
+
+`evaluate` 解析参考列与预测列时优先级为：命令行 `--ref-column-col/--pred-column-col` > 规则 `ref_column/pred_column` 列名 > chip 规则的 `hr_ref_column`/`spo_ref_column`（按 `type` 选择）中同名列的 1-based 索引。因此即使输出 CSV 改了列顺序，只要索引正确，evaluate 仍能定位参考列。
 
 ## parse 规则
 
