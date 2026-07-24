@@ -197,6 +197,41 @@ class RuleValidator:
             if not isinstance(rule.get("rules"), list):
                 errors.append("[严格模式] 缺少 'rules' 字段")
 
+        # 校验 path 字段
+        path_cfg = rule.get("path")
+        if path_cfg is not None:
+            if not isinstance(path_cfg, dict):
+                errors.append("'path' 必须是字典")
+            else:
+                path_regex = path_cfg.get("regex")
+                if not isinstance(path_regex, str) or not path_regex:
+                    errors.append("path 缺少有效的 'regex' 字段")
+                else:
+                    try:
+                        re.compile(path_regex)
+                    except re.error as exc:
+                        errors.append(f"path 正则表达式错误: {exc}")
+                fields = path_cfg.get("fields")
+                if fields is not None and not isinstance(fields, list):
+                    errors.append("path 'fields' 必须是列表")
+
+        # 校验 filters 字段
+        filters_cfg = rule.get("filters")
+        if filters_cfg is not None:
+            if not isinstance(filters_cfg, dict):
+                errors.append("'filters' 必须是字典")
+            else:
+                for key in ("min_rows", "min_size_kb"):
+                    if key in filters_cfg:
+                        value = filters_cfg[key]
+                        if not isinstance(value, (int, float)) or value < 0:
+                            errors.append(f"filters.{key} 必须是非负数")
+
+        # 校验 rename 字段
+        rename_cfg = rule.get("rename")
+        if rename_cfg is not None and not isinstance(rename_cfg, str):
+            errors.append("'rename' 必须是字符串")
+
         return errors
 
     @staticmethod

@@ -343,3 +343,49 @@ causes:
     assert any(
         "算法原因不能提供 actions" in error for error in RuleValidator.validate_file(invalid)
     )
+
+
+def test_validate_classify_accepts_path_rename_filters(tmp_path: Path):
+    """合法的 path/rename/filters 字段应通过校验。"""
+    path = _write(
+        tmp_path,
+        "classify",
+        "valid.yaml",
+        """version: '1.0'
+path:
+  regex: '(?P<race>\\w+)/(?P<name>\\w+)/[^/]+\\.csv'
+  fields: [race, name]
+filters:
+  min_rows: 100
+  min_size_kb: 10
+structure: {out: ''}
+rules:
+  - target: '{race}'
+rename: '{race}_{name}_{filename}'
+""",
+    )
+    assert RuleValidator.validate_file(path) == []
+
+
+def test_validate_classify_rejects_bad_path_regex(tmp_path: Path):
+    """path.regex 无法编译时应报错。"""
+    path = _write(
+        tmp_path,
+        "classify",
+        "bad_regex.yaml",
+        "version: '1.0'\npath:\n  regex: '('\nstructure: {out: ''}\nrules: []\n",
+    )
+    errors = RuleValidator.validate_file(path)
+    assert any("path" in e and "正则" in e for e in errors)
+
+
+def test_validate_classify_rejects_negative_filter(tmp_path: Path):
+    """filters.min_rows 为负数时应报错。"""
+    path = _write(
+        tmp_path,
+        "classify",
+        "bad_filter.yaml",
+        "version: '1.0'\nfilters:\n  min_rows: -1\nstructure: {out: ''}\nrules: []\n",
+    )
+    errors = RuleValidator.validate_file(path)
+    assert any("filters" in e for e in errors)
