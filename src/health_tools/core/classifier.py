@@ -171,16 +171,9 @@ class DataClassifier:
         if not self.rule.rename:
             return file_path.name
 
-        variables: Dict[str, Any] = {}
-        variables.update(self._path_fields)
-        variables.update(self._filename_fields)
-        variables.update(self._extracted_values)
-        variables["filename"] = file_path.name
-        variables["stem"] = file_path.stem
-
-        result = self.rule.rename
-        for key, value in variables.items():
-            result = result.replace(f"{{{key}}}", str(value))
+        result = self._resolve_variables(self.rule.rename)
+        result = result.replace("{filename}", file_path.name)
+        result = result.replace("{stem}", file_path.stem)
         return result
 
     def get_last_values(self) -> Dict[str, Dict[str, Any]]:
