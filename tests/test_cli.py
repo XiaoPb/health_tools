@@ -43,6 +43,10 @@ def test_cli_classify_help():
     runner = CliRunner()
     result = runner.invoke(main, ["classify", "--help"])
     assert result.exit_code == 0
+    assert "--dry-run" in result.output
+    assert "--min-rows" in result.output
+    assert "--min-size" in result.output
+    assert "--conflict" in result.output
 
 
 def test_cli_split_help():

@@ -29,6 +29,28 @@ console = Console()
 @click.option("--unknown", "unknown_dir", help="未匹配文件的存放目录")
 @click.option("-c", "--chip", "chip_name", help="芯片类型（决定CSV格式）")
 @click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件")
+@click.option("--dry-run", "dry_run", is_flag=True, help="预览模式：计算目标路径但不写入文件")
+@click.option(
+    "--min-rows",
+    "min_rows",
+    type=int,
+    default=None,
+    help="跳过行数少于该值的文件（覆盖规则 filters.min_rows）",
+)
+@click.option(
+    "--min-size",
+    "min_size_kb",
+    type=float,
+    default=None,
+    help="跳过大小（KB）小于该值的文件（覆盖规则 filters.min_size_kb）",
+)
+@click.option(
+    "--conflict",
+    "conflict",
+    type=click.Choice(["skip", "rename", "overwrite"]),
+    default="skip",
+    help="输出路径冲突处理策略（默认 skip）",
+)
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def classify_cmd(
@@ -45,6 +67,10 @@ def classify_cmd(
     unknown_dir: Optional[str],
     chip_name: Optional[str],
     filter_name: Optional[str],
+    dry_run: bool,
+    min_rows: Optional[int],
+    min_size_kb: Optional[float],
+    conflict: str,
     verbose: bool,
 ) -> None:
     """根据规则对数据进行分类保存"""
@@ -67,6 +93,10 @@ def classify_cmd(
                     unknown_dir=unknown_dir,
                     chip_name=chip_name,
                     filter_name=filter_name,
+                    min_rows=min_rows,
+                    min_size_kb=min_size_kb,
+                    dry_run=dry_run,
+                    conflict=conflict,
                 ),
                 context=context,
             )

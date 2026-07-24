@@ -26,6 +26,10 @@ ghealth_tool classify -i <input> -o <output> -r <rule.yaml> [options]
 | `--unknown` | 未匹配文件目录名 |
 | `-c/--chip` | 芯片类型 |
 | `--filter` | 仅处理文件名包含指定字符的 CSV |
+| `--dry-run` | 预览模式：计算目标路径但不写入文件 |
+| `--min-rows` | 跳过行数少于该值的文件（覆盖规则 filters.min_rows） |
+| `--min-size` | 跳过大小（KB）小于该值的文件（覆盖规则 filters.min_size_kb） |
+| `--conflict` | 输出路径冲突策略：skip（默认）/rename/overwrite |
 | `-v/--verbose` | 详细输出 |
 
 ## 分类规则
@@ -51,4 +55,10 @@ ghealth_tool classify -i ./data/ -o ./classified/ -r rule.yaml --accuracy --repo
 
 # 未匹配文件放入 unknown 目录
 ghealth_tool classify -i ./data/ -o ./classified/ -r rule.yaml --unknown unknown
+
+# 路径重命名 + 小文件过滤（dry-run 预览）
+ghealth_tool classify -i ./data/ -o ./classified/ -r path_rename.yaml --dry-run -v
+
+# 确认无误后正式执行，冲突时自动追加后缀
+ghealth_tool classify -i ./data/ -o ./classified/ -r path_rename.yaml --conflict rename
 ```
