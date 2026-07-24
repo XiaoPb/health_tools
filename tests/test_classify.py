@@ -178,3 +178,15 @@ def test_check_filters_caches_dataframe_for_extract(tmp_path: Path):
     assert classifier._cached_file == csv_path
     assert classifier._cached_df is not None
     assert len(classifier._cached_df) == 200
+
+
+def test_check_filters_handles_read_failure(tmp_path: Path):
+    """CSV 读取失败时返回失败原因而非抛出异常。"""
+    csv_path = tmp_path / "missing.csv"  # 文件不存在，触发读取异常
+    rule = ClassifyRule(structure={"placeholder": ""}, rules=[{"target": "out"}])
+    classifier = DataClassifier(rule)
+
+    reason = classifier.check_filters(csv_path, min_rows=100, min_size_kb=0.0)
+    assert reason is not None
+    assert "行数不足" not in reason
+    assert "文件过小" not in reason

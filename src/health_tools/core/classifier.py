@@ -10,6 +10,7 @@ import pandas as pd
 from health_tools.models.rules import ClassifyRule, DataColumn  # noqa: F401
 from health_tools.utils.classify_helpers import get_function
 from health_tools.utils.csv_handler import CSVHandler
+from health_tools.utils.errors import classify_exception
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ class DataClassifier:
     ) -> Optional[str]:
         """检查文件是否满足最小行数与大小阈值；返回跳过原因，None 表示通过。
 
-        通过行数检查时复用 csv_handler 读取结果并写入缓存，避免 _extract_values 重复读取。
+        通过行数检查时复用 csv_handler 读取结果并写入缓存，避免后续 _extract_from_data 重复读取。
         """
         if min_size_kb > 0:
             size_kb = file_path.stat().st_size / 1024.0
@@ -194,14 +195,14 @@ class DataClassifier:
         if min_rows > 0:
             try:
                 _, df = self.csv_handler.read(file_path)
-                self._cached_file = file_path
-                self._cached_df = df
                 row_count = len(df)
                 if row_count < min_rows:
                     return f"行数不足({row_count} < {min_rows})"
+                self._cached_file = file_path
+                self._cached_df = df
             except Exception as e:
                 logger.warning("检查行数失败 %s: %s", file_path.name, e)
-                return f"行数检查失败: {e}"
+                return f"{classify_exception(e)}: {e}"
 
         return None
 
