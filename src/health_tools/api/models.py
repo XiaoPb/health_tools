@@ -270,6 +270,8 @@ class ClassifyRequest:
     unknown_dir: Optional[str] = None
     chip_name: Optional[str] = None
     filter_name: Optional[str] = None
+    min_rows: Optional[int] = None
+    min_size_kb: Optional[float] = None
 
 
 @dataclass(frozen=True)

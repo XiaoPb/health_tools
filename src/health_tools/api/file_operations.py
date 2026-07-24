@@ -20,7 +20,13 @@ from health_tools.api.models import (
     ProgressEvent,
 )
 from health_tools.api.operations import _batch, _context, _events, _load_rule, _require_path
-from health_tools.utils.errors import REASON_NO_DATA, REASON_RULE_MISMATCH, classify_exception
+from health_tools.utils.errors import (
+    REASON_NO_DATA,
+    REASON_RULE_MISMATCH,
+    REASON_TOO_FEW_ROWS,
+    REASON_TOO_SMALL,
+    classify_exception,
+)
 
 
 def _read_convert_csv(file_path: Path, csv_config: Optional[dict]):
@@ -296,6 +302,18 @@ def run_classify(
     if request.filter_name:
         files = [path for path in files if request.filter_name in path.name]
 
+    # 过滤阈值：CLI 覆盖规则
+    rule_filters = getattr(rule, "filters", {}) or {}
+    min_rows = (
+        request.min_rows if request.min_rows is not None else int(rule_filters.get("min_rows", 0))
+    )
+    min_size_kb = (
+        request.min_size_kb
+        if request.min_size_kb is not None
+        else float(rule_filters.get("min_size_kb", 0))
+    )
+    input_root = source if source.is_dir() else None
+
     accuracy = None
     config = getattr(rule, "accuracy", {}) or {}
     if request.enable_accuracy and (config or (request.ref_column and request.pred_column)):
@@ -315,10 +333,25 @@ def run_classify(
     artifacts: List[Path] = []
     for _, path in _events("classify", "files", files, ctx, items):
         try:
-            target_dir = classifier.classify(path, output)
+            if min_rows > 0 or min_size_kb > 0:
+                skip_reason = classifier.check_filters(path, min_rows, min_size_kb)
+                if skip_reason is not None:
+                    reason = REASON_TOO_FEW_ROWS if "行数不足" in skip_reason else REASON_TOO_SMALL
+                    items.append(
+                        ItemResult(
+                            ItemStatus.SKIP,
+                            str(path),
+                            reason=reason,
+                            detail=skip_reason,
+                        )
+                    )
+                    continue
+
+            target_dir = classifier.classify(path, output, input_root=input_root)
+            output_name = classifier.resolve_filename(path)
             if target_dir:
                 target_dir.mkdir(parents=True, exist_ok=True)
-                target = target_dir / path.name
+                target = target_dir / output_name
                 if request.mode == "copy":
                     shutil.copy2(path, target)
                 elif request.mode == "move":
@@ -345,7 +378,7 @@ def run_classify(
             elif request.unknown_dir:
                 target_dir = output / request.unknown_dir
                 target_dir.mkdir(parents=True, exist_ok=True)
-                target = target_dir / path.name
+                target = target_dir / output_name
                 if request.mode == "copy":
                     shutil.copy2(path, target)
                 elif request.mode == "move":

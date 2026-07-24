@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from health_tools.api import ClassifyRequest, ExecutionContext, run_classify
 from health_tools.core.classifier import DataClassifier
 from health_tools.models.rules import ClassifyRule
 
@@ -190,3 +191,76 @@ def test_check_filters_handles_read_failure(tmp_path: Path):
     assert reason is not None
     assert "行数不足" not in reason
     assert "文件过小" not in reason
+
+
+def _write_rule(tmp_path: Path, source: str) -> Path:
+    rule_path = tmp_path / "classify" / "scenario.yaml"
+    rule_path.parent.mkdir(parents=True, exist_ok=True)
+    rule_path.write_text(source, encoding="utf-8")
+    return rule_path
+
+
+SCENARIO_RULE = r"""version: "1.0"
+description: 人种/姓名/场景 路径重命名示例
+path:
+  regex: '(?P<race>\w+)/(?P<name>\w+)/(?P<scene>\w+)/[^/]+\.csv'
+filters:
+  min_rows: 100
+  min_size_kb: 0
+structure:
+  placeholder: ""
+rules:
+  - target: '{scene}'
+rename: '{race}_{name}_{scene}_{filename}'
+default: unclassified
+"""
+
+
+def test_run_classify_path_rename_and_filters_user_scenario(tmp_path: Path):
+    """端到端：{race}/{name}/{scene}/*.csv -> {scene}/{race}_{name}_{scene}_*.csv。
+
+    小文件（行数不足）被跳过，合规文件按模板重命名并复制到目标目录。
+    """
+    source = tmp_path / "input"
+    _write_csv(source / "asian" / "zhangsan" / "sit" / "data_001.csv", rows=200)
+    _write_csv(source / "asian" / "zhangsan" / "sit" / "data_002.csv", rows=200)
+    _write_csv(source / "caucasian" / "lisi" / "walk" / "data_003.csv", rows=200)
+    # 行数不足的小文件应被跳过
+    _write_csv(source / "asian" / "zhangsan" / "sit" / "small.csv", rows=10)
+
+    rule_path = _write_rule(tmp_path, SCENARIO_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(source, output, rule_file=str(rule_path)),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 3
+    assert result.skip_count == 1
+
+    assert (output / "sit" / "asian_zhangsan_sit_data_001.csv").exists()
+    assert (output / "sit" / "asian_zhangsan_sit_data_002.csv").exists()
+    assert (output / "walk" / "caucasian_lisi_walk_data_003.csv").exists()
+    assert not list(output.rglob("asian_zhangsan_sit_small*.csv"))
+
+    skipped = [item for item in result.items if item.status.value == "SKIP"]
+    assert len(skipped) == 1
+    assert "行数不足" in skipped[0].reason
+
+
+def test_run_classify_min_rows_cli_overrides_rule(tmp_path: Path):
+    """CLI --min-rows 覆盖规则中的 min_rows。"""
+    source = tmp_path / "input"
+    _write_csv(source / "asian" / "zhangsan" / "sit" / "data_001.csv", rows=150)
+    rule_path = _write_rule(tmp_path, SCENARIO_RULE)
+    output = tmp_path / "output"
+
+    # 规则要求 100 行，文件有 150 行（通过）；CLI 覆盖为 200 行（不通过）
+    result = run_classify(
+        ClassifyRequest(source, output, rule_file=str(rule_path), min_rows=200),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 0
+    assert result.skip_count == 1
