@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-07-25
+
+### Fixed
+- 修复 ruff 0.16.0 默认规则集扩展（59 -> 413）导致 CI 报 1253 个 `UP006`/`FA100`/`UP045` 等错误的问题。在 `pyproject.toml` 显式 `[tool.ruff.lint] select = ["E4", "E7", "E9", "F", "I"]` 固定规则集，使本地与 CI 行为一致。`UP`/`FA100` 等涉及全项目类型注解现代化，后续单独 PR 逐步启用。
+
 ## [0.5.4] - 2026-07-25
 
 ### Fixed
