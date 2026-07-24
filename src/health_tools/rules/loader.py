@@ -191,6 +191,7 @@ class RuleLoader:
             classify_rules=classify_rules,
             accuracy=accuracy_config,
             rename=data.get("rename"),
+            filters=data.get("filters", {}),
         )
 
     @classmethod

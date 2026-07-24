@@ -133,3 +133,48 @@ def test_resolve_filename_supports_stem_placeholder(tmp_path: Path):
     classifier.classify(csv_path, tmp_path / "output", input_root=source)
 
     assert classifier.resolve_filename(csv_path) == "asian_data_001.csv"
+
+
+def test_check_filters_passes_when_no_filters(tmp_path: Path):
+    """未配置 filters 时所有文件都通过。"""
+    csv_path = _write_csv(tmp_path / "data.csv", rows=10)
+    rule = ClassifyRule(structure={"placeholder": ""}, rules=[{"target": "out"}])
+    classifier = DataClassifier(rule)
+
+    assert classifier.check_filters(csv_path, min_rows=0, min_size_kb=0.0) is None
+
+
+def test_check_filters_skips_small_row_count(tmp_path: Path):
+    """行数不足时返回跳过原因。"""
+    csv_path = _write_csv(tmp_path / "data.csv", rows=50)
+    rule = ClassifyRule(structure={"placeholder": ""}, rules=[{"target": "out"}])
+    classifier = DataClassifier(rule)
+
+    reason = classifier.check_filters(csv_path, min_rows=100, min_size_kb=0.0)
+    assert reason is not None
+    assert "行数不足" in reason
+    assert "50" in reason
+    assert "100" in reason
+
+
+def test_check_filters_skips_small_file_size(tmp_path: Path):
+    """文件大小不足时返回跳过原因。"""
+    csv_path = _write_csv(tmp_path / "data.csv", rows=5)
+    rule = ClassifyRule(structure={"placeholder": ""}, rules=[{"target": "out"}])
+    classifier = DataClassifier(rule)
+
+    reason = classifier.check_filters(csv_path, min_rows=0, min_size_kb=1024.0)
+    assert reason is not None
+    assert "文件过小" in reason
+
+
+def test_check_filters_caches_dataframe_for_extract(tmp_path: Path):
+    """通过行数检查后，CSV 应被缓存供 _extract_values 复用，不重复读取。"""
+    csv_path = _write_csv(tmp_path / "data.csv", rows=200)
+    rule = ClassifyRule(structure={"placeholder": ""}, rules=[{"target": "out"}])
+    classifier = DataClassifier(rule)
+
+    classifier.check_filters(csv_path, min_rows=100, min_size_kb=0.0)
+    assert classifier._cached_file == csv_path
+    assert classifier._cached_df is not None
+    assert len(classifier._cached_df) == 200

@@ -176,6 +176,35 @@ class DataClassifier:
         result = result.replace("{stem}", file_path.stem)
         return result
 
+    def check_filters(
+        self,
+        file_path: Path,
+        min_rows: int,
+        min_size_kb: float,
+    ) -> Optional[str]:
+        """检查文件是否满足最小行数与大小阈值；返回跳过原因，None 表示通过。
+
+        通过行数检查时复用 csv_handler 读取结果并写入缓存，避免 _extract_values 重复读取。
+        """
+        if min_size_kb > 0:
+            size_kb = file_path.stat().st_size / 1024.0
+            if size_kb < min_size_kb:
+                return f"文件过小({size_kb:.1f}KB < {min_size_kb}KB)"
+
+        if min_rows > 0:
+            try:
+                _, df = self.csv_handler.read(file_path)
+                self._cached_file = file_path
+                self._cached_df = df
+                row_count = len(df)
+                if row_count < min_rows:
+                    return f"行数不足({row_count} < {min_rows})"
+            except Exception as e:
+                logger.warning("检查行数失败 %s: %s", file_path.name, e)
+                return f"行数检查失败: {e}"
+
+        return None
+
     def get_last_values(self) -> Dict[str, Dict[str, Any]]:
         return {
             "path": dict(self._path_fields),
