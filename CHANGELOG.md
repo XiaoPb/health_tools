@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-07-24
+
+### Added
+- `classify` 命令支持路径级正则提取（`path.regex`，命名/位置捕获组 + `fields` 映射），可从相对输入目录的路径中提取人种、姓名、场景等变量
+- `classify` 命令支持输出文件名重命名模板（`rename`），可组合路径变量与 `{filename}`、`{stem}` 占位符
+- `classify` 命令支持小文件过滤（`filters.min_rows` / `filters.min_size_kb`），CLI `--min-rows` / `--min-size` 可覆盖规则阈值
+- `classify` 命令新增 `--dry-run` 预览模式，计算目标路径但不写入文件
+- `classify` 命令新增 `--conflict skip|rename|overwrite` 输出路径冲突处理策略，防止静默覆盖
+- 新增 `path_rename.yaml` 路径重命名示例规则
+- 规则验证器校验 `path` / `filters` / `rename` 新字段
+
+### Fixed
+- 修复 dry-run 与冲突处理在 `unknown_dir` 分支失效导致预览模式仍写入文件的问题
+- 修复 `check_filters` 读取异常时原因归类错误，统一映射为 `REASON_READ_FAILED` 等常量
+- 修复 `min_size_kb` 分支未捕获 `OSError` 导致文件缺失时崩溃的问题
+
+### Changed
+- `resolve_filename` 复用 `_resolve_variables` 消除变量替换重复逻辑
+- 补全 `docs/rules.md` 五类规则字段说明、列展开约定与内置规则清单
+- 补全 `docs/cmd_validate.md` 六类校验内容与 strict 要求
+- 统一 chip/parse/convert/evaluate/classify/analysis 规则文档措辞与默认值描述
+
+## [0.5.2] - 2026-07-21
+
+### Fixed
+- 恢复命令关键输出信息并优化启动性能
+
 ## [0.5.1] - 2026-07-18
 
 ### Fixed
