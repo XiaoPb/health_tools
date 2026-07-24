@@ -272,6 +272,7 @@ class ClassifyRequest:
     filter_name: Optional[str] = None
     min_rows: Optional[int] = None
     min_size_kb: Optional[float] = None
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)

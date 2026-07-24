@@ -21,6 +21,7 @@ from health_tools.api.models import (
 )
 from health_tools.api.operations import _batch, _context, _events, _load_rule, _require_path
 from health_tools.utils.errors import (
+    REASON_DRY_RUN,
     REASON_NO_DATA,
     REASON_RULE_MISMATCH,
     REASON_TOO_FEW_ROWS,
@@ -350,15 +351,27 @@ def run_classify(
             target_dir = classifier.classify(path, output, input_root=input_root)
             output_name = classifier.resolve_filename(path)
             if target_dir:
-                target_dir.mkdir(parents=True, exist_ok=True)
                 target = target_dir / output_name
+                category = str(target_dir.relative_to(output))
+                if request.dry_run:
+                    items.append(
+                        ItemResult(
+                            ItemStatus.SKIP,
+                            str(path),
+                            str(target),
+                            reason=REASON_DRY_RUN,
+                            detail="预览模式（未写入）",
+                            category=category,
+                        )
+                    )
+                    continue
+                target_dir.mkdir(parents=True, exist_ok=True)
                 if request.mode == "copy":
                     shutil.copy2(path, target)
                 elif request.mode == "move":
                     shutil.move(str(path), str(target))
                 else:
                     target.symlink_to(path.resolve())
-                category = str(target_dir.relative_to(output))
                 artifacts.append(target)
                 items.append(ItemResult(ItemStatus.OK, str(path), str(target), category=category))
                 if accuracy:

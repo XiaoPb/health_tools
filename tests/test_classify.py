@@ -299,3 +299,26 @@ def test_run_classify_min_size_kb_rule_filters_small_file(tmp_path: Path):
     skipped = [item for item in result.items if item.status.value == "SKIP"]
     assert len(skipped) == 1
     assert "文件过小" in skipped[0].reason
+
+
+def test_run_classify_dry_run_writes_no_files(tmp_path: Path):
+    """dry-run 下不写入任何文件，但报告计划目标路径。"""
+    source = tmp_path / "input"
+    _write_csv(source / "asian" / "zhangsan" / "sit" / "data_001.csv", rows=200)
+    rule_path = _write_rule(tmp_path, SCENARIO_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(source, output, rule_file=str(rule_path), dry_run=True),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 0
+    assert result.skip_count == 1
+    # 没有任何文件被写入
+    assert not any(output.rglob("*.csv"))
+
+    item = result.items[0]
+    assert "预览模式" in item.reason
+    # 计划目标路径仍记录在 output 字段
+    assert "asian_zhangsan_sit_data_001.csv" in item.output
