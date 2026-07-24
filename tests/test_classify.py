@@ -391,3 +391,114 @@ def test_run_classify_conflict_overwrite_replaces(tmp_path: Path):
     assert result.ok_count == 2
     assert (output / "groupA" / "merged.csv").exists()
     assert not (output / "groupA" / "merged_1.csv").exists()
+
+
+UNKNOWN_CONFLICT_RULE = r"""version: "1.0"
+description: unknown_dir 冲突测试（路径不匹配时归入 unknown_dir）
+path:
+  regex: '(?P<match>\w+)/\w+/\w+/[^/]+\.csv'
+structure:
+  placeholder: ""
+rules:
+  - target: '{match}'
+rename: 'unknown.csv'
+default: unclassified
+"""
+
+
+def test_run_classify_dry_run_with_unknown_dir_does_not_write(tmp_path: Path):
+    """dry_run + unknown_dir：不匹配的文件不写入，但报告计划路径。"""
+    source = tmp_path / "input"
+    # 文件在根目录，不匹配三层路径正则
+    _write_csv(source / "data_001.csv", rows=200)
+    rule_path = _write_rule(tmp_path, UNKNOWN_CONFLICT_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(
+            source,
+            output,
+            rule_file=str(rule_path),
+            unknown_dir="unknown",
+            dry_run=True,
+        ),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 0
+    assert result.skip_count == 1
+    # 没有任何文件被写入
+    assert not any(output.rglob("*.csv"))
+
+    item = result.items[0]
+    assert "预览模式" in item.reason
+    assert "unknown.csv" in item.output
+
+
+def test_run_classify_unknown_dir_conflict_skip(tmp_path: Path):
+    """unknown_dir + conflict=skip：第二个冲突文件被跳过。"""
+    source = tmp_path / "input"
+    _write_csv(source / "data_001.csv", rows=200)
+    _write_csv(source / "data_002.csv", rows=200)
+    rule_path = _write_rule(tmp_path, UNKNOWN_CONFLICT_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(
+            source,
+            output,
+            rule_file=str(rule_path),
+            unknown_dir="unknown",
+            conflict="skip",
+        ),
+        context=ExecutionContext(),
+    )
+
+    # 两个都进入 unknown_dir，但第二个因冲突被跳过
+    skip_items = [item for item in result.items if item.status.value == "SKIP"]
+    assert len(skip_items) == 2
+    assert (output / "unknown" / "unknown.csv").exists()
+    assert any("目标已存在" in item.reason for item in skip_items)
+
+
+def test_run_classify_unknown_dir_conflict_rename(tmp_path: Path):
+    """unknown_dir + conflict=rename：冲突文件追加后缀。"""
+    source = tmp_path / "input"
+    _write_csv(source / "data_001.csv", rows=200)
+    _write_csv(source / "data_002.csv", rows=200)
+    rule_path = _write_rule(tmp_path, UNKNOWN_CONFLICT_RULE)
+    output = tmp_path / "output"
+
+    run_classify(
+        ClassifyRequest(
+            source,
+            output,
+            rule_file=str(rule_path),
+            unknown_dir="unknown",
+            conflict="rename",
+        ),
+        context=ExecutionContext(),
+    )
+
+    assert (output / "unknown" / "unknown.csv").exists()
+    assert (output / "unknown" / "unknown_1.csv").exists()
+
+
+def test_check_filters_missing_file_returns_read_failed_reason(tmp_path: Path):
+    """文件不存在时，check_filters 返回读取失败原因而非文件过小/行数不足。"""
+    csv_path = tmp_path / "missing.csv"
+    rule = ClassifyRule(structure={"placeholder": ""}, rules=[{"target": "out"}])
+    classifier = DataClassifier(rule)
+
+    # min_rows 检查触发读取异常
+    reason = classifier.check_filters(csv_path, min_rows=100, min_size_kb=0.0)
+    assert reason is not None
+    assert "读取失败" in reason
+    assert "文件过小" not in reason
+    assert "行数不足" not in reason
+
+    # min_size_kb 检查触发 stat 异常
+    reason = classifier.check_filters(csv_path, min_rows=0, min_size_kb=10.0)
+    assert reason is not None
+    assert "读取失败" in reason
+    assert "文件过小" not in reason

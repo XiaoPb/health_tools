@@ -341,7 +341,13 @@ def run_classify(
             if min_rows > 0 or min_size_kb > 0:
                 skip_reason = classifier.check_filters(path, min_rows, min_size_kb)
                 if skip_reason is not None:
-                    reason = REASON_TOO_FEW_ROWS if "行数不足" in skip_reason else REASON_TOO_SMALL
+                    if skip_reason.startswith(REASON_TOO_FEW_ROWS):
+                        reason = REASON_TOO_FEW_ROWS
+                    elif skip_reason.startswith(REASON_TOO_SMALL):
+                        reason = REASON_TOO_SMALL
+                    else:
+                        # 异常原因：classify_exception 返回的常量是 skip_reason 的前缀
+                        reason = skip_reason.split(":")[0].strip()
                     items.append(
                         ItemResult(
                             ItemStatus.SKIP,
@@ -416,8 +422,43 @@ def run_classify(
                         )
             elif request.unknown_dir:
                 target_dir = output / request.unknown_dir
-                target_dir.mkdir(parents=True, exist_ok=True)
                 target = target_dir / output_name
+                category = request.unknown_dir
+                if request.dry_run:
+                    items.append(
+                        ItemResult(
+                            ItemStatus.SKIP,
+                            str(path),
+                            str(target),
+                            reason=REASON_DRY_RUN,
+                            detail="预览模式（未写入）",
+                            category=category,
+                        )
+                    )
+                    seen_targets.add(target)
+                    continue
+                if target.exists() or target in seen_targets:
+                    if request.conflict == "skip":
+                        items.append(
+                            ItemResult(
+                                ItemStatus.SKIP,
+                                str(path),
+                                str(target),
+                                reason=REASON_CONFLICT,
+                                detail="目标路径已存在，跳过",
+                                category=category,
+                            )
+                        )
+                        continue
+                    elif request.conflict == "rename":
+                        stem = target.stem
+                        suffix = target.suffix
+                        index = 1
+                        while target.exists() or target in seen_targets:
+                            target = target_dir / f"{stem}_{index}{suffix}"
+                            index += 1
+                seen_targets.add(target)
+                target_dir.mkdir(parents=True, exist_ok=True)
                 if request.mode == "copy":
                     shutil.copy2(path, target)
                 elif request.mode == "move":

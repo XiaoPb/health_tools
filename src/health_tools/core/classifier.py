@@ -188,7 +188,11 @@ class DataClassifier:
         通过行数检查时复用 csv_handler 读取结果并写入缓存，避免后续 _extract_from_data 重复读取。
         """
         if min_size_kb > 0:
-            size_kb = file_path.stat().st_size / 1024.0
+            try:
+                size_kb = file_path.stat().st_size / 1024.0
+            except OSError as e:
+                logger.warning("检查文件大小失败 %s: %s", file_path.name, e)
+                return f"{classify_exception(e)}: {e}"
             if size_kb < min_size_kb:
                 return f"文件过小({size_kb:.1f}KB < {min_size_kb}KB)"
 
