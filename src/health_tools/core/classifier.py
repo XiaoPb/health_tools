@@ -134,6 +134,8 @@ class DataClassifier:
             try:
                 rel_path = file_path.relative_to(input_root)
             except ValueError:
+                # file_path 不在 input_root 子树内时回退到纯文件名，便于排查规则配置错误
+                logger.debug("file_path 不在 input_root 下，回退到文件名: %s", file_path)
                 rel_path = Path(file_path.name)
         else:
             rel_path = Path(file_path.name)
@@ -166,6 +168,7 @@ class DataClassifier:
 
     def get_last_values(self) -> Dict[str, Dict[str, Any]]:
         return {
+            "path": dict(self._path_fields),
             "filename": dict(self._filename_fields),
             "extracted": dict(self._extracted_values),
         }

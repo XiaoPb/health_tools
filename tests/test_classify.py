@@ -68,3 +68,23 @@ def test_classify_without_input_root_skips_path_parsing(tmp_path: Path):
     # 无 input_root，path 变量未提取 → {scene} 无法解析 → 返回 None
     target_dir = classifier.classify(csv_path, tmp_path / "output")
     assert target_dir is None
+
+
+def test_classify_path_regex_no_match_falls_back_empty(tmp_path: Path):
+    """传了 input_root 但 path 正则不匹配时，path 字段为空、target 无法解析返回 None。"""
+    source = tmp_path / "input"
+    # 路径只有两层，正则要求三层，不匹配
+    csv_path = _write_csv(source / "asian" / "data_001.csv")
+
+    rule = ClassifyRule(
+        path={"regex": r"(?P<race>\w+)/(?P<name>\w+)/(?P<scene>\w+)/[^/]+\.csv"},
+        structure={"placeholder": ""},
+        rules=[{"target": "{scene}"}],
+    )
+    classifier = DataClassifier(rule)
+
+    target_dir = classifier.classify(csv_path, tmp_path / "output", input_root=source)
+
+    # 正则不匹配 → path 字段为空 → {scene} 残留 → 返回 None
+    assert target_dir is None
+    assert classifier.get_last_values()["path"] == {}
