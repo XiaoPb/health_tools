@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-
 REASON_EMPTY_FILE = "文件为空"
 REASON_BAD_FORMAT = "格式不对"
 REASON_READ_FAILED = "读取失败"

@@ -8,6 +8,7 @@ import click
 import yaml
 from rich.console import Console
 from rich.table import Table
+
 from health_tools.utils.errors import REASON_RULE_MISMATCH, classify_exception
 from health_tools.utils.progress import progress_track
 from health_tools.utils.reporting import ResultCollector, print_summary

@@ -3,6 +3,7 @@ from typing import Optional
 
 import click
 from rich.console import Console
+
 from health_tools.utils.errors import REASON_NO_DATA
 from health_tools.utils.reporting import FileResult, ResultCollector
 

@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from health_tools.core.vshb import read_vshb_result
 from health_tools.core.analysis.reference import analyze_reference
+from health_tools.core.vshb import read_vshb_result
 from health_tools.models.rules import AnalysisRule
 
 

@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import ChipRule
-from health_tools.utils.errors import REASON_EMPTY_FILE
 from health_tools.utils.csv_handler import CSVHandler
+from health_tools.utils.errors import REASON_EMPTY_FILE
 from health_tools.utils.progress import progress_track
 from health_tools.utils.reporting import FileResult, ResultCollector
 

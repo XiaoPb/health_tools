@@ -9,8 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from health_tools.core.ppg_analysis import compute_pi, prepare_signal, resolve_acc_columns
 from health_tools.core.analysis.reference import analyze_reference
+from health_tools.core.ppg_analysis import compute_pi, prepare_signal, resolve_acc_columns
 from health_tools.models.rules import AnalysisRule, ChipRule
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.csv_handler import CSVHandler

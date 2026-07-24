@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
-from health_tools.models.rules import ChipRule
 from health_tools.core.splitter import DataSplitter
+from health_tools.models.rules import ChipRule
 from health_tools.utils.csv_handler import CSVHandler
 from health_tools.utils.parallel import parallel_process
 

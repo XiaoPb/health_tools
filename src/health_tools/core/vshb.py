@@ -5,7 +5,6 @@ from typing import Dict
 
 import pandas as pd
 
-
 VSHB_COLUMNS = ["time", "offline", "ref", "online", "comp"]
 VSHB_HEADER_ALIASES = {
     "time": "second",

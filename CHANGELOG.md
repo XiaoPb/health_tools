@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-07-25
+
+### Fixed
+- 修复 CI 中 `ruff check` 报告的 `I001` 导入排序问题，统一 `src/` 下 16 个模块的 import 块排序与 `__all__` 顺序
+
 ## [0.5.3] - 2026-07-24
 
 ### Added

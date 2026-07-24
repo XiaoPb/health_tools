@@ -13,10 +13,10 @@ import pandas as pd
 import yaml
 
 from health_tools.config import CONFIG_DIR, load_config, save_config
+from health_tools.core.vshb import read_vshb_result
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.accuracy import calculate_accuracy, format_metric_name
 from health_tools.utils.progress import progress_track
-from health_tools.core.vshb import read_vshb_result
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
 EXE_NAME = "TEE_Algorithm.exe"

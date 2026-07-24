@@ -15,7 +15,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import GHealthError, RequestValidationError
 from health_tools.api.models import (

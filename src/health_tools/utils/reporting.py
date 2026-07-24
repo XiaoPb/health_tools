@@ -16,7 +16,6 @@ from health_tools.utils.errors import (
     normalize_reason,
 )
 
-
 STATUS_OK = "OK"
 STATUS_SKIP = "SKIP"
 STATUS_FAIL = "FAIL"

@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import click
 from rich.console import Console
+
 from health_tools.utils.reporting import FileResult, ResultCollector
 
 console = Console()

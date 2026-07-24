@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import EvaluateRule
-from health_tools.utils.errors import REASON_EMPTY_FILE, REASON_MISSING_COLUMN
 from health_tools.utils.accuracy import calculate_accuracy
 from health_tools.utils.csv_handler import CSVHandler
+from health_tools.utils.errors import REASON_EMPTY_FILE, REASON_MISSING_COLUMN
 from health_tools.utils.progress import progress_track
 from health_tools.utils.reporting import ResultCollector
 

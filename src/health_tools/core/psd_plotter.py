@@ -7,8 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from rich.console import Console
-from health_tools.utils.progress import progress_track
+
 from health_tools.core.vshb import read_vshb_result
+from health_tools.utils.progress import progress_track
 
 plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei"]
 plt.rcParams["axes.unicode_minus"] = False
