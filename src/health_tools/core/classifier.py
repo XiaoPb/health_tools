@@ -166,6 +166,23 @@ class DataClassifier:
 
         return None
 
+    def resolve_filename(self, file_path: Path) -> str:
+        """按 rename 模板生成输出文件名；未配置时返回原文件名。"""
+        if not self.rule.rename:
+            return file_path.name
+
+        variables: Dict[str, Any] = {}
+        variables.update(self._path_fields)
+        variables.update(self._filename_fields)
+        variables.update(self._extracted_values)
+        variables["filename"] = file_path.name
+        variables["stem"] = file_path.stem
+
+        result = self.rule.rename
+        for key, value in variables.items():
+            result = result.replace(f"{{{key}}}", str(value))
+        return result
+
     def get_last_values(self) -> Dict[str, Dict[str, Any]]:
         return {
             "path": dict(self._path_fields),

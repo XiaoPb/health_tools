@@ -190,6 +190,7 @@ class RuleLoader:
             extract=extract_rules,
             classify_rules=classify_rules,
             accuracy=accuracy_config,
+            rename=data.get("rename"),
         )
 
     @classmethod

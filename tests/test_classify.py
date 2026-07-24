@@ -88,3 +88,48 @@ def test_classify_path_regex_no_match_falls_back_empty(tmp_path: Path):
     # 正则不匹配 → path 字段为空 → {scene} 残留 → 返回 None
     assert target_dir is None
     assert classifier.get_last_values()["path"] == {}
+
+
+def test_resolve_filename_without_rename_preserves_original(tmp_path: Path):
+    """无 rename 字段时保持原文件名（向后兼容）。"""
+    csv_path = _write_csv(tmp_path / "data_001.csv")
+
+    rule = ClassifyRule(structure={"placeholder": ""}, rules=[{"target": "out"}])
+    classifier = DataClassifier(rule)
+    classifier.classify(csv_path, tmp_path / "output")
+
+    assert classifier.resolve_filename(csv_path) == "data_001.csv"
+
+
+def test_resolve_filename_applies_template_with_path_vars(tmp_path: Path):
+    """rename 模板应组合路径变量与原文件名。"""
+    source = tmp_path / "input"
+    csv_path = _write_csv(source / "asian" / "zhangsan" / "sit" / "data_001.csv")
+
+    rule = ClassifyRule(
+        path={"regex": r"(?P<race>\w+)/(?P<name>\w+)/(?P<scene>\w+)/[^/]+\.csv"},
+        rename="{race}_{name}_{scene}_{filename}",
+        structure={"placeholder": ""},
+        rules=[{"target": "{scene}"}],
+    )
+    classifier = DataClassifier(rule)
+    classifier.classify(csv_path, tmp_path / "output", input_root=source)
+
+    assert classifier.resolve_filename(csv_path) == "asian_zhangsan_sit_data_001.csv"
+
+
+def test_resolve_filename_supports_stem_placeholder(tmp_path: Path):
+    """{stem} 占位符应替换为不含扩展名的文件名。"""
+    source = tmp_path / "input"
+    csv_path = _write_csv(source / "asian" / "zhangsan" / "sit" / "data_001.csv")
+
+    rule = ClassifyRule(
+        path={"regex": r"(?P<race>\w+)/\w+/\w+/[^/]+\.csv"},
+        rename="{race}_{stem}.csv",
+        structure={"placeholder": ""},
+        rules=[{"target": "{race}"}],
+    )
+    classifier = DataClassifier(rule)
+    classifier.classify(csv_path, tmp_path / "output", input_root=source)
+
+    assert classifier.resolve_filename(csv_path) == "asian_data_001.csv"

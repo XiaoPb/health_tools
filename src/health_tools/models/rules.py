@@ -170,6 +170,7 @@ class ClassifyRule:
     classify_rules: List[Dict[str, Any]] = field(default_factory=list)
     accuracy: Dict[str, Any] = field(default_factory=dict)
     target_chip: Optional[str] = None
+    rename: Optional[str] = None
 
 
 @dataclass
