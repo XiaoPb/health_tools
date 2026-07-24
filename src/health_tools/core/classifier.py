@@ -95,6 +95,7 @@ class DataClassifier:
         self.rule = rule
         self.chip_rule = chip_rule
         self.csv_handler = CSVHandler(chip_rule)
+        self._path_fields: Dict[str, str] = {}
         self._filename_fields: Dict[str, str] = {}
         self._extracted_values: Dict[str, Any] = {}
         self._cached_df: Optional[pd.DataFrame] = None
@@ -115,13 +116,28 @@ class DataClassifier:
 
     def _resolve_variables(self, text: str) -> str:
         result = text
+        for key, value in self._path_fields.items():
+            result = result.replace(f"{{{key}}}", str(value))
         for key, value in self._filename_fields.items():
             result = result.replace(f"{{{key}}}", str(value))
         for key, value in self._extracted_values.items():
             result = result.replace(f"{{{key}}}", str(value))
         return result
 
-    def classify(self, file_path: Path, base_dir: Path) -> Optional[Path]:
+    def classify(
+        self,
+        file_path: Path,
+        base_dir: Path,
+        input_root: Optional[Path] = None,
+    ) -> Optional[Path]:
+        if input_root is not None:
+            try:
+                rel_path = file_path.relative_to(input_root)
+            except ValueError:
+                rel_path = Path(file_path.name)
+        else:
+            rel_path = Path(file_path.name)
+        self._parse_path(rel_path)
         self._parse_filename(file_path)
 
         self._extracted_values = self._extract_values(file_path)
@@ -153,6 +169,33 @@ class DataClassifier:
             "filename": dict(self._filename_fields),
             "extracted": dict(self._extracted_values),
         }
+
+    def _parse_path(self, rel_path: Path) -> None:
+        self._path_fields = {}
+
+        if not self.rule.path:
+            return
+
+        regex = self.rule.path.get("regex", "")
+        fields = self.rule.path.get("fields", [])
+
+        if not regex:
+            return
+
+        rel_str = str(rel_path).replace("\\", "/")
+        match = re.search(regex, rel_str)
+        if not match:
+            return
+
+        if fields:
+            groups = match.groups()
+            for i, field_name in enumerate(fields):
+                if i < len(groups) and groups[i] is not None:
+                    self._path_fields[field_name] = groups[i]
+        else:
+            for name, value in match.groupdict().items():
+                if value is not None:
+                    self._path_fields[name] = value
 
     def _parse_filename(self, file_path: Path) -> None:
         self._filename_fields = {}
@@ -295,6 +338,9 @@ class DataClassifier:
         conditions: Dict[str, Dict[str, str]],
     ) -> Optional[str]:
         result = target
+
+        for key, value in self._path_fields.items():
+            result = result.replace(f"{{{key}}}", str(value))
 
         for key, value in self._filename_fields.items():
             result = result.replace(f"{{{key}}}", str(value))

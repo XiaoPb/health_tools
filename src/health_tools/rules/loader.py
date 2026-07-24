@@ -182,6 +182,7 @@ class RuleLoader:
 
         return ClassifyRule(
             filename=data.get("filename", {}),
+            path=data.get("path", {}),
             data_columns=data_columns,
             structure=data.get("structure", {}),
             rules=data.get("rules", []),

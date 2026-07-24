@@ -161,6 +161,7 @@ class DataColumn:
 @dataclass
 class ClassifyRule:
     filename: Dict[str, Any] = field(default_factory=dict)
+    path: Dict[str, Any] = field(default_factory=dict)
     data_columns: List[DataColumn] = field(default_factory=list)
     structure: Dict[str, str] = field(default_factory=dict)
     rules: List[Dict[str, Any]] = field(default_factory=list)
