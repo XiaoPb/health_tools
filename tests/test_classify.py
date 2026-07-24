@@ -264,3 +264,38 @@ def test_run_classify_min_rows_cli_overrides_rule(tmp_path: Path):
 
     assert result.ok_count == 0
     assert result.skip_count == 1
+
+
+SIZE_FILTER_RULE = r"""version: "1.0"
+description: 按文件大小过滤
+path:
+  regex: '(?P<race>\w+)/[^/]+\.csv'
+filters:
+  min_rows: 0
+  min_size_kb: 5
+structure:
+  placeholder: ""
+rules:
+  - target: '{race}'
+default: unclassified
+"""
+
+
+def test_run_classify_min_size_kb_rule_filters_small_file(tmp_path: Path):
+    """规则 filters.min_size_kb 过滤小文件，跳过原因含"文件过小"。"""
+    source = tmp_path / "input"
+    # 200 行 CSV 约 1.4KB，小于规则阈值 5KB
+    _write_csv(source / "asian" / "data_001.csv", rows=200)
+    rule_path = _write_rule(tmp_path, SIZE_FILTER_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(source, output, rule_file=str(rule_path)),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 0
+    assert result.skip_count == 1
+    skipped = [item for item in result.items if item.status.value == "SKIP"]
+    assert len(skipped) == 1
+    assert "文件过小" in skipped[0].reason
