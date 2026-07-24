@@ -21,6 +21,7 @@ from health_tools.api.models import (
 )
 from health_tools.api.operations import _batch, _context, _events, _load_rule, _require_path
 from health_tools.utils.errors import (
+    REASON_CONFLICT,
     REASON_DRY_RUN,
     REASON_NO_DATA,
     REASON_RULE_MISMATCH,
@@ -286,6 +287,8 @@ def run_classify(
 
     if request.mode not in {"copy", "move", "symlink"}:
         raise RequestValidationError("mode 仅支持 copy、move 或 symlink")
+    if request.conflict not in {"skip", "rename", "overwrite"}:
+        raise RequestValidationError("conflict 仅支持 skip、rename 或 overwrite")
     ctx = _context(context)
     source = _require_path(request.input_path)
     rule = _load_rule(
@@ -332,6 +335,7 @@ def run_classify(
     handler = CSVHandler(chip_rule)
     items: List[ItemResult] = []
     artifacts: List[Path] = []
+    seen_targets: set = set()
     for _, path in _events("classify", "files", files, ctx, items):
         try:
             if min_rows > 0 or min_size_kb > 0:
@@ -364,7 +368,29 @@ def run_classify(
                             category=category,
                         )
                     )
+                    seen_targets.add(target)
                     continue
+                if target.exists() or target in seen_targets:
+                    if request.conflict == "skip":
+                        items.append(
+                            ItemResult(
+                                ItemStatus.SKIP,
+                                str(path),
+                                str(target),
+                                reason=REASON_CONFLICT,
+                                detail="目标路径已存在，跳过",
+                                category=category,
+                            )
+                        )
+                        continue
+                    elif request.conflict == "rename":
+                        stem = target.stem
+                        suffix = target.suffix
+                        index = 1
+                        while target.exists() or target in seen_targets:
+                            target = target_dir / f"{stem}_{index}{suffix}"
+                            index += 1
+                seen_targets.add(target)
                 target_dir.mkdir(parents=True, exist_ok=True)
                 if request.mode == "copy":
                     shutil.copy2(path, target)

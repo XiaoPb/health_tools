@@ -322,3 +322,72 @@ def test_run_classify_dry_run_writes_no_files(tmp_path: Path):
     assert "预览模式" in item.reason
     # 计划目标路径仍记录在 output 字段
     assert "asian_zhangsan_sit_data_001.csv" in item.output
+
+
+CONFLICT_RULE = r"""version: "1.0"
+description: 两个不同输入映射到同一输出名的冲突场景
+path:
+  regex: '(?P<group>\w+)/[^/]+\.csv'
+structure:
+  placeholder: ""
+rules:
+  - target: '{group}'
+rename: 'merged.csv'
+default: unclassified
+"""
+
+
+def test_run_classify_conflict_skip_keeps_first(tmp_path: Path):
+    """skip 策略：第二个冲突文件被跳过，保留第一个。"""
+    source = tmp_path / "input"
+    _write_csv(source / "groupA" / "data_001.csv", rows=200)
+    _write_csv(source / "groupA" / "data_002.csv", rows=200)
+    rule_path = _write_rule(tmp_path, CONFLICT_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(source, output, rule_file=str(rule_path), conflict="skip"),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 1
+    assert result.skip_count == 1
+    assert (output / "groupA" / "merged.csv").exists()
+    skipped = [item for item in result.items if item.status.value == "SKIP"]
+    assert any("目标已存在" in item.reason for item in skipped)
+
+
+def test_run_classify_conflict_rename_appends_suffix(tmp_path: Path):
+    """rename 策略：冲突文件追加 _1/_2 后缀。"""
+    source = tmp_path / "input"
+    _write_csv(source / "groupA" / "data_001.csv", rows=200)
+    _write_csv(source / "groupA" / "data_002.csv", rows=200)
+    rule_path = _write_rule(tmp_path, CONFLICT_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(source, output, rule_file=str(rule_path), conflict="rename"),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 2
+    assert (output / "groupA" / "merged.csv").exists()
+    assert (output / "groupA" / "merged_1.csv").exists()
+
+
+def test_run_classify_conflict_overwrite_replaces(tmp_path: Path):
+    """overwrite 策略：后者覆盖前者。"""
+    source = tmp_path / "input"
+    _write_csv(source / "groupA" / "data_001.csv", rows=200)
+    _write_csv(source / "groupA" / "data_002.csv", rows=200)
+    rule_path = _write_rule(tmp_path, CONFLICT_RULE)
+    output = tmp_path / "output"
+
+    result = run_classify(
+        ClassifyRequest(source, output, rule_file=str(rule_path), conflict="overwrite"),
+        context=ExecutionContext(),
+    )
+
+    assert result.ok_count == 2
+    assert (output / "groupA" / "merged.csv").exists()
+    assert not (output / "groupA" / "merged_1.csv").exists()

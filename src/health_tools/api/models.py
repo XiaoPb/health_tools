@@ -273,6 +273,7 @@ class ClassifyRequest:
     min_rows: Optional[int] = None
     min_size_kb: Optional[float] = None
     dry_run: bool = False
+    conflict: str = "skip"
 
 
 @dataclass(frozen=True)
