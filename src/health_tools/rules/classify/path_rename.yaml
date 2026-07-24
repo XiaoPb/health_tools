@@ -1,0 +1,24 @@
+version: "1.0"
+description: |
+  路径重命名示例：将 {人种}/{姓名}/{场景}/*.csv 整理为
+  {场景}/{人种}_{姓名}_{场景}_{原文件名}，并跳过行数不足的小文件。
+
+path:
+  # 匹配相对输入目录的路径，命名捕获组提取 race/name/scene
+  regex: '(?P<race>\w+)/(?P<name>\w+)/(?P<scene>\w+)/[^/]+\.csv'
+
+filters:
+  min_rows: 100        # 跳过行数少于 100 的文件
+  min_size_kb: 1       # 跳过小于 1KB 的文件
+
+structure:
+  placeholder: ""
+
+rules:
+  # 输出目录：{场景}
+  - target: '{scene}'
+
+# 输出文件名模板：{人种}_{姓名}_{场景}_{原文件名}
+rename: '{race}_{name}_{scene}_{filename}'
+
+default: unclassified

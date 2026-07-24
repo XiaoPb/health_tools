@@ -326,6 +326,26 @@ default: unclassified
 
 classify 的准确度按列名读取 `ref_column`/`pred_column`；如参考列名不在 CSV 中，请用命令行 `--ref-column`/`--pred-column` 指定，或改用 evaluate 规则（其 chip 规则的 `hr_ref_column`/`spo_ref_column` 支持按 1-based 索引回退）。
 
+### 路径正则与文件重命名
+
+当需要按多级目录结构重新组织文件时，用 `path.regex` 匹配文件相对输入目录的路径（目录分隔符统一为 `/`），提取的变量可在 `target`、`rename` 和条件中引用。`rename` 模板生成新的输出文件名，支持 `{filename}`（含扩展名）与 `{stem}`（不含扩展名）。
+
+```yaml
+version: "1.0"
+path:
+  regex: '(?P<race>\w+)/(?P<name>\w+)/(?P<scene>\w+)/[^/]+\.csv'
+filters:
+  min_rows: 100
+  min_size_kb: 1
+structure:
+  placeholder: ""
+rules:
+  - target: '{scene}'
+rename: '{race}_{name}_{scene}_{filename}'
+```
+
+输入 `asian/zhangsan/sit/data_001.csv` 输出 `sit/asian_zhangsan_sit_data_001.csv`；行数或大小不足的文件被跳过。`--dry-run` 可预览目标路径而不写入，`--conflict rename` 在路径冲突时追加 `_1`/`_2` 后缀。
+
 ### 字段说明
 
 | 字段 | 类型 | 说明 |
@@ -336,6 +356,9 @@ classify 的准确度按列名读取 `ref_column`/`pred_column`；如参考列�
 | `filename` | object | 文件名正则与字段 |
 | `filename.regex` | string | 文件名正则 |
 | `filename.fields` | list | 捕获组对应的字段名 |
+| `path` | object | 相对路径正则与字段（匹配相对输入目录的路径，自动转换 `\` 为 `/`） |
+| `path.regex` | string | 相对路径正则，支持命名捕获组 `(?P<name>...)` |
+| `path.fields` | list | 位置捕获组对应的字段名（与命名组二选一） |
 | `data_columns` | list | 数据列定义，见下 |
 | `structure` | object | 目录结构；值为 `""` 或 `|` 分隔的子目录名 |
 | `rules` | list | 简单分类规则（存在 `classify` 时被跳过；`--strict` 简单结构要求存在） |
@@ -350,6 +373,10 @@ classify 的准确度按列名读取 `ref_column`/`pred_column`；如参考列�
 | `classify[].target` | string | 分类目标路径 |
 | `classify[].condition` | string | 条件表达式 |
 | `accuracy` | object | 准确度配置，见下 |
+| `rename` | string | 输出文件名模板，支持 `{变量}` 及 `{filename}`/`{stem}`；省略时保留原文件名 |
+| `filters` | object | 小文件过滤阈值 |
+| `filters.min_rows` | int | 跳过行数少于该值的文件 |
+| `filters.min_size_kb` | number | 跳过大小（KB）小于该值的文件 |
 | `default` | string | 未匹配时的目录名 |
 
 ### data_columns 字段
@@ -774,7 +801,7 @@ ghealth_tool validate path/to/rules/parse/custom.yaml --strict
 | `evaluate` | `type` ∈ {hr, spo2}、`ref_column`、`pred_column` | `description` |
 | `analysis` | `version`、`type` ∈ {hr, spo2, other}、`columns`、非空 `detectors`、`thresholds`（可选，为映射）、非空 `causes`（每项含 `id`/`title`/`origin`/`when`，`algorithm` 不能有 `actions`） | `description` |
 
-parse 会额外校验正则可编译、捕获组数量与 `columns` 数量匹配（单捕获组多列时要求 `separator` 非空）。convert 会校验 `source_columns`/`target_columns` 等长、`extra_source` 结构与 `align.left_on`/`right_on` 配对。
+parse 会额外校验正则可编译、捕获组数量与 `columns` 数量匹配（单捕获组多列时要求 `separator` 非空）。convert 会校验 `source_columns`/`target_columns` 等长、`extra_source` 结构与 `align.left_on`/`right_on` 配对。classify 会额外校验 `path.regex` 可编译、`filters.min_rows`/`min_size_kb` 为非负数、`rename` 为字符串。
 
 `version` 字段除 `chip` 外仅用于 `validate` 校验，加载后不保留在规则对象中；`chip` 加载时缺省为 `1.0`。
 
