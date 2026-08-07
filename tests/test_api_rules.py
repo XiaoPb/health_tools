@@ -534,3 +534,27 @@ def test_validate_convert_rule_rejects_classify_bad_rename():
         rule_type="convert",
     )
     assert any("'rename' 必须是字符串" in error for error in errors)
+
+
+def test_validate_convert_rule_rejects_classify_non_dict():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": 123,
+        },
+        rule_type="convert",
+    )
+    assert any("'classify' 必须是字典" in error for error in errors)
+
+
+def test_validate_convert_rule_accepts_classify_null():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": None,
+        },
+        rule_type="convert",
+    )
+    assert errors == []

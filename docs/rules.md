@@ -498,6 +498,7 @@ split:
 | `expand_repeat` | object | 列重复扩展 `{列: 次数}` |
 | `forward_fill` | list | 前值填充列 |
 | `split` | object | 先分割再转换；支持 by_column/by_size/by_time 三选一 |
+| `classify` | object | 转换后分类配置；支持完整 classify 规则参数 |
 | `extra_source` | object/list | 外部参考文件合并，见下 |
 
 ### split
