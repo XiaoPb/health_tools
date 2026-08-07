@@ -45,6 +45,10 @@ column_mapping:
 # forward_fill: 前向填充（0 值用前一个非零值替代）
 forward_fill:
   - polar_HR
+# split: 先分割再转换（每段独立 forward_fill）
+split:
+  by_column: FRAME_ID
+  column_value: 0
 
 # expand_repeat: 低采样率列重复扩展
 expand_repeat:
@@ -78,6 +82,7 @@ extra_source:
 | `csv` | 输入 CSV 解析配置 |
 | `column_mapping` | 源列 → 目标列映射（支持 `{start-end}` 展开） |
 | `forward_fill` | 前向填充列（零值用前一个非零值替代） |
+| `split` | 先分割再转换；支持 by_column/by_size/by_time（三选一） |
 | `expand_repeat` | 列重复扩展（低采样率对齐高采样率） |
 | `computed` | 计算列（支持 +, -, *, / 运算） |
 | `extra_source` | 从额外文件读取参考列并按配置列对齐 |
@@ -104,6 +109,13 @@ extra_source:
 
 当找到对比文件但按对齐列合并后没有有效数据时，命令会生成
 `extra_source_align_errors.csv`，记录原始文件、对比文件、对比源和失败原因，便于批量排查金标时间不一致的问题。
+
+## 规则 split
+
+规则文件配置 `split` 时，convert 在读取并合并 `extra_source` 后先按配置分割，再对每段
+分别执行映射、computed、expand_repeat、forward_fill 并写出 `<输出名>_<序号>.csv`。
+适用于按帧分割：`forward_fill` 不会跨段串值。`--split <N>` 仅在没有规则 `split` 的合并
+模式下按转换后的行数分割输出。
 
 ## 输出与异常汇总
 

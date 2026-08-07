@@ -168,6 +168,7 @@ def _generate_rule_template(
         )
         f.write("\n# forward_fill: []  # 前向填充列（如 [TimeStamp, FRAME_ID]）\n")
         f.write("# expand_repeat: []  # 重复扩展列（如 [REF_RESULT{0-15}]）\n")
+        f.write("# split:  # 先分割再转换（by_column/by_size/by_time）\n")
 
     if source_columns:
         matched_count = sum(1 for v in column_mapping.values() if v != "Unknown")

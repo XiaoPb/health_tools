@@ -445,7 +445,7 @@ rename: '{race}_{name}_{scene}_{filename}'
 
 ## convert 规则
 
-路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入 → 合并 `extra_source` → 映射列 → 计算 `computed` 列 → `expand_repeat` 频率扩展 → `forward_fill` 前值填充 → 按目标芯片列补 0 并排序。
+路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入 → 合并 `extra_source` →（若配置 `split`）先分割 → 每段分别执行：映射列 → 计算 `computed` 列 → `expand_repeat` 频率扩展 → `forward_fill` 前值填充 → 按目标芯片列补 0 并排序。每段独立执行 `forward_fill`，避免帧边界串值。
 
 ```yaml
 version: "1.0"
@@ -477,6 +477,9 @@ expand_repeat:
 
 forward_fill:
   - polar_hr
+split:
+  by_column: FRAME_ID   # 先分割再转换；列值等于 column_value 时开始新段
+  column_value: 0
 ```
 
 也可用等长的 `source_columns` 和 `target_columns` 代替 `column_mapping`。映射后缺失的目标芯片列补 0，多余列被丢弃。
@@ -494,7 +497,23 @@ forward_fill:
 | `computed` | object | 计算列，见下 |
 | `expand_repeat` | object | 列重复扩展 `{列: 次数}` |
 | `forward_fill` | list | 前值填充列 |
+| `split` | object | 先分割再转换；支持 by_column/by_size/by_time 三选一 |
 | `extra_source` | object/list | 外部参考文件合并，见下 |
+
+### split
+
+`split` 让 convert 在合并 `extra_source` 之后、映射列之前把数据切成多段，每段独立完成
+映射、`computed`、`expand_repeat`、`forward_fill` 与芯片列输出，并写出
+`<输出名>_<序号>.csv`。适用于按帧分割：`forward_fill` 不会把上一帧末尾的值带入下一帧。
+
+| 字段 | 说明 |
+|---|---|
+| `by_column` | 按列值分割；`column_value` 为该列触发新段的值（默认 0） |
+| `by_size` | 按行数分割（正整数） |
+| `by_time` | 按时间分割（秒，正数），需配合 `time_column` |
+
+三种模式互斥。规则配置 `split` 时优先于 CLI `--split`；`--split` 仅在未配置规则
+`split` 时按转换后的行数分割输出（仅合并模式）。
 
 ### computed 公式
 
