@@ -63,7 +63,39 @@ def _write_convert_csv(frame, output_file: Path, csv_config: Optional[dict]) -> 
     handler.write(output_file, frame, info=info or None)
 
 
-def _convert_one(source, destination, converter, input_config, output_config) -> ItemResult:
+def _convert_classifier(converter):
+    """规则配置 classify 时构建内存分类器，否则返回 None。"""
+    if not converter.rule.classify:
+        return None
+    from health_tools.core.classifier import DataClassifier
+    from health_tools.rules.loader import RuleLoader
+
+    return DataClassifier(RuleLoader.build_classify_rule(converter.rule.classify))
+
+
+def _classify_default(converter) -> str:
+    """未命中分类时的默认目录名。"""
+    default = converter.rule.classify.get("default")
+    return default or "unclassified"
+
+
+def _convert_one(
+    source, destination, converter, input_config, output_config, input_root=None
+) -> ItemResult:
+    classifier = _convert_classifier(converter)
+    default_category = _classify_default(converter)
+
+    def _output_name(index=None) -> str:
+        """输出文件名：classify 配置 rename 时用模板（先分类再取字段），否则沿用 destination。"""
+        if classifier is not None and classifier.rule.rename:
+            base = classifier.resolve_filename(source)
+            stem, suffix = Path(base).stem, Path(base).suffix
+        else:
+            stem, suffix = destination.stem, destination.suffix
+        if index is None:
+            return f"{stem}{suffix}"
+        return f"{stem}_{index}{suffix}"
+
     try:
         frame = _read_convert_csv(source, input_config)
         if not converter.has_matching_columns(frame):
@@ -85,14 +117,24 @@ def _convert_one(source, destination, converter, input_config, output_config) ->
                     "不符合转换规则",
                 )
             outputs = []
+            categories = set()
             for index, chunk in enumerate(chunks, 1):
-                chunk_path = destination.parent / f"{destination.stem}_{index}{destination.suffix}"
+                if classifier is not None:
+                    category = (
+                        classifier.classify_frame(chunk, source, input_root=input_root)
+                        or default_category
+                    )
+                    chunk_path = destination.parent / category / _output_name(index)
+                    categories.add(category)
+                else:
+                    chunk_path = destination.parent / _output_name(index)
                 _write_convert_csv(chunk, chunk_path, output_config)
                 outputs.append(chunk_path)
             return ItemResult(
                 ItemStatus.OK,
                 str(source),
                 ";".join(str(path) for path in outputs),
+                category=categories.pop() if len(categories) == 1 else "",
                 rows=sum(len(chunk) for chunk in chunks),
             )
         result = converter.convert(frame, source_file=source)
@@ -104,8 +146,20 @@ def _convert_one(source, destination, converter, input_config, output_config) ->
                 REASON_RULE_MISMATCH,
                 "不符合转换规则",
             )
-        _write_convert_csv(result, destination, output_config)
-        return ItemResult(ItemStatus.OK, str(source), str(destination), rows=len(result))
+        category = ""
+        if classifier is not None:
+            category = (
+                classifier.classify_frame(result, source, input_root=input_root) or default_category
+            )
+        write_path = destination.parent / category / _output_name() if category else destination
+        _write_convert_csv(result, write_path, output_config)
+        return ItemResult(
+            ItemStatus.OK,
+            str(source),
+            str(write_path),
+            category=category,
+            rows=len(result),
+        )
     except Exception as exc:
         return ItemResult(
             ItemStatus.FAIL,
@@ -275,6 +329,25 @@ def run_convert(
                     )
             if frames:
                 merged = pd.concat(frames, ignore_index=True)
+                merge_classifier = _convert_classifier(converter)
+                merge_default = _classify_default(converter)
+
+                def _merge_path(destination, index, frame):
+                    if merge_classifier is not None:
+                        category = (
+                            merge_classifier.classify_frame(frame, destination) or merge_default
+                        )
+                        if merge_classifier.rule.rename:
+                            base = merge_classifier.resolve_filename(destination)
+                            stem, suffix = Path(base).stem, Path(base).suffix
+                        else:
+                            stem, suffix = destination.stem, destination.suffix
+                        name = f"{stem}_{index}{suffix}" if index is not None else f"{stem}{suffix}"
+                        return destination.parent / category / name
+                    if index is None:
+                        return destination.parent / destination.name
+                    return destination.parent / f"{destination.stem}_{index}.csv"
+
                 if converter.rule.split:
                     try:
                         chunks = converter.convert_split(merged)
@@ -301,25 +374,33 @@ def run_convert(
                             )
                         else:
                             for index, chunk in enumerate(chunks, 1):
-                                path = destination.parent / f"{destination.stem}_{index}.csv"
+                                path = _merge_path(destination, index, chunk)
                                 _write_convert_csv(chunk, path, output_config)
                                 artifacts.append(path)
                 elif request.split:
                     converted = converter.convert(merged)
                     for index, start in enumerate(range(0, len(converted), request.split), 1):
                         chunk = converted.iloc[start : start + request.split]
-                        path = destination.parent / f"{destination.stem}_{index}.csv"
+                        path = _merge_path(destination, index, chunk)
                         _write_convert_csv(chunk, path, output_config)
                         artifacts.append(path)
                 else:
                     converted = converter.convert(merged)
-                    _write_convert_csv(converted, destination, output_config)
-                    artifacts.append(destination)
+                    path = _merge_path(destination, None, converted)
+                    _write_convert_csv(converted, path, output_config)
+                    artifacts.append(path)
         else:
             destination.mkdir(parents=True, exist_ok=True)
             for _, path in _events("convert", "files", files, ctx, items):
                 output_file = destination / path.relative_to(source)
-                item = _convert_one(path, output_file, converter, input_config, output_config)
+                item = _convert_one(
+                    path,
+                    output_file,
+                    converter,
+                    input_config,
+                    output_config,
+                    input_root=source,
+                )
                 items.append(item)
                 if item.status == ItemStatus.OK:
                     artifacts.extend(Path(path) for path in item.output.split(";"))
