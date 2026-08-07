@@ -509,3 +509,42 @@ def test_convert_split_returns_empty_when_rule_does_not_match():
     converter = DataConverter(rule)
 
     assert converter.convert_split(pd.DataFrame({"foo": [1]})) == []
+
+
+def test_convert_split_by_time_segments():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp", "frame": "FRAME_ID"})
+    rule.split = {"by_time": 1.0, "time_column": "time"}
+    converter = DataConverter(rule)
+    df = pd.DataFrame(
+        {
+            "time": [
+                "2024-01-01 00:00:00.000",
+                "2024-01-01 00:00:00.500",
+                "2024-01-01 00:00:01.000",
+                "2024-01-01 00:00:01.500",
+                "2024-01-01 00:00:03.000",
+            ],
+            "frame": [0, 1, 2, 3, 4],
+        }
+    )
+
+    chunks = converter.convert_split(df)
+
+    assert [list(chunk["FRAME_ID"]) for chunk in chunks] == [[0, 1], [2, 3], [4]]
+
+
+def test_convert_split_without_split_matches_convert():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"frame": "FRAME_ID", "value": "VALUE"})
+    rule.forward_fill = ["FRAME_ID"]
+    converter = DataConverter(rule)
+    df = pd.DataFrame({"frame": [0, 1, 2, 3], "value": [10, 0, 0, 40]})
+
+    chunks = converter.convert_split(df)
+    expected = converter.convert(df)
+
+    assert len(chunks) == 1
+    pd.testing.assert_frame_equal(chunks[0], expected)
