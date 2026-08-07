@@ -218,6 +218,14 @@ class RuleValidator:
                 if not isinstance(item, dict) or not item.get("target"):
                     errors.append(f"'classify[{index}]' 需要 target")
 
+        data_columns = rule.get("data_columns")
+        if data_columns is not None and not isinstance(data_columns, list):
+            errors.append("'data_columns' 必须是列表")
+        elif isinstance(data_columns, list):
+            for index, item in enumerate(data_columns):
+                if not isinstance(item, dict):
+                    errors.append(f"'data_columns[{index}]' 必须是字典")
+
         if strict and has_simple:
             if not isinstance(rule.get("rules"), list):
                 errors.append("[严格模式] 缺少 'rules' 字段")
@@ -323,16 +331,16 @@ class RuleValidator:
 
         classify = rule.get("classify")
         if classify is not None:
-            errors.extend(RuleValidator._validate_convert_classify_config(classify))
+            errors.extend(RuleValidator._validate_convert_classify_config(classify, strict))
 
         return errors
 
     @staticmethod
-    def _validate_convert_classify_config(config: object) -> List[str]:
+    def _validate_convert_classify_config(config: object, strict: bool) -> List[str]:
         """convert 规则内联 classify 块：与 classify 规则同构，但不要求 version。"""
         if not isinstance(config, dict):
             return ["'classify' 必须是字典"]
-        return RuleValidator._validate_classify_rule(config, strict=False, require_version=False)
+        return RuleValidator._validate_classify_rule(config, strict=strict, require_version=False)
 
     @staticmethod
     def _validate_split_config(config: dict) -> List[str]:

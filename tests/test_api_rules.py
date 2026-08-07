@@ -524,6 +524,18 @@ def test_validate_convert_rule_rejects_classify_bad_extract():
     assert any("需要 name 和 function" in error for error in errors)
 
 
+def test_validate_convert_rule_rejects_classify_bad_data_columns():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": {"data_columns": [123], "structure": {"a": ""}},
+        },
+        rule_type="convert",
+    )
+    assert any("'data_columns[0]' 必须是字典" in error for error in errors)
+
+
 def test_validate_convert_rule_rejects_classify_bad_rename():
     errors = RuleValidator.validate(
         {

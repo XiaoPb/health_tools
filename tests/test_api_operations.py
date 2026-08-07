@@ -454,6 +454,76 @@ def test_run_convert_merge_with_classify_writes_category_dir(tmp_path: Path):
     assert result.artifacts[0] == tmp_path / "low" / "merged.csv"
 
 
+def test_run_convert_single_classify_bad_data_columns_degrades_to_fail(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify_bad.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        _CLASSIFY_RULE.replace("classify:\n", "classify:\n  data_columns: [123]\n", 1),
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.csv"
+
+    result = run_convert(ConvertRequest(source, output, rule_file=str(rule)))
+
+    assert result.ok_count == 0
+    assert result.fail_count == 1
+    assert result.items[0].status == ItemStatus.FAIL
+    assert not output.exists()
+
+
+def test_run_convert_merge_classify_bad_data_columns_degrades_to_fail(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")
+    (input_dir / "b.csv").write_text("frame,value\n2,3\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify_bad.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        _CLASSIFY_RULE.replace("classify:\n", "classify:\n  data_columns: [123]\n", 1),
+        encoding="utf-8",
+    )
+    output = tmp_path / "merged.csv"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule), merge=True))
+
+    assert result.fail_count == 1
+    assert result.items[-1].status == ItemStatus.FAIL
+    assert not (tmp_path / "merged.csv").exists()
+
+
+def test_run_convert_merge_classify_filename_uses_default(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "sit_session.csv").write_text("value\n1\n2\n", encoding="utf-8")
+    (input_dir / "walk_session.csv").write_text("value\n3\n4\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify_filename.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  value: VALUE\n"
+        "classify:\n"
+        "  filename:\n"
+        "    regex: '(?P<motion>sit|walk).*\\.csv'\n"
+        "    fields: [motion]\n"
+        "  structure:\n"
+        "    sit: ''\n"
+        "    walk: ''\n"
+        "  rules:\n"
+        "    - target: '{motion}'\n"
+        "  default: unclassified\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "merged.csv"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule), merge=True))
+
+    assert (tmp_path / "unclassified" / "merged.csv").exists()
+    assert len(result.artifacts) == 1
+    assert result.artifacts[0] == tmp_path / "unclassified" / "merged.csv"
+
+
 def test_run_convert_classify_no_match_uses_default(tmp_path: Path):
     source = tmp_path / "source.csv"
     source.write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")

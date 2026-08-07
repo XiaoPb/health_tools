@@ -82,9 +82,6 @@ def _classify_default(converter) -> str:
 def _convert_one(
     source, destination, converter, input_config, output_config, input_root=None
 ) -> ItemResult:
-    classifier = _convert_classifier(converter)
-    default_category = _classify_default(converter)
-
     def _output_name(index=None) -> str:
         """输出文件名：classify 配置 rename 时用模板（先分类再取字段），否则沿用 destination。"""
         if classifier is not None and classifier.rule.rename:
@@ -97,6 +94,8 @@ def _convert_one(
         return f"{stem}_{index}{suffix}"
 
     try:
+        classifier = _convert_classifier(converter)
+        default_category = _classify_default(converter)
         frame = _read_convert_csv(source, input_config)
         if not converter.has_matching_columns(frame):
             return ItemResult(
@@ -330,10 +329,8 @@ def run_convert(
                     )
             if frames:
                 merged = pd.concat(frames, ignore_index=True)
-                merge_classifier = _convert_classifier(converter)
-                merge_default = _classify_default(converter)
 
-                def _merge_path(destination, index, frame):
+                def _merge_path(destination, index, frame, merge_classifier, merge_default):
                     if merge_classifier is not None:
                         category = (
                             merge_classifier.classify_frame(frame, destination) or merge_default
@@ -352,7 +349,11 @@ def run_convert(
                 def _write_merge_output(destination, index, frame):
                     """写出合并结果：分类/重命名后写 CSV 并记录产物，异常降级为 FAIL。"""
                     try:
-                        path = _merge_path(destination, index, frame)
+                        merge_classifier = _convert_classifier(converter)
+                        merge_default = _classify_default(converter)
+                        path = _merge_path(
+                            destination, index, frame, merge_classifier, merge_default
+                        )
                         _write_convert_csv(frame, path, output_config)
                         artifacts.append(path)
                     except Exception as exc:
