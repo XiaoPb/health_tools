@@ -297,3 +297,46 @@ def test_run_convert_single_file_with_missing_split_column_is_fail(tmp_path: Pat
 
     assert result.fail_count == 1
     assert result.items[0].reason == "列缺失"
+
+
+def test_run_convert_merge_with_missing_split_column_is_fail(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")
+    (input_dir / "b.csv").write_text("frame,value\n2,3\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "bad_split.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  frame: FRAME_ID\n  value: VALUE\n"
+        "split:\n  by_column: MISSING\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "merged.csv"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule), merge=True))
+
+    assert result.ok_count == 2
+    assert result.fail_count == 1
+    assert result.items[-1].reason == "列缺失"
+
+
+def test_run_convert_merge_with_header_only_inputs_skips(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text("frame,value\n", encoding="utf-8")
+    (input_dir / "b.csv").write_text("frame,value\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "split.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  frame: FRAME_ID\n  value: VALUE\n"
+        "split:\n  by_size: 2\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "merged.csv"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule), merge=True))
+
+    assert result.skip_count == 1
+    assert len(result.artifacts) == 0

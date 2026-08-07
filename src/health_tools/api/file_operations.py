@@ -275,11 +275,34 @@ def run_convert(
             if frames:
                 merged = pd.concat(frames, ignore_index=True)
                 if converter.rule.split:
-                    chunks = converter.convert_split(merged)
-                    for index, chunk in enumerate(chunks, 1):
-                        path = destination.parent / f"{destination.stem}_{index}.csv"
-                        _write_convert_csv(chunk, path, output_config)
-                        artifacts.append(path)
+                    try:
+                        chunks = converter.convert_split(merged)
+                    except Exception as exc:
+                        items.append(
+                            ItemResult(
+                                ItemStatus.FAIL,
+                                str(source),
+                                str(destination),
+                                classify_exception(exc),
+                                str(exc),
+                            )
+                        )
+                    else:
+                        if not chunks:
+                            items.append(
+                                ItemResult(
+                                    ItemStatus.SKIP,
+                                    str(source),
+                                    str(destination),
+                                    REASON_RULE_MISMATCH,
+                                    "不符合转换规则",
+                                )
+                            )
+                        else:
+                            for index, chunk in enumerate(chunks, 1):
+                                path = destination.parent / f"{destination.stem}_{index}.csv"
+                                _write_convert_csv(chunk, path, output_config)
+                                artifacts.append(path)
                 elif request.split:
                     converted = converter.convert(merged)
                     for index, start in enumerate(range(0, len(converted), request.split), 1):
