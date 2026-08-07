@@ -534,6 +534,13 @@ def test_classify_frame_no_match_returns_none():
     import pandas as pd
 
     rule = ClassifyRule(
+        extract=[
+            {
+                "name": "spo2_median",
+                "function": "calculate_median",
+                "params": {"column": "REF_RESULT5"},
+            }
+        ],
         classify_rules=[{"target": "normal", "condition": "spo2_median >= 95"}],
         default="unclassified",
     )
@@ -593,3 +600,28 @@ def test_classify_frame_supports_path_variables(tmp_path):
     result = classifier.classify_frame(df, source / "sit" / "data.csv", input_root=source)
 
     assert result == "sit/normal"
+
+
+def test_classify_frame_data_column_ranges_from_memory_df():
+    import pandas as pd
+
+    rule = ClassifyRule(
+        data_columns=[
+            DataColumn(
+                name="spo2_level",
+                source="data",
+                column="REF_RESULT5",
+                ranges={"low": (0, 90), "high": (90, 100)},
+            )
+        ],
+        structure={"low": "", "high": ""},
+        rules=[{"target": "{spo2_level}"}],
+        default="unclassified",
+    )
+    classifier = DataClassifier(rule)
+
+    low = pd.DataFrame({"REF_RESULT5": [80.0, 81.0, 82.0]})
+    high = pd.DataFrame({"REF_RESULT5": [95.0, 96.0, 97.0]})
+
+    assert classifier.classify_frame(low, Path("data.csv")) == "low"
+    assert classifier.classify_frame(high, Path("data.csv")) == "high"
