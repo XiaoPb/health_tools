@@ -478,7 +478,7 @@ expand_repeat:
 forward_fill:
   - polar_hr
 split:
-  by_column: FRAME_ID   # 先分割再转换；列值等于 column_value 时开始新段
+  by_column: frame      # 先分割再转换；列值等于 column_value 时开始新段（须为映射前的源列名）
   column_value: 0
 ```
 
@@ -506,9 +506,11 @@ split:
 映射、`computed`、`expand_repeat`、`forward_fill` 与芯片列输出，并写出
 `<输出名>_<序号>.csv`。适用于按帧分割：`forward_fill` 不会把上一帧末尾的值带入下一帧。
 
+`by_column` 与 `time_column` 必须使用映射前的源列名（即 `column_mapping` 左侧的列名）。
+
 | 字段 | 说明 |
 |---|---|
-| `by_column` | 按列值分割；`column_value` 为该列触发新段的值（默认 0） |
+| `by_column` | 按列值分割（须为映射前的源列名）；`column_value` 为该列触发新段的值（默认 0） |
 | `by_size` | 按行数分割（正整数） |
 | `by_time` | 按时间分割（秒，正数），需配合 `time_column` |
 

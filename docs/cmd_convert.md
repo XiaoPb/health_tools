@@ -47,7 +47,7 @@ forward_fill:
   - polar_HR
 # split: 先分割再转换（每段独立 forward_fill）
 split:
-  by_column: FRAME_ID
+  by_column: source_col   # 须为映射前的源列名
   column_value: 0
 
 # expand_repeat: 低采样率列重复扩展
@@ -116,6 +116,8 @@ extra_source:
 分别执行映射、computed、expand_repeat、forward_fill 并写出 `<输出名>_<序号>.csv`。
 适用于按帧分割：`forward_fill` 不会跨段串值。`--split <N>` 仅在没有规则 `split` 的合并
 模式下按转换后的行数分割输出。
+
+`by_column` 与 `time_column` 必须使用映射前的源列名（即 `column_mapping` 左侧的列名）。
 
 ## 输出与异常汇总
 
