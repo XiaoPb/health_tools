@@ -546,11 +546,16 @@ classify:
 | `rename` | 输出文件名模板，支持 `{变量}` 与 `{filename}`/`{stem}`；未配置时沿用原输出名 |
 | `default` | 未匹配任何条件时的输出目录名（默认 `unclassified`） |
 
-与 classify 命令的关键区别：`extract` 直接作用于**转换后的内存 DataFrame**，因此
-`params.column` 必须使用转换后的目标列名（如 `REF_RESULT5`）；`filename`/`path` 仍基于源
-文件路径（目录模式下 `path.regex` 匹配相对输入目录的路径）。分类条件未命中时输出到
-`{default}` 目录，保证转换产物不丢失。`rename` 生成新的输出文件名（split 分段时追加
-`_{序号}`）。`split` 与 `classify` 可同时配置：先分割并逐段转换，再对每段独立分类。
+与 classify 命令的关键区别：`extract` 直接作用于**转换后的内存 DataFrame**，其中基于列参数
+的函数（如 `calculate_median`）作用于转换后的 DataFrame，`params.column` 必须使用转换后的
+目标列名（如 `REF_RESULT5`）；基于文件路径的函数（`params.patterns`）仍基于源文件路径。
+`filename`/`path` 仍基于源文件路径（目录模式下 `path.regex` 匹配相对输入目录的路径）。
+分类条件未命中时输出到 `{default}` 目录，保证转换产物不丢失。`rename` 生成新的输出文件名
+（split 分段时追加 `_{序号}`）。`split` 与 `classify` 可同时配置：先分割并逐段转换，再对
+每段独立分类。
+
+合并模式没有单一源文件：`filename`/`path` 分类在合并模式下基于输出文件名解析（通常无法命中，
+落入 `default` 目录），条件分类（`extract`/`classify`）与数据列分类仍正常工作。
 
 ### computed 公式
 
