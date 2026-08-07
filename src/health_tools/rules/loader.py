@@ -148,6 +148,10 @@ class RuleLoader:
                         if "params" in extract_item and "patterns" in extract_item["params"]:
                             extract_item["params"]["patterns"].update(extend_data["patterns"])
 
+        return cls.build_classify_rule(data)
+
+    @classmethod
+    def build_classify_rule(cls, data: Dict[str, Any]) -> ClassifyRule:
         extract_rules = []
         for extract_item in data.get("extract", []):
             extract_rules.append(
@@ -211,6 +215,7 @@ class RuleLoader:
             csv=data.get("csv", {}),
             extra_source=data.get("extra_source", {}),
             split=data.get("split") or {},
+            classify=data.get("classify") or {},
         )
 
     @classmethod
