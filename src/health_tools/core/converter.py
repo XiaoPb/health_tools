@@ -26,6 +26,7 @@ class DataConverter:
     def convert_split(
         self, df: pd.DataFrame, source_file: Optional[Path] = None
     ) -> List[pd.DataFrame]:
+        """按规则 split 配置先分割再转换；无匹配列返回 []，每段独立执行 forward_fill。"""
         df = self._merge_extra_source(df, source_file)
         if not self.has_matching_columns(df):
             return []
@@ -33,6 +34,7 @@ class DataConverter:
         return [self._convert_segment(segment) for segment in segments if not segment.empty]
 
     def _split_frames(self, df: pd.DataFrame) -> List[pd.DataFrame]:
+        """按规则 split 配置分割数据；未配置或模式未知时返回 [df]。"""
         if not self.rule.split:
             return [df]
         from health_tools.core.splitter import (

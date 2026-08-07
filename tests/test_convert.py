@@ -466,6 +466,7 @@ def test_convert_split_forward_fill_resets_at_frame_boundary():
     converter = DataConverter(rule)
     df = pd.DataFrame({"frame": [0, 1, 2, 3, 0, 1, 2], "value": [10, 20, 30, 40, 50, 60, 70]})
 
+    # 未逐段填充时第二段首个 0 会被上一帧末尾的 3 填充
     chunks = converter.convert_split(df)
 
     assert [list(chunk["FRAME_ID"]) for chunk in chunks] == [[0, 1, 2, 3], [0, 1, 2]]

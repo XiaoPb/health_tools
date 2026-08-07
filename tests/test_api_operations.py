@@ -212,3 +212,88 @@ def test_offline_runner_terminates_cancellable_process(monkeypatch, tmp_path: Pa
         )
 
     assert state["terminated"] is True
+
+
+def test_run_convert_single_file_with_rule_split_writes_chunks(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text("frame,value\n0,1\n1,2\n2,3\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "split.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  frame: FRAME_ID\n  value: VALUE\n"
+        "split:\n  by_size: 2\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.csv"
+
+    result = run_convert(ConvertRequest(source, output, rule_file=str(rule)))
+
+    assert result.ok_count == 1
+    assert len(result.artifacts) == 2
+    assert (tmp_path / "out_1.csv").exists()
+    assert (tmp_path / "out_2.csv").exists()
+
+
+def test_run_convert_merge_with_rule_split_writes_chunks(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")
+    (input_dir / "b.csv").write_text("frame,value\n2,3\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "split.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  frame: FRAME_ID\n  value: VALUE\n"
+        "split:\n  by_size: 2\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "merged.csv"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule), merge=True))
+
+    assert result.ok_count == 2
+    assert len(result.artifacts) == 2
+    assert (tmp_path / "merged_1.csv").exists()
+    assert (tmp_path / "merged_2.csv").exists()
+
+
+def test_run_convert_directory_with_rule_split_keeps_relative_paths(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    (input_dir / "sub").mkdir(parents=True)
+    (input_dir / "sub" / "a.csv").write_text("frame,value\n0,1\n1,2\n2,3\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "split.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  frame: FRAME_ID\n  value: VALUE\n"
+        "split:\n  by_size: 2\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule)))
+
+    assert result.ok_count == 1
+    assert len(result.artifacts) == 2
+    assert (output / "sub" / "a_1.csv").exists()
+    assert (output / "sub" / "a_2.csv").exists()
+
+
+def test_run_convert_single_file_with_missing_split_column_is_fail(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "bad_split.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  frame: FRAME_ID\n  value: VALUE\n"
+        "split:\n  by_column: MISSING\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.csv"
+
+    result = run_convert(ConvertRequest(source, output, rule_file=str(rule)))
+
+    assert result.fail_count == 1
+    assert result.items[0].reason == "列缺失"

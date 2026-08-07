@@ -74,6 +74,27 @@ def _convert_one(source, destination, converter, input_config, output_config) ->
                 REASON_RULE_MISMATCH,
                 "不符合转换规则",
             )
+        if converter.rule.split:
+            chunks = converter.convert_split(frame, source_file=source)
+            if not chunks:
+                return ItemResult(
+                    ItemStatus.SKIP,
+                    str(source),
+                    str(destination),
+                    REASON_RULE_MISMATCH,
+                    "不符合转换规则",
+                )
+            outputs = []
+            for index, chunk in enumerate(chunks, 1):
+                chunk_path = destination.parent / f"{destination.stem}_{index}{destination.suffix}"
+                _write_convert_csv(chunk, chunk_path, output_config)
+                outputs.append(chunk_path)
+            return ItemResult(
+                ItemStatus.OK,
+                str(source),
+                ";".join(str(path) for path in outputs),
+                rows=sum(len(chunk) for chunk in chunks),
+            )
         result = converter.convert(frame, source_file=source)
         if result.empty and len(result.columns) == 0:
             return ItemResult(
@@ -218,7 +239,7 @@ def run_convert(
             item = _convert_one(path, destination, converter, input_config, output_config)
             items.append(item)
             if item.status == ItemStatus.OK:
-                artifacts.append(destination)
+                artifacts.extend(Path(path) for path in item.output.split(";"))
     else:
         files = sorted(source.rglob("*.csv"))
         if request.filter_name:
@@ -252,14 +273,22 @@ def run_convert(
                         )
                     )
             if frames:
-                converted = converter.convert(pd.concat(frames, ignore_index=True))
-                if request.split:
+                merged = pd.concat(frames, ignore_index=True)
+                if converter.rule.split:
+                    chunks = converter.convert_split(merged)
+                    for index, chunk in enumerate(chunks, 1):
+                        path = destination.parent / f"{destination.stem}_{index}.csv"
+                        _write_convert_csv(chunk, path, output_config)
+                        artifacts.append(path)
+                elif request.split:
+                    converted = converter.convert(merged)
                     for index, start in enumerate(range(0, len(converted), request.split), 1):
                         chunk = converted.iloc[start : start + request.split]
                         path = destination.parent / f"{destination.stem}_{index}.csv"
                         _write_convert_csv(chunk, path, output_config)
                         artifacts.append(path)
                 else:
+                    converted = converter.convert(merged)
                     _write_convert_csv(converted, destination, output_config)
                     artifacts.append(destination)
         else:
@@ -269,7 +298,7 @@ def run_convert(
                 item = _convert_one(path, output_file, converter, input_config, output_config)
                 items.append(item)
                 if item.status == ItemStatus.OK:
-                    artifacts.append(output_file)
+                    artifacts.extend(Path(path) for path in item.output.split(";"))
     report = _write_align_report(converter, destination.parent if source.is_file() else destination)
     if report:
         artifacts.append(report)
