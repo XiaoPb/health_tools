@@ -455,3 +455,56 @@ def test_merge_and_convert_skips_files_that_do_not_match_rule(tmp_path: Path):
     result = pd.read_csv(output_file)
     assert list(result.columns) == ["TimeStamp", "VALUE"]
     assert result.to_dict("records") == [{"TimeStamp": 1, "VALUE": 10}]
+
+
+def test_convert_split_forward_fill_resets_at_frame_boundary():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"frame": "FRAME_ID", "value": "VALUE"})
+    rule.forward_fill = ["FRAME_ID"]
+    rule.split = {"by_column": "frame", "column_value": 0}
+    converter = DataConverter(rule)
+    df = pd.DataFrame({"frame": [0, 1, 2, 3, 0, 1, 2], "value": [10, 20, 30, 40, 50, 60, 70]})
+
+    chunks = converter.convert_split(df)
+
+    assert [list(chunk["FRAME_ID"]) for chunk in chunks] == [[0, 1, 2, 3], [0, 1, 2]]
+    assert [list(chunk["VALUE"]) for chunk in chunks] == [
+        [10, 20, 30, 40],
+        [50, 60, 70],
+    ]
+
+
+def test_convert_split_by_size_returns_multiple_chunks():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"value": "VALUE"})
+    rule.split = {"by_size": 2}
+    converter = DataConverter(rule)
+    df = pd.DataFrame({"value": [1, 2, 3, 4, 5]})
+
+    chunks = converter.convert_split(df)
+
+    assert [len(chunk) for chunk in chunks] == [2, 2, 1]
+
+
+def test_convert_split_without_split_config_returns_single_chunk():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"value": "VALUE"})
+    converter = DataConverter(rule)
+
+    chunks = converter.convert_split(pd.DataFrame({"value": [1, 2, 3]}))
+
+    assert len(chunks) == 1
+    assert list(chunks[0]["VALUE"]) == [1, 2, 3]
+
+
+def test_convert_split_returns_empty_when_rule_does_not_match():
+    import pandas as pd
+
+    rule = ConvertRule(column_mapping={"time": "TimeStamp"})
+    rule.split = {"by_size": 2}
+    converter = DataConverter(rule)
+
+    assert converter.convert_split(pd.DataFrame({"foo": [1]})) == []

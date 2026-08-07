@@ -21,7 +21,36 @@ class DataConverter:
         df = self._merge_extra_source(df, source_file)
         if not self.has_matching_columns(df):
             return pd.DataFrame()
+        return self._convert_segment(df)
 
+    def convert_split(
+        self, df: pd.DataFrame, source_file: Optional[Path] = None
+    ) -> List[pd.DataFrame]:
+        df = self._merge_extra_source(df, source_file)
+        if not self.has_matching_columns(df):
+            return []
+        segments = self._split_frames(df)
+        return [self._convert_segment(segment) for segment in segments if not segment.empty]
+
+    def _split_frames(self, df: pd.DataFrame) -> List[pd.DataFrame]:
+        if not self.rule.split:
+            return [df]
+        from health_tools.core.splitter import (
+            split_by_column_value,
+            split_by_size,
+            split_by_time,
+        )
+
+        split = self.rule.split
+        if split.get("by_size"):
+            return split_by_size(df, int(split["by_size"]))
+        if split.get("by_time") and split.get("time_column"):
+            return split_by_time(df, split["time_column"], float(split["by_time"]))
+        if split.get("by_column"):
+            return split_by_column_value(df, split["by_column"], split.get("column_value", 0))
+        return [df]
+
+    def _convert_segment(self, df: pd.DataFrame) -> pd.DataFrame:
         result = pd.DataFrame()
 
         if self.rule.column_mapping:
@@ -52,8 +81,7 @@ class DataConverter:
                 result = pd.concat([result, fill_df], axis=1)
             result = result[self.chip_columns]
 
-        result = self._ensure_int64(result)
-        return result
+        return self._ensure_int64(result)
 
     def has_matching_columns(self, df: pd.DataFrame) -> bool:
         expected_columns = self._expected_source_columns()
