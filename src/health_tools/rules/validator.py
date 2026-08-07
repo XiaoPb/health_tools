@@ -289,6 +289,48 @@ class RuleValidator:
             else:
                 errors.append("'extra_source' 必须是字典或列表")
 
+        split = rule.get("split")
+        if split is not None:
+            if not isinstance(split, dict):
+                errors.append("'split' 必须是字典")
+            else:
+                errors.extend(RuleValidator._validate_split_config(split))
+
+        return errors
+
+    @staticmethod
+    def _validate_split_config(config: dict) -> List[str]:
+        errors = []
+        modes = [key for key in ("by_column", "by_size", "by_time") if key in config]
+        if len(modes) != 1:
+            errors.append("'split' 需要且仅需要 by_column/by_size/by_time 之一")
+        if "by_column" in config:
+            if not isinstance(config["by_column"], str) or not config["by_column"].strip():
+                errors.append("'split.by_column' 必须是非空字符串")
+            if "column_value" in config and not isinstance(config["column_value"], (int, float)):
+                errors.append("'split.column_value' 必须是数字")
+        if "by_size" in config and (
+            not isinstance(config["by_size"], int) or config["by_size"] <= 0
+        ):
+            errors.append("'split.by_size' 必须是正整数")
+        if "by_time" in config:
+            if not isinstance(config["by_time"], (int, float)) or config["by_time"] <= 0:
+                errors.append("'split.by_time' 必须是正数")
+            if not isinstance(config.get("time_column"), str) or not config["time_column"].strip():
+                errors.append("'split.by_time' 需要非空 'time_column'")
+        if "time_column" in config and "by_time" not in config:
+            errors.append("'split.time_column' 仅在 by_time 模式下有效")
+        if "column_value" in config and "by_column" not in config:
+            errors.append("'split.column_value' 仅在 by_column 模式下有效")
+        unknown = set(config) - {
+            "by_column",
+            "column_value",
+            "by_size",
+            "by_time",
+            "time_column",
+        }
+        if unknown:
+            errors.append(f"'split' 包含未知字段: {', '.join(sorted(unknown))}")
         return errors
 
     @staticmethod

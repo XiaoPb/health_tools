@@ -389,3 +389,36 @@ def test_validate_classify_rejects_negative_filter(tmp_path: Path):
     )
     errors = RuleValidator.validate_file(path)
     assert any("filters" in e for e in errors)
+
+
+def test_validate_convert_rule_accepts_valid_split(tmp_path: Path):
+    path = tmp_path / "convert" / "ok.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "version: '1.0'\n"
+        "column_mapping: {time: TimeStamp}\n"
+        "split:\n"
+        "  by_column: FRAME_ID\n"
+        "  column_value: 0\n",
+        encoding="utf-8",
+    )
+
+    assert RuleValidator.validate_file(path) == []
+
+
+def test_validate_convert_rule_rejects_invalid_split(tmp_path: Path):
+    path = tmp_path / "convert" / "bad.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "version: '1.0'\n"
+        "column_mapping: {time: TimeStamp}\n"
+        "split:\n"
+        "  by_size: 0\n"
+        "  by_time: 60\n",
+        encoding="utf-8",
+    )
+
+    errors = RuleValidator.validate_file(path)
+
+    assert any("需要且仅需要" in error for error in errors)
+    assert any("by_size" in error for error in errors)

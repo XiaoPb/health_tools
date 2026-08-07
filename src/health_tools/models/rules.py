@@ -91,6 +91,7 @@ class ConvertRule:
     expand_repeat: Dict[str, int] = field(default_factory=dict)
     csv: Dict[str, Any] = field(default_factory=dict)
     extra_source: Dict[str, Any] = field(default_factory=dict)
+    split: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.source_columns = self._expand_columns(self.source_columns)

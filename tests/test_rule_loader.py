@@ -36,3 +36,20 @@ check_columns:
     assert rule.frame_column == "framed_id"
     assert rule.acc_columns == {"x": "acc_x", "y": "acc_y", "z": "acc_z"}
     assert rule.check_columns["data"] == ["ppg_ch0", "ppg_ch1"]
+
+
+def test_load_convert_rule_preserves_split_config(tmp_path):
+    rule_file = tmp_path / "convert" / "split.yaml"
+    rule_file.parent.mkdir(parents=True, exist_ok=True)
+    rule_file.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  time: TimeStamp\n"
+        "split:\n"
+        "  by_time: 60\n"
+        "  time_column: TimeStamp\n",
+        encoding="utf-8",
+    )
+
+    rule = RuleLoader.load_convert_rule(str(rule_file))
+
+    assert rule.split == {"by_time": 60, "time_column": "TimeStamp"}

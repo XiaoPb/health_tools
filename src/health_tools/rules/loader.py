@@ -210,6 +210,7 @@ class RuleLoader:
             expand_repeat=data.get("expand_repeat", {}),
             csv=data.get("csv", {}),
             extra_source=data.get("extra_source", {}),
+            split=data.get("split", {}),
         )
 
     @classmethod
