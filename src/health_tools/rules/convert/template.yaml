@@ -60,7 +60,7 @@ column_mapping:
 #       condition: 'spo2_median >= 95'
 #     - target: lowspo2
 #       condition: 'spo2_median < 95'
-# # 文件名重分类与重命名示例：
+# 文件名重分类与重命名示例：
 # classify:
 #   filename:
 #     regex: '(?P<motion>sit|walk).*\.csv'

@@ -49,7 +49,7 @@ forward_fill:
 split:
   by_column: source_col   # 须为映射前的源列名
   column_value: 0
-# classify: 转换后分类（extract 作用于转换后的列；支持完整 classify 参数）
+# classify: 转换后分类（支持 extract/classify 条件分类与 filename 重分类；extract 作用于转换后的列）
 classify:
   default: unclassified
   filename:

@@ -445,7 +445,7 @@ rename: '{race}_{name}_{scene}_{filename}'
 
 ## convert 规则
 
-路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入 → 合并 `extra_source` →（若配置 `split`）先分割 → 每段分别执行：映射列 → 计算 `computed` 列 → `expand_repeat` 频率扩展 → `forward_fill` 前值填充 → 按目标芯片列补 0 并排序。→（若配置 `classify`）最后对每段转换结果分类并写入 `{输出目录}/{类别路径}/{输出文件名}`。每段独立执行 `forward_fill`，避免帧边界串值。
+路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入 → 合并 `extra_source` →（若配置 `split`）先分割 → 每段分别执行：映射列 → 计算 `computed` 列 → `expand_repeat` 频率扩展 → `forward_fill` 前值填充 → 按目标芯片列补 0 并排序 →（若配置 `classify`）最后对每段转换结果分类并写入 `{输出目录}/{类别路径}/{输出文件名}`。每段独立执行 `forward_fill`，避免帧边界串值。
 
 ```yaml
 version: "1.0"

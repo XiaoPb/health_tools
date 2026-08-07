@@ -238,7 +238,7 @@ def _generate_convert_template(chip_rule, output_path: Path, source_file: Option
         handle.write("\n# forward_fill: []  # 前向填充列\n")
         handle.write("# expand_repeat: []  # 重复扩展列\n")
         handle.write("# split:  # 先分割再转换（by_column/by_size/by_time）\n")
-        handle.write("# classify: []  # 转换后分类（完整 classify 规则参数）\n")
+        handle.write("# classify:  # 转换后分类（完整 classify 规则参数）\n")
 
 
 def _write_align_report(converter, output_dir: Path) -> Optional[Path]:
