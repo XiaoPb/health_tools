@@ -348,6 +348,23 @@ def run_convert(
                         return destination.parent / destination.name
                     return destination.parent / f"{destination.stem}_{index}.csv"
 
+                def _write_merge_output(destination, index, frame):
+                    """写出合并结果：分类/重命名后写 CSV 并记录产物，异常降级为 FAIL。"""
+                    try:
+                        path = _merge_path(destination, index, frame)
+                        _write_convert_csv(frame, path, output_config)
+                        artifacts.append(path)
+                    except Exception as exc:
+                        items.append(
+                            ItemResult(
+                                ItemStatus.FAIL,
+                                str(source),
+                                str(destination),
+                                classify_exception(exc),
+                                str(exc),
+                            )
+                        )
+
                 if converter.rule.split:
                     try:
                         chunks = converter.convert_split(merged)
@@ -374,21 +391,15 @@ def run_convert(
                             )
                         else:
                             for index, chunk in enumerate(chunks, 1):
-                                path = _merge_path(destination, index, chunk)
-                                _write_convert_csv(chunk, path, output_config)
-                                artifacts.append(path)
+                                _write_merge_output(destination, index, chunk)
                 elif request.split:
                     converted = converter.convert(merged)
                     for index, start in enumerate(range(0, len(converted), request.split), 1):
                         chunk = converted.iloc[start : start + request.split]
-                        path = _merge_path(destination, index, chunk)
-                        _write_convert_csv(chunk, path, output_config)
-                        artifacts.append(path)
+                        _write_merge_output(destination, index, chunk)
                 else:
                     converted = converter.convert(merged)
-                    path = _merge_path(destination, None, converted)
-                    _write_convert_csv(converted, path, output_config)
-                    artifacts.append(path)
+                    _write_merge_output(destination, None, converted)
         else:
             destination.mkdir(parents=True, exist_ok=True)
             for _, path in _events("convert", "files", files, ctx, items):

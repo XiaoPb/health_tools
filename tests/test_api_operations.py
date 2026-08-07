@@ -6,6 +6,7 @@ import pytest
 from health_tools.api import (
     ConvertRequest,
     ExecutionContext,
+    ItemStatus,
     OperationCancelled,
     ParseRequest,
     RequestValidationError,
@@ -491,6 +492,7 @@ def test_run_convert_split_with_classify_classifies_each_chunk(tmp_path: Path):
     result = run_convert(ConvertRequest(source, output, rule_file=str(rule)))
 
     assert result.ok_count == 1
+    assert result.items[0].category == ""
     assert len(result.artifacts) == 2
     assert (tmp_path / "low" / "out_1.csv").exists()
     assert (tmp_path / "high" / "out_2.csv").exists()
@@ -612,3 +614,80 @@ def test_run_convert_split_with_classify_and_rename_appends_index(tmp_path: Path
     assert len(result.artifacts) == 2
     assert (tmp_path / "sit" / f"{renamed}_1.csv").exists()
     assert (tmp_path / "sit" / f"{renamed}_2.csv").exists()
+
+
+def test_run_convert_directory_with_classify_rename(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "20260808_gh3036_sit_25Hz.csv").write_text("value\n1\n2\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify_dir_rename.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  value: VALUE\n"
+        "classify:\n"
+        "  filename:\n"
+        "    regex: '([0-9]{8})_([a-z0-9]+)_([a-z]+)_([0-9]+Hz)'\n"
+        "    fields: [date, chip, motion, sample_rate]\n"
+        "  structure:\n"
+        "    sit: ''\n"
+        "    walk: ''\n"
+        "  rules:\n"
+        "    - target: '{motion}'\n"
+        "  rename: '{date}_{motion}_{stem}.csv'\n"
+        "  default: unclassified\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule)))
+
+    assert result.ok_count == 1
+    assert (output / "sit" / "20260808_sit_20260808_gh3036_sit_25Hz.csv").exists()
+
+
+def test_run_convert_classify_invalid_filename_regex_is_fail(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text("value\n1\n2\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify_bad_regex.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  value: VALUE\n"
+        "classify:\n"
+        "  filename:\n"
+        "    regex: '('\n"
+        "    fields: [motion]\n"
+        "  default: unclassified\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.csv"
+
+    result = run_convert(ConvertRequest(source, output, rule_file=str(rule)))
+
+    assert result.ok_count == 0
+    assert result.items[0].status == ItemStatus.FAIL
+
+
+def test_run_convert_merge_classify_invalid_filename_regex_is_fail(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text("value\n1\n2\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify_bad_regex.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        "version: '1.0'\n"
+        "column_mapping:\n  value: VALUE\n"
+        "classify:\n"
+        "  filename:\n"
+        "    regex: '('\n"
+        "    fields: [motion]\n"
+        "  default: unclassified\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "merged.csv"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule), merge=True))
+
+    assert result.fail_count == 1
+    assert any(item.status == ItemStatus.FAIL for item in result.items)
