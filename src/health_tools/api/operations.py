@@ -460,15 +460,20 @@ def run_split(request: SplitRequest, *, context: Optional[ExecutionContext] = No
         destination = Path(request.output_path)
         if source.is_dir():
             destination = destination / path.relative_to(source).parent
-        result = splitter.split_file_result(
-            path,
-            destination,
-            by_column=request.by_column,
-            column_value=request.column_value,
-            by_size=request.by_size,
-            by_time=request.by_time,
-            time_column=request.time_column,
-        )
+        try:
+            result = splitter.split_file_result(
+                path,
+                destination,
+                by_column=request.by_column,
+                column_value=request.column_value,
+                by_size=request.by_size,
+                by_time=request.by_time,
+                time_column=request.time_column,
+            )
+        except Exception as exc:
+            from health_tools.utils.reporting import result_from_exception
+
+            result = result_from_exception(path, exc, output=destination)
         item = _item(result)
         items.append(item)
         if item.status == ItemStatus.OK:

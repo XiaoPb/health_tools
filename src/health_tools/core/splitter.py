@@ -8,9 +8,15 @@ import pandas as pd
 
 from health_tools.models.rules import ChipRule
 from health_tools.utils.csv_handler import CSVHandler
-from health_tools.utils.errors import REASON_EMPTY_FILE
+from health_tools.utils.errors import (
+    REASON_BAD_FORMAT,
+    REASON_EMPTY_FILE,
+    REASON_MISSING_COLUMN,
+    REASON_PROCESS_FAILED,
+    classify_exception,
+)
 from health_tools.utils.progress import progress_track
-from health_tools.utils.reporting import FileResult, ResultCollector
+from health_tools.utils.reporting import STATUS_FAIL, STATUS_SKIP, FileResult, ResultCollector
 
 
 def split_by_column_value(
@@ -169,6 +175,24 @@ class DataSplitter:
             return []
         return [Path(p) for p in result.output.split(";") if p]
 
+    def _error_result(self, input_file: Path, output_dir: Path, exc: Exception) -> FileResult:
+        reason = classify_exception(exc, default=REASON_PROCESS_FAILED)
+        if reason in {REASON_EMPTY_FILE, REASON_BAD_FORMAT, REASON_MISSING_COLUMN}:
+            return FileResult(
+                status=STATUS_SKIP,
+                input=str(input_file),
+                output=str(output_dir),
+                reason=reason,
+                detail=str(exc),
+            )
+        return FileResult(
+            status=STATUS_FAIL,
+            input=str(input_file),
+            output=str(output_dir),
+            reason=reason,
+            detail=str(exc),
+        )
+
     def split_file_result(
         self,
         input_file: Union[str, Path],
@@ -188,8 +212,7 @@ class DataSplitter:
         try:
             info, df = self.csv_handler.read(input_file)
         except Exception as e:
-            collector = ResultCollector()
-            return collector.add_exception(input_file, e, output=output_dir)
+            return self._error_result(input_file, output_dir, e)
 
         if df.empty:
             return FileResult(
@@ -200,37 +223,40 @@ class DataSplitter:
                 detail="CSV没有数据行",
             )
 
-        if by_size:
-            dfs = split_by_size(df, by_size)
-        elif by_time and time_column:
-            dfs = split_by_time(df, time_column, by_time)
-        elif by_column:
-            dfs = split_by_column_value(df, by_column, column_value)
-        else:
-            dfs = [df]
+        try:
+            if by_size:
+                dfs = split_by_size(df, by_size)
+            elif by_time and time_column:
+                dfs = split_by_time(df, time_column, by_time)
+            elif by_column:
+                dfs = split_by_column_value(df, by_column, column_value)
+            else:
+                dfs = [df]
 
-        output_files = []
-        base_name = input_file.stem
+            output_files = []
+            base_name = input_file.stem
 
-        for i, split_df in enumerate(dfs):
-            if split_df.empty:
-                continue
+            for i, split_df in enumerate(dfs):
+                if split_df.empty:
+                    continue
 
-            output_file = output_dir / f"{base_name}_{i + 1:04d}.csv"
-            self.csv_handler.write(output_file, split_df, info)
-            output_files.append(output_file)
+                output_file = output_dir / f"{base_name}_{i + 1:04d}.csv"
+                self.csv_handler.write(output_file, split_df, info)
+                output_files.append(output_file)
 
-            if verbose:
-                pass
+                if verbose:
+                    pass
 
-        if not output_files:
-            return FileResult(
-                status="SKIP",
-                input=str(input_file),
-                output=str(output_dir),
-                reason=REASON_EMPTY_FILE,
-                detail="分割后没有可写入的数据",
-            )
+            if not output_files:
+                return FileResult(
+                    status=STATUS_SKIP,
+                    input=str(input_file),
+                    output=str(output_dir),
+                    reason=REASON_EMPTY_FILE,
+                    detail="分割后没有可写入的数据",
+                )
+        except Exception as e:
+            return self._error_result(input_file, output_dir, e)
 
         return FileResult(
             status="OK",
@@ -282,16 +308,19 @@ class DataSplitter:
         for file in progress_track(files, "分割CSV...", enabled=show_progress):
             relative = file.relative_to(input_dir)
             file_output_dir = output_dir / relative.parent
-            result = self.split_file_result(
-                file,
-                file_output_dir,
-                by_column,
-                column_value,
-                by_size,
-                by_time,
-                time_column,
-                verbose,
-            )
+            try:
+                result = self.split_file_result(
+                    file,
+                    file_output_dir,
+                    by_column,
+                    column_value,
+                    by_size,
+                    by_time,
+                    time_column,
+                    verbose,
+                )
+            except Exception as exc:
+                result = self._error_result(file, file_output_dir, exc)
             if result.status == "OK":
                 all_output_files.extend(Path(p) for p in result.output.split(";") if p)
             self.last_collector.add(result)
