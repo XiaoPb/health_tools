@@ -422,3 +422,17 @@ def test_validate_convert_rule_rejects_invalid_split(tmp_path: Path):
 
     assert any("需要且仅需要" in error for error in errors)
     assert any("by_size" in error for error in errors)
+    assert any("正整数" in error for error in errors)
+
+
+def test_validate_convert_rule_rejects_bool_by_size(tmp_path: Path):
+    path = tmp_path / "convert" / "bool_size.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "version: '1.0'\n" "column_mapping: {time: TimeStamp}\n" "split:\n" "  by_size: true\n",
+        encoding="utf-8",
+    )
+
+    errors = RuleValidator.validate_file(path)
+
+    assert any("正整数" in error for error in errors)

@@ -53,3 +53,16 @@ def test_load_convert_rule_preserves_split_config(tmp_path):
     rule = RuleLoader.load_convert_rule(str(rule_file))
 
     assert rule.split == {"by_time": 60, "time_column": "TimeStamp"}
+
+
+def test_load_convert_rule_with_null_split_loads_empty_dict(tmp_path):
+    rule_file = tmp_path / "convert" / "null_split.yaml"
+    rule_file.parent.mkdir(parents=True, exist_ok=True)
+    rule_file.write_text(
+        "version: '1.0'\n" "column_mapping:\n  time: TimeStamp\n" "split: null\n",
+        encoding="utf-8",
+    )
+
+    rule = RuleLoader.load_convert_rule(str(rule_file))
+
+    assert rule.split == {}

@@ -307,14 +307,23 @@ class RuleValidator:
         if "by_column" in config:
             if not isinstance(config["by_column"], str) or not config["by_column"].strip():
                 errors.append("'split.by_column' 必须是非空字符串")
-            if "column_value" in config and not isinstance(config["column_value"], (int, float)):
+            if "column_value" in config and (
+                not isinstance(config["column_value"], (int, float))
+                or isinstance(config["column_value"], bool)
+            ):
                 errors.append("'split.column_value' 必须是数字")
         if "by_size" in config and (
-            not isinstance(config["by_size"], int) or config["by_size"] <= 0
+            not isinstance(config["by_size"], int)
+            or isinstance(config["by_size"], bool)
+            or config["by_size"] <= 0
         ):
             errors.append("'split.by_size' 必须是正整数")
         if "by_time" in config:
-            if not isinstance(config["by_time"], (int, float)) or config["by_time"] <= 0:
+            if (
+                not isinstance(config["by_time"], (int, float))
+                or isinstance(config["by_time"], bool)
+                or config["by_time"] <= 0
+            ):
                 errors.append("'split.by_time' 必须是正数")
             if not isinstance(config.get("time_column"), str) or not config["time_column"].strip():
                 errors.append("'split.by_time' 需要非空 'time_column'")
