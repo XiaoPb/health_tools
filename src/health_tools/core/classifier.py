@@ -131,6 +131,28 @@ class DataClassifier:
         base_dir: Path,
         input_root: Optional[Path] = None,
     ) -> Optional[Path]:
+        self._prepare(file_path, input_root)
+        resolved = self._resolve_classify_target()
+        if resolved is None:
+            return None
+        return base_dir / resolved
+
+    def classify_frame(
+        self,
+        df: pd.DataFrame,
+        file_path: Path,
+        input_root: Optional[Path] = None,
+    ) -> Optional[str]:
+        """对内存 DataFrame 执行分类，返回相对输出目录的类别路径；未匹配返回 None。"""
+        self._prepare(file_path, input_root, df=df)
+        return self._resolve_classify_target()
+
+    def _prepare(
+        self,
+        file_path: Path,
+        input_root: Optional[Path] = None,
+        df: Optional[pd.DataFrame] = None,
+    ) -> None:
         if input_root is not None:
             try:
                 rel_path = file_path.relative_to(input_root)
@@ -142,9 +164,9 @@ class DataClassifier:
             rel_path = Path(file_path.name)
         self._parse_path(rel_path)
         self._parse_filename(file_path)
+        self._extracted_values = self._extract_values(file_path, df=df)
 
-        self._extracted_values = self._extract_values(file_path)
-
+    def _resolve_classify_target(self) -> Optional[str]:
         if self.rule.classify_rules:
             for rule in self.rule.classify_rules:
                 target = rule.get("target", "")
@@ -154,7 +176,7 @@ class DataClassifier:
                     resolved_target = self._resolve_variables(target)
                     for key, value in self._extracted_values.items():
                         resolved_target = resolved_target.replace(f"{{{key}}}", str(value))
-                    return base_dir / resolved_target
+                    return resolved_target
         else:
             for rule in self.rule.rules:
                 target = rule.get("target", "")
@@ -163,7 +185,7 @@ class DataClassifier:
                 resolved_target = self._resolve_target(target, self._extracted_values, conditions)
 
                 if resolved_target:
-                    return base_dir / resolved_target
+                    return resolved_target
 
         return None
 
@@ -261,17 +283,18 @@ class DataClassifier:
                     if i < len(groups):
                         self._filename_fields[field_name] = groups[i]
 
-    def _extract_values(self, file_path: Path) -> Dict[str, Any]:
+    def _extract_values(self, file_path: Path, df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         values = {}
 
         for col_def in self.rule.data_columns:
-            value = self._extract_column_value(file_path, col_def)
+            value = self._extract_column_value(file_path, col_def, df)
             if value is not None:
                 values[col_def.name] = value
 
         if self.rule.extract:
             try:
-                info, df = self.csv_handler.read(file_path)
+                if df is None:
+                    info, df = self.csv_handler.read(file_path)
 
                 for extract_item in self.rule.extract:
                     name = extract_item.get("name", "")
@@ -298,13 +321,15 @@ class DataClassifier:
 
         return values
 
-    def _extract_column_value(self, file_path: Path, col_def: DataColumn) -> Any:
+    def _extract_column_value(
+        self, file_path: Path, col_def: DataColumn, df: Optional[pd.DataFrame] = None
+    ) -> Any:
         if col_def.source == "filename":
             return self._extract_from_filename(file_path, col_def)
         elif col_def.source == "parent_dir":
             return self._extract_from_parent_dir(file_path, col_def)
         else:
-            return self._extract_from_data(file_path, col_def)
+            return self._extract_from_data(file_path, col_def, df)
 
     def _extract_from_filename(self, file_path: Path, col_def: DataColumn) -> Optional[str]:
         filename = file_path.name
@@ -335,13 +360,19 @@ class DataClassifier:
 
         return None
 
-    def _extract_from_data(self, file_path: Path, col_def: DataColumn) -> Any:
+    def _extract_from_data(
+        self,
+        file_path: Path,
+        col_def: DataColumn,
+        df: Optional[pd.DataFrame] = None,
+    ) -> Any:
         try:
-            if self._cached_file != file_path:
-                _, self._cached_df = self.csv_handler.read(file_path)
-                self._cached_file = file_path
+            if df is None:
+                if self._cached_file != file_path:
+                    _, self._cached_df = self.csv_handler.read(file_path)
+                    self._cached_file = file_path
 
-            df = self._cached_df
+                df = self._cached_df
             if df is None or df.empty:
                 return None
 

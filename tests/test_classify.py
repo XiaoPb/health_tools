@@ -4,7 +4,7 @@ from pathlib import Path
 
 from health_tools.api import ClassifyRequest, ExecutionContext, run_classify
 from health_tools.core.classifier import DataClassifier
-from health_tools.models.rules import ClassifyRule
+from health_tools.models.rules import ClassifyRule, DataColumn
 
 
 def _write_csv(path: Path, rows: int = 200) -> Path:
@@ -502,3 +502,94 @@ def test_check_filters_missing_file_returns_read_failed_reason(tmp_path: Path):
     assert reason is not None
     assert "读取失败" in reason
     assert "文件过小" not in reason
+
+
+def test_classify_frame_with_in_memory_df():
+    import pandas as pd
+
+    rule = ClassifyRule(
+        extract=[
+            {
+                "name": "spo2_median",
+                "function": "calculate_median",
+                "params": {"column": "REF_RESULT5"},
+            }
+        ],
+        classify_rules=[
+            {"target": "normal", "condition": "spo2_median >= 95"},
+            {"target": "lowspo2", "condition": "spo2_median < 95"},
+        ],
+        default="unclassified",
+    )
+    classifier = DataClassifier(rule)
+
+    high = pd.DataFrame({"REF_RESULT5": [95.0, 96.0, 97.0, 98.0]})
+    low = pd.DataFrame({"REF_RESULT5": [80.0, 81.0, 82.0]})
+
+    assert classifier.classify_frame(high, Path("data.csv")) == "normal"
+    assert classifier.classify_frame(low, Path("data.csv")) == "lowspo2"
+
+
+def test_classify_frame_no_match_returns_none():
+    import pandas as pd
+
+    rule = ClassifyRule(
+        classify_rules=[{"target": "normal", "condition": "spo2_median >= 95"}],
+        default="unclassified",
+    )
+    classifier = DataClassifier(rule)
+    df = pd.DataFrame({"REF_RESULT5": [80.0, 81.0, 82.0]})
+
+    assert classifier.classify_frame(df, Path("data.csv")) is None
+
+
+def test_classify_frame_simple_filename_rules_and_rename():
+    import pandas as pd
+
+    rule = ClassifyRule(
+        filename={
+            "regex": r"(\d{8})_([^_]+)_([^_]+)_[^_]+_(\d+Hz)",
+            "fields": ["date", "chip", "company", "sample_rate"],
+        },
+        data_columns=[
+            DataColumn(
+                name="motion",
+                source="filename",
+                match={"sit": ["sit"], "walk": ["walk"]},
+            )
+        ],
+        structure={"sit": "", "walk": ""},
+        rules=[{"target": "{motion}", "use_filename": True}],
+        rename="{company}_{motion}_{stem}.csv",
+        default="unclassified",
+    )
+    classifier = DataClassifier(rule)
+    df = pd.DataFrame({"value": [1, 2, 3]})
+    path = Path("20260808_gh3036_acme_sit_25Hz.csv")
+
+    assert classifier.classify_frame(df, path) == "sit"
+    assert classifier.resolve_filename(path) == "acme_sit_20260808_gh3036_acme_sit_25Hz.csv"
+
+
+def test_classify_frame_supports_path_variables(tmp_path):
+    import pandas as pd
+
+    source = tmp_path / "input"
+    rule = ClassifyRule(
+        path={"regex": r"(?P<scene>\w+)/[^/]+\.csv"},
+        extract=[
+            {
+                "name": "val",
+                "function": "calculate_median",
+                "params": {"column": "REF_RESULT5"},
+            }
+        ],
+        classify_rules=[{"target": "{scene}/normal", "condition": "val >= 1"}],
+        default="unclassified",
+    )
+    classifier = DataClassifier(rule)
+    df = pd.DataFrame({"REF_RESULT5": [95.0]})
+
+    result = classifier.classify_frame(df, source / "sit" / "data.csv", input_root=source)
+
+    assert result == "sit/normal"
