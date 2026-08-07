@@ -49,6 +49,17 @@ forward_fill:
 split:
   by_column: source_col   # 须为映射前的源列名
   column_value: 0
+# classify: 转换后分类（extract 作用于转换后的列；支持完整 classify 参数）
+classify:
+  default: unclassified
+  filename:
+    regex: '(?P<motion>sit|walk).*\.csv'
+  structure:
+    sit: ''
+    walk: ''
+  rules:
+    - target: '{motion}'
+  rename: '{motion}_{filename}'
 
 # expand_repeat: 低采样率列重复扩展
 expand_repeat:
@@ -83,6 +94,7 @@ extra_source:
 | `column_mapping` | 源列 → 目标列映射（支持 `{start-end}` 展开） |
 | `forward_fill` | 前向填充列（零值用前一个非零值替代） |
 | `split` | 先分割再转换；支持 by_column/by_size/by_time（三选一） |
+| `classify` | 转换后分类；支持完整 classify 参数（含 filename/rules/rename） |
 | `expand_repeat` | 列重复扩展（低采样率对齐高采样率） |
 | `computed` | 计算列（支持 +, -, *, / 运算） |
 | `extra_source` | 从额外文件读取参考列并按配置列对齐 |
@@ -118,6 +130,15 @@ extra_source:
 模式下按转换后的行数分割输出。
 
 `by_column` 与 `time_column` 必须使用映射前的源列名（即 `column_mapping` 左侧的列名）。
+
+## 规则 classify
+
+规则文件配置 `classify` 时，convert 在转换完成（含 `split` 分段）后对每个转换结果执行分类，
+写入 `{输出目录}/{类别路径}/{输出文件名}`。块内支持完整 classify 规则参数：`filename`/`path`/
+`data_columns`/`structure`/`rules`（简单分类，含文件名重分类）、`extract`/`classify`（条件
+分类）、`default`、`rename`（重命名输出文件名）。`extract` 的列参数使用转换后的目标列名（如
+`REF_RESULT5`）；未命中任何条件时输出到 `classify.default` 目录（默认 `unclassified`），
+保证转换产物不丢失。
 
 ## 输出与异常汇总
 

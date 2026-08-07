@@ -45,3 +45,28 @@ column_mapping:
 # split:
 #   by_time: 60           # 按时间分割（秒）；time_column 须为映射前的源列名
 #   time_column: time
+
+# classify: 转换完成后分类并输出到 {输出目录}/{类别路径}/{输出文件名}
+# 支持完整 classify 规则参数：filename/path/data_columns/structure/rules、extract/classify、default、rename
+# classify:
+#   default: unclassified
+#   extract:
+#     - name: spo2_median
+#       function: calculate_median
+#       params:
+#         column: REF_RESULT5   # 转换后的目标列名
+#   classify:
+#     - target: normal
+#       condition: 'spo2_median >= 95'
+#     - target: lowspo2
+#       condition: 'spo2_median < 95'
+# # 文件名重分类与重命名示例：
+# classify:
+#   filename:
+#     regex: '(?P<motion>sit|walk).*\.csv'
+#   structure:
+#     sit: ''
+#     walk: ''
+#   rules:
+#     - target: '{motion}'
+#   rename: '{motion}_{filename}'

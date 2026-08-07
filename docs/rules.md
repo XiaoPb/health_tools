@@ -445,7 +445,7 @@ rename: '{race}_{name}_{scene}_{filename}'
 
 ## convert 规则
 
-路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入 → 合并 `extra_source` →（若配置 `split`）先分割 → 每段分别执行：映射列 → 计算 `computed` 列 → `expand_repeat` 频率扩展 → `forward_fill` 前值填充 → 按目标芯片列补 0 并排序。每段独立执行 `forward_fill`，避免帧边界串值。
+路径：`rules/convert/<name>.yaml`。转换顺序为：读取输入 → 合并 `extra_source` →（若配置 `split`）先分割 → 每段分别执行：映射列 → 计算 `computed` 列 → `expand_repeat` 频率扩展 → `forward_fill` 前值填充 → 按目标芯片列补 0 并排序。→（若配置 `classify`）最后对每段转换结果分类并写入 `{输出目录}/{类别路径}/{输出文件名}`。每段独立执行 `forward_fill`，避免帧边界串值。
 
 ```yaml
 version: "1.0"
@@ -480,6 +480,19 @@ forward_fill:
 split:
   by_column: frame      # 先分割再转换；列值等于 column_value 时开始新段（须为映射前的源列名）
   column_value: 0
+
+classify:
+  default: unclassified
+  extract:
+    - name: spo2_median
+      function: calculate_median
+      params:
+        column: REF_RESULT5   # 转换后的目标列名
+  classify:
+    - target: normal
+      condition: 'spo2_median >= 95'
+    - target: lowspo2
+      condition: 'spo2_median < 95'
 ```
 
 也可用等长的 `source_columns` 和 `target_columns` 代替 `column_mapping`。映射后缺失的目标芯片列补 0，多余列被丢弃。
@@ -517,6 +530,27 @@ split:
 
 三种模式互斥。规则配置 `split` 时优先于 CLI `--split`；`--split` 仅在未配置规则
 `split` 时按转换后的行数分割输出（仅合并模式）。
+
+### classify
+
+`classify` 让 convert 在转换完成（含 `split` 分段转换）后，对每个转换结果执行分类，并写入
+`{输出目录}/{类别路径}/{输出文件名}`。块内支持**完整的 classify 规则参数**，与 classify 规则
+文件同构：
+
+| 参数 | 说明 |
+|---|---|
+| `filename` / `path` | 文件名/相对路径正则与字段，供 `{变量}` 引用 |
+| `data_columns` | 数据列提取（`source` 支持 filename/parent_dir/data） |
+| `structure` + `rules` | 简单分类：`rules[].target` 按变量解析，支持 `use_filename` |
+| `extract` + `classify` | 条件分类：`extract` 提取变量，`classify` 按条件匹配 target |
+| `rename` | 输出文件名模板，支持 `{变量}` 与 `{filename}`/`{stem}`；未配置时沿用原输出名 |
+| `default` | 未匹配任何条件时的输出目录名（默认 `unclassified`） |
+
+与 classify 命令的关键区别：`extract` 直接作用于**转换后的内存 DataFrame**，因此
+`params.column` 必须使用转换后的目标列名（如 `REF_RESULT5`）；`filename`/`path` 仍基于源
+文件路径（目录模式下 `path.regex` 匹配相对输入目录的路径）。分类条件未命中时输出到
+`{default}` 目录，保证转换产物不丢失。`rename` 生成新的输出文件名（split 分段时追加
+`_{序号}`）。`split` 与 `classify` 可同时配置：先分割并逐段转换，再对每段独立分类。
 
 ### computed 公式
 
