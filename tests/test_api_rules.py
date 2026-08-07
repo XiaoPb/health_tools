@@ -436,3 +436,101 @@ def test_validate_convert_rule_rejects_bool_by_size(tmp_path: Path):
     errors = RuleValidator.validate_file(path)
 
     assert any("正整数" in error for error in errors)
+
+
+def test_validate_convert_rule_accepts_classify_pipeline():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": {
+                "default": "unclassified",
+                "extract": [
+                    {
+                        "name": "spo2_median",
+                        "function": "calculate_median",
+                        "params": {"column": "REF_RESULT5"},
+                    }
+                ],
+                "classify": [{"target": "normal", "condition": "spo2_median >= 95"}],
+            },
+        },
+        rule_type="convert",
+    )
+    assert errors == []
+
+
+def test_validate_convert_rule_accepts_classify_full_schema():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": {
+                "filename": {
+                    "regex": r"(\d{8})_(\w+)_(\w+)\.csv",
+                    "fields": ["date", "chip", "project"],
+                },
+                "data_columns": [
+                    {
+                        "name": "motion",
+                        "source": "filename",
+                        "match": {"sit": ["sit"], "walk": ["walk"]},
+                    }
+                ],
+                "structure": {"sit": "", "walk": ""},
+                "rules": [{"target": "{motion}", "use_filename": True}],
+                "rename": "{date}_{filename}",
+                "default": "unclassified",
+            },
+        },
+        rule_type="convert",
+    )
+    assert errors == []
+
+
+def test_validate_convert_rule_rejects_classify_without_structure_or_classify():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": {"filename": {}},
+        },
+        rule_type="convert",
+    )
+    assert any("需要非空 'structure'" in error for error in errors)
+
+
+def test_validate_convert_rule_rejects_classify_without_target():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": {"classify": [{"condition": "x > 1"}]},
+        },
+        rule_type="convert",
+    )
+    assert any("需要 target" in error for error in errors)
+
+
+def test_validate_convert_rule_rejects_classify_bad_extract():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": {"extract": [{"name": "x"}], "classify": [{"target": "a"}]},
+        },
+        rule_type="convert",
+    )
+    assert any("需要 name 和 function" in error for error in errors)
+
+
+def test_validate_convert_rule_rejects_classify_bad_rename():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "column_mapping": {"time": "TimeStamp"},
+            "classify": {"structure": {"a": ""}, "rename": 123},
+        },
+        rule_type="convert",
+    )
+    assert any("'rename' 必须是字符串" in error for error in errors)

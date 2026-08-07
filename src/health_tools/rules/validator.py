@@ -47,6 +47,26 @@ class RuleValidator:
         return errors
 
     @staticmethod
+    def validate(rule: object, rule_type: str, strict: bool = False) -> List[str]:
+        """校验内存中的规则字典，按规则类型分发。"""
+        if not isinstance(rule, dict):
+            return ["规则必须是一个字典结构"]
+
+        if rule_type == "chip":
+            return RuleValidator._validate_chip_rule(rule, strict)
+        elif rule_type == "parse":
+            return RuleValidator._validate_parse_rule(rule, strict)
+        elif rule_type == "classify":
+            return RuleValidator._validate_classify_rule(rule, strict)
+        elif rule_type == "convert":
+            return RuleValidator._validate_convert_rule(rule, strict)
+        elif rule_type == "evaluate":
+            return RuleValidator._validate_evaluate_rule(rule, strict)
+        elif rule_type == "analysis":
+            return RuleValidator._validate_analysis_rule(rule, strict)
+        return ["无法识别的规则类型"]
+
+    @staticmethod
     def _detect_rule_type(rule_path: Path) -> str:
         parts = rule_path.parts
         if "chip" in parts:
@@ -165,10 +185,12 @@ class RuleValidator:
         return errors
 
     @staticmethod
-    def _validate_classify_rule(rule: dict, strict: bool) -> List[str]:
+    def _validate_classify_rule(
+        rule: dict, strict: bool, require_version: bool = True
+    ) -> List[str]:
         errors = []
 
-        if "version" not in rule:
+        if require_version and "version" not in rule:
             errors.append("缺少 'version' 字段")
 
         patterns = rule.get("patterns")
@@ -185,11 +207,14 @@ class RuleValidator:
         if not has_simple and not has_pipeline:
             errors.append("分类规则需要非空 'structure'，或同时提供 'extract'/'classify' 列表")
 
-        if has_pipeline:
-            for index, item in enumerate(rule.get("extract", [])):
+        extract_items = rule.get("extract")
+        if isinstance(extract_items, list):
+            for index, item in enumerate(extract_items):
                 if not isinstance(item, dict) or not item.get("name") or not item.get("function"):
                     errors.append(f"'extract[{index}]' 需要 name 和 function")
-            for index, item in enumerate(rule.get("classify", [])):
+        classify_items = rule.get("classify")
+        if isinstance(classify_items, list):
+            for index, item in enumerate(classify_items):
                 if not isinstance(item, dict) or not item.get("target"):
                     errors.append(f"'classify[{index}]' 需要 target")
 
@@ -296,7 +321,18 @@ class RuleValidator:
             else:
                 errors.extend(RuleValidator._validate_split_config(split))
 
+        classify = rule.get("classify")
+        if classify is not None:
+            errors.extend(RuleValidator._validate_convert_classify_config(classify))
+
         return errors
+
+    @staticmethod
+    def _validate_convert_classify_config(config: object) -> List[str]:
+        """convert 规则内联 classify 块：与 classify 规则同构，但不要求 version。"""
+        if not isinstance(config, dict):
+            return ["'classify' 必须是字典"]
+        return RuleValidator._validate_classify_rule(config, strict=False, require_version=False)
 
     @staticmethod
     def _validate_split_config(config: dict) -> List[str]:
