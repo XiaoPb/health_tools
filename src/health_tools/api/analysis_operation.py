@@ -203,15 +203,28 @@ def _run_supporting_stages(
     from health_tools.api.operations import run_evaluate
 
     try:
-        evaluate_result = run_evaluate(
-            EvaluateRequest(
+        if _custom_accuracy(request):
+            evaluate_request = EvaluateRequest(
                 input_path=staging,
                 output_path=output / "evaluate",
                 eval_type=request.analysis_type if request.analysis_type != "other" else "hr",
                 ref_column=request.ref_column,
                 pred_column=request.pred_column,
                 chip=chip,
-            ),
+                accuracy_thresholds=request.accuracy_thresholds,
+                accuracy_inclusive=request.accuracy_inclusive,
+            )
+        else:
+            evaluate_request = EvaluateRequest(
+                input_path=staging,
+                output_path=output / "evaluate",
+                eval_type=request.analysis_type if request.analysis_type != "other" else "hr",
+                ref_column=request.ref_column,
+                pred_column=request.pred_column,
+                chip=chip,
+            )
+        evaluate_result = run_evaluate(
+            evaluate_request,
             context=context,
         )
         evaluate_path = next(

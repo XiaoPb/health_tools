@@ -12,6 +12,7 @@ from health_tools.api.analysis_operation import (
     _escalate,
     _generate_psd_plots,
     _generate_raw_plots,
+    _run_supporting_stages,
 )
 from health_tools.api.context import ExecutionContext
 from health_tools.api.models import BatchResult, ItemResult, ItemStatus, OfflineResult
@@ -326,6 +327,37 @@ def test_accuracy_report_files_exclude_zero_sample_comparisons():
 
     assert overall_online["files"] == 1
     assert overall_online["samples"] == 2
+
+
+def test_supporting_evaluate_receives_analyze_accuracy_options(monkeypatch, tmp_path: Path):
+    source = tmp_path / "input.csv"
+    source.write_text("value\n1\n", encoding="utf-8")
+    requests = []
+
+    def fake_run_evaluate(request, *, context=None):
+        requests.append(request)
+        return BatchResult("evaluate")
+
+    monkeypatch.setattr("health_tools.api.operations.run_evaluate", fake_run_evaluate)
+
+    _run_supporting_stages(
+        AnalyzeRequest(
+            source,
+            tmp_path / "out",
+            accuracy_thresholds=(2.0, 7.5),
+            accuracy_inclusive=True,
+        ),
+        source,
+        [source],
+        tmp_path,
+        None,
+        tmp_path / "stages",
+        AnalysisRule(),
+        ExecutionContext(),
+    )
+
+    assert requests[0].accuracy_thresholds == (2.0, 7.5)
+    assert requests[0].accuracy_inclusive is True
 
 
 @pytest.mark.parametrize(
