@@ -54,7 +54,7 @@ def normalize_accuracy_thresholds(
     return tuple(normalized)
 
 
-def _format_accuracy_threshold(threshold: float) -> str:
+def format_accuracy_threshold(threshold: float) -> str:
     if threshold.is_integer():
         return str(int(threshold))
     return repr(threshold)
@@ -78,7 +78,7 @@ def resolve_accuracy_methods(
     if normalized is None:
         return resolved
 
-    replacement = [f"within_{_format_accuracy_threshold(value)}" for value in normalized]
+    replacement = [f"within_{format_accuracy_threshold(value)}" for value in normalized]
     indices = [index for index, method in enumerate(resolved) if _is_within_method(method)]
     if not indices:
         return [*resolved, *replacement]

@@ -15,7 +15,14 @@ import yaml
 from health_tools.config import CONFIG_DIR, load_config, save_config
 from health_tools.core.vshb import read_vshb_result
 from health_tools.rules.loader import RuleLoader
-from health_tools.utils.accuracy import calculate_accuracy, format_metric_name
+from health_tools.utils.accuracy import (
+    DEFAULT_ACCURACY_THRESHOLDS,
+    calculate_accuracy,
+    format_metric_name,
+    normalize_accuracy_thresholds,
+    prepare_accuracy_columns,
+    resolve_accuracy_methods,
+)
 from health_tools.utils.progress import progress_track
 
 OFFLINE_TOOLS_DIR = CONFIG_DIR / "offline_algorithm_tools"
@@ -876,26 +883,10 @@ class VshbParser:
 ACCURACY_METHODS = ["mae", "within_5", "within_10", "within_15", "rmse", "correlation"]
 
 
-def _has_valid_ref(df: pd.DataFrame) -> bool:
-    """判断是否提供了有效金标心率。"""
-    ref = pd.to_numeric(df["ref"], errors="coerce")
-    return bool((ref > 0).any())
-
-
-def _has_valid_comp(df: pd.DataFrame) -> bool:
-    """判断comp是否包含非零有效心率。"""
-    comp = pd.to_numeric(df["comp"], errors="coerce")
-    return bool((comp > 0).any())
-
-
-def _filter_valid_ref(df: pd.DataFrame) -> pd.DataFrame:
-    """仅保留有效金标行。"""
-    ref = pd.to_numeric(df["ref"], errors="coerce")
-    return df[ref > 0].reset_index(drop=True)
-
-
 def _add_metric_columns(row: Dict, metrics: Dict[str, float], suffix: str) -> None:
     """将准确度指标写入报告行。"""
+    if metrics.get("samples") is not None:
+        row[f"samples{suffix}"] = int(metrics["samples"])
     for key, val in metrics.items():
         if key != "samples":
             row[f"{format_metric_name(key)}{suffix}"] = round(val, 2)
@@ -904,6 +895,8 @@ def _add_metric_columns(row: Dict, metrics: Dict[str, float], suffix: str) -> No
 def calculate_offline_accuracy(
     output_dir: Path,
     show_progress: bool = False,
+    accuracy_thresholds: Optional[Tuple[float, ...]] = None,
+    accuracy_inclusive: bool = False,
 ) -> Optional[pd.DataFrame]:
     """计算离线跑库准确度
 
@@ -921,6 +914,8 @@ def calculate_offline_accuracy(
 
     parser = VshbParser()
     file_rows: List[Dict] = []
+    thresholds = normalize_accuracy_thresholds(accuracy_thresholds) or DEFAULT_ACCURACY_THRESHOLDS
+    methods = resolve_accuracy_methods(ACCURACY_METHODS, thresholds)
 
     for vshb_path in progress_track(vshb_files, "统计准确度...", enabled=show_progress):
         df = parser.parse(vshb_path)
@@ -930,37 +925,53 @@ def calculate_offline_accuracy(
         rel = vshb_path.relative_to(output_dir)
         category = rel.parts[0] if len(rel.parts) > 1 else "default"
 
-        has_ref = _has_valid_ref(df)
-        if has_ref:
-            metric_df = _filter_valid_ref(df)
-            offline_metrics = calculate_accuracy(metric_df, "ref", "offline", ACCURACY_METHODS)
-            online_metrics = calculate_accuracy(metric_df, "ref", "online", ACCURACY_METHODS)
-            comp_metrics = (
-                calculate_accuracy(metric_df, "ref", "comp", ACCURACY_METHODS)
-                if _has_valid_comp(df)
-                else {}
-            )
+        prepared = prepare_accuracy_columns(
+            {
+                name: pd.to_numeric(df[name], errors="coerce").to_numpy(dtype=float)
+                for name in ("ref", "offline", "online", "comp")
+            }
+        )
+        active = set(prepared.active_columns)
+        metric_df = pd.DataFrame(prepared.columns)
+        comparisons: List[Tuple[str, str, str]] = []
+        if prepared.start < prepared.end and "ref" in active:
             reference = "polar"
-        else:
-            metric_df = df
-            offline_metrics = {}
-            online_metrics = calculate_accuracy(metric_df, "offline", "online", ACCURACY_METHODS)
-            comp_metrics = {}
+            for name in ("offline", "online", "comp"):
+                if name in active:
+                    comparisons.append((name, "ref", name))
+        elif prepared.start < prepared.end and {"offline", "online"}.issubset(active):
             reference = "offline"
+            comparisons.append(("online_vs_offline", "offline", "online"))
+        else:
+            reference = ""
+
+        comparison_metrics = {
+            name: calculate_accuracy(
+                metric_df,
+                ref_name,
+                pred_name,
+                methods,
+                inclusive=accuracy_inclusive,
+                trim_zero_padding=False,
+            )
+            for name, ref_name, pred_name in comparisons
+        }
 
         row: Dict = {
             "file": vshb_path.stem.replace("_result", ""),
             "category": category,
             "reference": reference,
-            "samples": offline_metrics.get("samples", 0),
+            "samples": next(
+                (
+                    comparison_metrics[name].get("samples", 0)
+                    for name in ("offline", "online", "comp", "online_vs_offline")
+                    if name in comparison_metrics
+                ),
+                0,
+            ),
         }
-        if has_ref:
-            _add_metric_columns(row, offline_metrics, "(offline)")
-            _add_metric_columns(row, online_metrics, "(online)")
-            _add_metric_columns(row, comp_metrics, "(comp)")
-        else:
-            row["samples"] = online_metrics.get("samples", 0)
-            _add_metric_columns(row, online_metrics, "(online_vs_offline)")
+        for name, metrics in comparison_metrics.items():
+            _add_metric_columns(row, metrics, f"({name})")
 
         file_rows.append(row)
 
@@ -978,7 +989,11 @@ def calculate_offline_accuracy(
             for row in file_rows
             for col in row
             if col not in ("file", "category", "reference", "samples")
+            and not col.startswith("samples(")
         }
+    )
+    comparison_sample_cols = sorted(
+        {col for row in file_rows for col in row if col.startswith("samples(")}
     )
     summary_rows: List[Dict] = []
 
@@ -995,10 +1010,14 @@ def calculate_offline_accuracy(
             "reference": "",
             "samples": cat_samples,
         }
+        for sample_col in comparison_sample_cols:
+            cat_row[sample_col] = sum(int(entry.get(sample_col, 0)) for entry in entries)
         for col in metric_cols:
             col_entries = [e for e in entries if col in e]
-            col_samples = sum(e["samples"] for e in col_entries)
-            weighted = sum(e[col] * e["samples"] for e in col_entries)
+            suffix = col[col.rfind("(") :] if "(" in col else ""
+            sample_col = f"samples{suffix}"
+            col_samples = sum(int(e.get(sample_col, 0)) for e in col_entries)
+            weighted = sum(e[col] * int(e.get(sample_col, 0)) for e in col_entries)
             total_weighted[col] += weighted
             total_metric_samples[col] += col_samples
             cat_row[col] = round(weighted / col_samples, 2) if col_samples > 0 else 0.0
@@ -1010,6 +1029,8 @@ def calculate_offline_accuracy(
         "reference": "",
         "samples": total_samples,
     }
+    for sample_col in comparison_sample_cols:
+        total_row[sample_col] = sum(int(entry.get(sample_col, 0)) for entry in file_rows)
     for col in metric_cols:
         samples = total_metric_samples[col]
         total_row[col] = round(total_weighted[col] / samples, 2) if samples > 0 else 0.0

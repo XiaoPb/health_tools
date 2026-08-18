@@ -1,14 +1,23 @@
 """PSD时频图绘制（离线跑库结果可视化）"""
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.axes import Axes
 from rich.console import Console
 
 from health_tools.core.vshb import read_vshb_result
+from health_tools.utils.accuracy import (
+    DEFAULT_ACCURACY_THRESHOLDS,
+    calculate_accuracy,
+    format_accuracy_threshold,
+    normalize_accuracy_thresholds,
+    prepare_accuracy_columns,
+    resolve_accuracy_methods,
+)
 from health_tools.utils.progress import progress_track
 
 plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei"]
@@ -49,33 +58,49 @@ def _load_vshb_overlay(path: Path) -> Dict[str, np.ndarray]:
     }
 
 
-def _calc_metrics(ref: np.ndarray, pred: np.ndarray) -> Dict[str, float]:
-    """计算±5/±10/±15bpm准确度和MAE"""
-    valid = ~(np.isnan(ref) | np.isnan(pred)) & (ref > 0)
-    r, p = ref[valid], pred[valid]
-    if len(r) == 0:
-        return {"within_5": 0.0, "within_10": 0.0, "within_15": 0.0, "mae": 0.0}
-    diff = np.abs(r - p)
-    within_5 = float(np.mean(diff <= 5) * 100)
-    within_10 = float(np.mean(diff <= 10) * 100)
-    within_15 = float(np.mean(diff <= 15) * 100)
-    mae = float(np.mean(diff))
-    return {
-        "within_5": round(within_5, 1),
-        "within_10": round(within_10, 1),
-        "within_15": round(within_15, 1),
-        "mae": round(mae, 2),
-    }
+def _resolved_thresholds(thresholds: Optional[Sequence[float]]) -> Tuple[float, ...]:
+    return normalize_accuracy_thresholds(thresholds) or DEFAULT_ACCURACY_THRESHOLDS
 
 
-def _format_metric_line(label: str, metrics: Dict[str, float]) -> str:
-    """格式化PSD图顶部准确度摘要。"""
-    return (
-        f"{label}: ±5bpm={metrics['within_5']}%  "
-        f"±10bpm={metrics['within_10']}%  "
-        f"±15bpm={metrics['within_15']}%  "
-        f"MAE={metrics['mae']}"
+def _calc_metrics(
+    ref: np.ndarray,
+    pred: np.ndarray,
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
+    trim_zero_padding: bool = True,
+) -> Dict[str, float]:
+    """计算动态阈值准确度和 MAE。"""
+    thresholds = _resolved_thresholds(accuracy_thresholds)
+    methods = resolve_accuracy_methods(["mae", "within_5", "within_10", "within_15"], thresholds)
+    metrics = calculate_accuracy(
+        pd.DataFrame({"ref": ref, "pred": pred}),
+        "ref",
+        "pred",
+        methods,
+        inclusive=accuracy_inclusive,
+        trim_zero_padding=trim_zero_padding,
     )
+    if not metrics.get("samples"):
+        return {}
+    metrics.pop("samples", None)
+    for key in list(metrics):
+        if key.startswith("within_"):
+            metrics[key] = round(metrics[key], 1)
+    metrics["mae"] = round(metrics["mae"], 2)
+    return metrics
+
+
+def _format_metric_line(
+    label: str,
+    metrics: Dict[str, float],
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+) -> str:
+    """格式化PSD图顶部准确度摘要。"""
+    parts = []
+    for threshold in _resolved_thresholds(accuracy_thresholds):
+        threshold_text = format_accuracy_threshold(threshold)
+        parts.append(f"±{threshold_text}bpm={metrics[f'within_{threshold_text}']}%")
+    return f"{label}: " + "  ".join(parts) + f"  MAE={metrics['mae']}"
 
 
 def _has_valid_ref(ref: np.ndarray) -> bool:
@@ -114,21 +139,41 @@ def _metric_text_rows(
     hba_out: np.ndarray,
     mcu_hr: np.ndarray,
     comp_hr: np.ndarray,
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
 ) -> List[str]:
     """生成PSD图顶部准确度说明。"""
-    if _has_valid_ref(polar_hr):
-        offline_m = _calc_metrics(polar_hr, hba_out)
-        online_m = _calc_metrics(polar_hr, mcu_hr)
-        rows = [
-            _format_metric_line("Offline vs Polar", offline_m),
-            _format_metric_line("Online vs Polar", online_m),
-        ]
-        if _has_valid_ref(comp_hr):
-            rows.append(_format_metric_line("Comp vs Polar", _calc_metrics(polar_hr, comp_hr)))
-        return rows
+    prepared = prepare_accuracy_columns(
+        {"polar": polar_hr, "offline": hba_out, "online": mcu_hr, "comp": comp_hr}
+    )
+    if prepared.start == prepared.end:
+        return []
+    active = set(prepared.active_columns)
+    columns = prepared.columns
+    comparisons = []
+    if "polar" in active:
+        for name, label in (
+            ("offline", "Offline vs Polar"),
+            ("online", "Online vs Polar"),
+            ("comp", "Comp vs Polar"),
+        ):
+            if name in active:
+                comparisons.append((label, "polar", name))
+    elif {"offline", "online"}.issubset(active):
+        comparisons.append(("Online vs Offline", "offline", "online"))
 
-    online_m = _calc_metrics(hba_out, mcu_hr)
-    return [_format_metric_line("Online vs Offline", online_m)]
+    rows = []
+    for label, ref_name, pred_name in comparisons:
+        metrics = _calc_metrics(
+            columns[ref_name],
+            columns[pred_name],
+            accuracy_thresholds,
+            accuracy_inclusive,
+            trim_zero_padding=False,
+        )
+        if metrics:
+            rows.append(_format_metric_line(label, metrics, accuracy_thresholds))
+    return rows
 
 
 def _plot_hr_overlays(
@@ -167,6 +212,8 @@ class PsdPlotter:
         show_progress: bool = False,
         acc_mode: str = "axis",
         save_to_source: bool = False,
+        accuracy_thresholds: Optional[Sequence[float]] = None,
+        accuracy_inclusive: bool = False,
     ) -> List[Path]:
         """生成PSD时频图
 
@@ -209,7 +256,16 @@ class PsdPlotter:
                 comp_hr = overlay["comp"]
                 has_overlay = len(second) > 0
                 metric_rows = (
-                    _metric_text_rows(polar_hr, hba_out, mcu_hr, comp_hr) if has_overlay else []
+                    _metric_text_rows(
+                        polar_hr,
+                        hba_out,
+                        mcu_hr,
+                        comp_hr,
+                        accuracy_thresholds,
+                        accuracy_inclusive,
+                    )
+                    if has_overlay
+                    else []
                 )
 
                 psd_all = []

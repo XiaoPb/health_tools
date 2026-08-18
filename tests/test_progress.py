@@ -236,6 +236,47 @@ def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
     assert calls == [(input_dir, output_dir, False, "rms", False)]
 
 
+def test_plot_psd_forwards_custom_accuracy_options(monkeypatch, tmp_path: Path):
+    calls = []
+    input_dir = tmp_path / "result"
+    output_dir = tmp_path / "new_output"
+    input_dir.mkdir()
+
+    def fake_plot(
+        self,
+        result_dir,
+        save_dir=None,
+        show_progress=False,
+        acc_mode="axis",
+        save_to_source=False,
+        accuracy_thresholds=None,
+        accuracy_inclusive=False,
+    ):
+        calls.append((accuracy_thresholds, accuracy_inclusive))
+        return [save_dir / "sample.png"]
+
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "--type",
+            "psd",
+            "--accuracy-thresholds",
+            "3.5,7",
+            "--accuracy-inclusive",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [((3.5, 7.0), True)]
+
+
 def test_plot_psd_requires_directory(tmp_path: Path):
     input_file = tmp_path / "result.csv"
     output_dir = tmp_path / "output"
@@ -680,6 +721,67 @@ def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
 
     assert result.exit_code == 0
     assert calls == [("reorganize", False), ("plot", False, "axis", True), ("accuracy", False)]
+
+
+def test_offline_forwards_custom_accuracy_options(monkeypatch, tmp_path: Path):
+    import pandas as pd
+
+    calls = []
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    monkeypatch.setattr(
+        "health_tools.core.offline.reorganize_output",
+        lambda input_path, output_path, show_progress=False: output_path,
+    )
+
+    def fake_plot(
+        self,
+        result_dir,
+        save_dir=None,
+        show_progress=False,
+        acc_mode="axis",
+        save_to_source=False,
+        accuracy_thresholds=None,
+        accuracy_inclusive=False,
+    ):
+        calls.append(("plot", accuracy_thresholds, accuracy_inclusive))
+        return []
+
+    def fake_accuracy(
+        output_path,
+        show_progress=False,
+        accuracy_thresholds=None,
+        accuracy_inclusive=False,
+    ):
+        calls.append(("accuracy", accuracy_thresholds, accuracy_inclusive))
+        return pd.DataFrame({"file": ["TOTAL"]})
+
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
+    monkeypatch.setattr("health_tools.core.offline.calculate_offline_accuracy", fake_accuracy)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "--no-run",
+            "--accuracy-thresholds",
+            "3.5,7",
+            "--accuracy-inclusive",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [
+        ("plot", (3.5, 7.0), True),
+        ("accuracy", (3.5, 7.0), True),
+    ]
 
 
 def test_offline_medium_version_defaults_psd_to_accrms(monkeypatch, tmp_path: Path):

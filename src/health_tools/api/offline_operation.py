@@ -120,8 +120,14 @@ def run_offline(
         load_local_cmd_config,
         reorganize_output,
     )
+    from health_tools.utils.accuracy import normalize_accuracy_thresholds
 
     ctx = _context(context)
+    try:
+        accuracy_thresholds = normalize_accuracy_thresholds(request.accuracy_thresholds)
+    except ValueError as exc:
+        raise RequestValidationError(str(exc)) from exc
+    use_custom_accuracy = accuracy_thresholds is not None or request.accuracy_inclusive
     if request.do_list:
         ctx.check_cancelled("list")
         ctx.emit(ProgressEvent("offline", "list", 0, 1, "读取版本"))
@@ -282,19 +288,38 @@ def run_offline(
             stage("plot", "生成 PSD 图", label)
             from health_tools.core.psd_plotter import PsdPlotter
 
-            saved = PsdPlotter().plot(
-                reorganized,
-                save_dir=version_output / "psd_bmpfile",
-                show_progress=False,
-                acc_mode=_acc_mode(executable),
-                save_to_source=True,
-            )
+            if use_custom_accuracy:
+                saved = PsdPlotter().plot(
+                    reorganized,
+                    save_dir=version_output / "psd_bmpfile",
+                    show_progress=False,
+                    acc_mode=_acc_mode(executable),
+                    save_to_source=True,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_inclusive=request.accuracy_inclusive,
+                )
+            else:
+                saved = PsdPlotter().plot(
+                    reorganized,
+                    save_dir=version_output / "psd_bmpfile",
+                    show_progress=False,
+                    acc_mode=_acc_mode(executable),
+                    save_to_source=True,
+                )
             artifacts.extend(saved)
             completed += 1
 
         if not request.no_accuracy:
             stage("accuracy", "统计准确度", label)
-            report = calculate_offline_accuracy(reorganized, show_progress=False)
+            if use_custom_accuracy:
+                report = calculate_offline_accuracy(
+                    reorganized,
+                    show_progress=False,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_inclusive=request.accuracy_inclusive,
+                )
+            else:
+                report = calculate_offline_accuracy(reorganized, show_progress=False)
             if report is not None and not report.empty:
                 report_path = reorganized / "accuracy_report.csv"
                 report.to_csv(report_path, index=False, encoding="utf-8-sig")

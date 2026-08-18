@@ -14,8 +14,7 @@ from PIL import Image
 import health_tools.api.offline_operation as offline_api
 from health_tools.cli import main
 from health_tools.commands import offline as offline_command
-from health_tools.core import psd_plotter
-from health_tools.core import offline
+from health_tools.core import offline, psd_plotter
 from health_tools.core.vshb import read_vshb_result
 from health_tools.rules.loader import RuleLoader
 
@@ -1386,6 +1385,105 @@ def test_psd_metric_text_skips_zero_comp():
 
     assert len(rows) == 2
     assert all(not row.startswith("Comp vs Polar:") for row in rows)
+
+
+def test_psd_metric_text_uses_global_ready_boundary_and_keeps_middle_zero():
+    polar = np.array([80, 81, 82, 0, 84, 85, 86], dtype=float)
+    online_hr = np.array([0, 81, 87, 0, 89, 85, 0], dtype=float)
+    offline_hr = np.array([0, 0, 82, 0, 84, 0, 0], dtype=float)
+    comp_hr = np.zeros(7, dtype=float)
+
+    strict_rows = psd_plotter._metric_text_rows(
+        polar,
+        offline_hr,
+        online_hr,
+        comp_hr,
+        accuracy_thresholds=(5.0,),
+    )
+    inclusive_rows = psd_plotter._metric_text_rows(
+        polar,
+        offline_hr,
+        online_hr,
+        comp_hr,
+        accuracy_thresholds=(5.0,),
+        accuracy_inclusive=True,
+    )
+
+    assert strict_rows == [
+        "Offline vs Polar: ±5bpm=100.0%  MAE=0.0",
+        "Online vs Polar: ±5bpm=33.3%  MAE=3.33",
+    ]
+    assert inclusive_rows[1] == "Online vs Polar: ±5bpm=100.0%  MAE=3.33"
+
+
+def test_psd_metric_text_preserves_high_precision_threshold_names():
+    rows = psd_plotter._metric_text_rows(
+        np.array([100, 100], dtype=float),
+        np.array([101.0000001, 101.0000002], dtype=float),
+        np.array([101.0000001, 101.0000002], dtype=float),
+        np.zeros(2, dtype=float),
+        accuracy_thresholds=(1.0000001, 1.0000002),
+    )
+
+    assert "±1.0000001bpm=" in rows[0]
+    assert "±1.0000002bpm=" in rows[0]
+
+
+def test_offline_accuracy_uses_global_boundary_and_per_comparison_samples(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    header = "second,polar,algo_hr,comp_hr,fw_hr"
+    rows = [
+        "1,80,0,0,0",
+        "2,81,0,0,81",
+        "3,82,82,0,87",
+        "4,0,0,0,0",
+        "5,84,84,0,89",
+        "6,85,0,0,85",
+        "7,86,0,0,0",
+    ]
+    (result_dir / "sample_result.vshb").write_text(
+        header + "\n" + "\n".join(rows) + "\n",
+        encoding="utf-8",
+    )
+
+    report = offline.calculate_offline_accuracy(
+        result_dir,
+        accuracy_thresholds=(5.0,),
+    )
+
+    assert report is not None
+    first = report.iloc[0]
+    assert first["samples"] == 3
+    assert first["samples(offline)"] == 3
+    assert first["samples(online)"] == 3
+    assert first["±5BPM(offline)"] == 100.0
+    assert first["±5BPM(online)"] == 33.33
+    assert not any(column.endswith("(comp)") for column in report.columns)
+
+
+def test_offline_accuracy_weights_each_comparison_by_its_own_samples(tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    header = "second,polar,algo_hr,comp_hr,fw_hr"
+    (result_dir / "first_result.vshb").write_text(
+        header + "\n1,100,100,0,100\n2,100,100,0,nan\n3,100,100,0,110\n",
+        encoding="utf-8",
+    )
+    (result_dir / "second_result.vshb").write_text(
+        header + "\n1,100,100,0,110\n2,100,100,0,110\n3,100,100,0,110\n",
+        encoding="utf-8",
+    )
+
+    report = offline.calculate_offline_accuracy(result_dir)
+
+    assert report is not None
+    total = report.loc[report["file"] == "TOTAL"].iloc[0]
+    assert total["samples"] == 6
+    assert total["samples(offline)"] == 6
+    assert total["samples(online)"] == 5
+    assert total["MAE(offline)"] == 0.0
+    assert total["MAE(online)"] == 8.0
 
 
 def test_psd_hr_overlays_draws_cyan_dashed_comp():

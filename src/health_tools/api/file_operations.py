@@ -878,12 +878,18 @@ def run_plot(request: PlotRequest, *, context: Optional[ExecutionContext] = None
     from health_tools.core.plotter import DataPlotter
     from health_tools.models.rules import ChipRule
     from health_tools.rules.loader import RuleLoader
+    from health_tools.utils.accuracy import normalize_accuracy_thresholds
 
     valid = {"time", "freq", "stft", "psd", "ac", "fft", "both"}
     if request.plot_type not in valid:
         raise RequestValidationError(f"不支持的图表类型: {request.plot_type}")
     if request.channels and request.plot_type != "ac" and ";" in request.channels:
         raise RequestValidationError("分号通道分组仅支持 AC")
+    try:
+        accuracy_thresholds = normalize_accuracy_thresholds(request.accuracy_thresholds)
+    except ValueError as exc:
+        raise RequestValidationError(str(exc)) from exc
+    use_custom_accuracy = accuracy_thresholds is not None or request.accuracy_inclusive
     ctx = _context(context)
     source = _require_path(request.input_path)
     output = Path(request.output_path)
@@ -895,9 +901,22 @@ def run_plot(request: PlotRequest, *, context: Optional[ExecutionContext] = None
 
         ctx.check_cancelled("psd")
         ctx.emit(ProgressEvent("plot", "psd", 0, 1, "生成 PSD", str(source)))
-        saved = PsdPlotter().plot(
-            source, save_dir=output, show_progress=False, acc_mode=request.psd_acc
-        )
+        if use_custom_accuracy:
+            saved = PsdPlotter().plot(
+                source,
+                save_dir=output,
+                show_progress=False,
+                acc_mode=request.psd_acc,
+                accuracy_thresholds=accuracy_thresholds,
+                accuracy_inclusive=request.accuracy_inclusive,
+            )
+        else:
+            saved = PsdPlotter().plot(
+                source,
+                save_dir=output,
+                show_progress=False,
+                acc_mode=request.psd_acc,
+            )
         ctx.check_cancelled("psd", BatchResult("plot", artifacts=tuple(saved)))
         ctx.emit(ProgressEvent("plot", "psd", 1, 1, "完成", str(source)))
         psd_items = tuple(ItemResult(ItemStatus.OK, str(source), str(path)) for path in saved)

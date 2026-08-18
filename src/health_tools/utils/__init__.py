@@ -31,6 +31,7 @@ _LAZY_IMPORTS = {
     "PreparedAccuracyColumns": "health_tools.utils.accuracy",
     "calculate_within_percent": "health_tools.utils.accuracy",
     "calculate_within_threshold": "health_tools.utils.accuracy",
+    "format_accuracy_threshold": "health_tools.utils.accuracy",
     "normalize_accuracy_thresholds": "health_tools.utils.accuracy",
     "prepare_accuracy_columns": "health_tools.utils.accuracy",
     "resolve_accuracy_methods": "health_tools.utils.accuracy",
