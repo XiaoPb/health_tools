@@ -979,6 +979,28 @@ def test_analyze_propagates_dynamic_accuracy_to_psd_plot_and_report(monkeypatch,
     assert "100.0%" in report
 
 
+def test_analyze_default_accuracy_keeps_psd_plot_call_signature(monkeypatch, tmp_path: Path):
+    source = tmp_path / "result"
+    source.mkdir()
+    (source / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n" "1,100,100,0,100\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_generate_psd_plots(source, records, output, context):
+        calls.append((source, records, output, context))
+
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_psd_plots",
+        fake_generate_psd_plots,
+    )
+
+    run_analyze(AnalyzeRequest(source, tmp_path / "out", report="markdown", allow_offline=False))
+
+    assert len(calls) == 1
+
+
 def test_analyze_rejects_invalid_accuracy_thresholds(tmp_path: Path):
     source = tmp_path / "input.csv"
     _write_csv(source)

@@ -730,14 +730,17 @@ def run_analyze(
     escalated: List[Path] = []
     if source.is_dir() and any(source.rglob("*_result.vshb")):
         records, _ = _offline_records(request, source, rule)
-        _generate_psd_plots(
-            source,
-            records,
-            figures / "psd",
-            ctx,
-            request.accuracy_thresholds,
-            request.accuracy_inclusive,
-        )
+        if _custom_accuracy(request):
+            _generate_psd_plots(
+                source,
+                records,
+                figures / "psd",
+                ctx,
+                request.accuracy_thresholds,
+                request.accuracy_inclusive,
+            )
+        else:
+            _generate_psd_plots(source, records, figures / "psd", ctx)
     else:
         records, root, raw_files, _, chip = _raw_records(request, source, rule, ctx)
         stage_notes, check_path, evaluate_path = _run_supporting_stages(
@@ -749,14 +752,17 @@ def run_analyze(
         _apply_check_results(records, check_path, rule)
         _apply_evaluate_results(records, evaluate_path, rule)
         escalated = _escalate(request, records, root, chip, rule, stages, ctx)
-        _generate_psd_plots(
-            stages / "offline",
-            records,
-            figures / "psd",
-            ctx,
-            request.accuracy_thresholds,
-            request.accuracy_inclusive,
-        )
+        if _custom_accuracy(request):
+            _generate_psd_plots(
+                stages / "offline",
+                records,
+                figures / "psd",
+                ctx,
+                request.accuracy_thresholds,
+                request.accuracy_inclusive,
+            )
+        else:
+            _generate_psd_plots(stages / "offline", records, figures / "psd", ctx)
         _generate_raw_plots(request, records, chip, figures / "raw", rule, ctx)
     for index, record in enumerate(records):
         if (
