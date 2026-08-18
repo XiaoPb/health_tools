@@ -134,11 +134,13 @@ extra_source:
 ## 规则 classify
 
 规则文件配置 `classify` 时，convert 在转换完成（含 `split` 分段）后对每个转换结果执行分类，
-写入 `{输出目录}/{类别路径}/{输出文件名}`。块内支持完整 classify 规则参数：`filename`/`path`/
-`data_columns`/`structure`/`rules`（简单分类，含文件名重分类）、`extract`/`classify`（条件
-分类）、`default`、`rename`（重命名输出文件名）。`extract` 的列参数使用转换后的目标列名（如
-`REF_RESULT5`）；未命中任何条件时输出到 `classify.default` 目录（默认 `unclassified`），
-保证转换产物不丢失。
+写入 `{输出目录}/{类别路径}/{输出文件名}`。目录输入配置分类后，类别路径会取代源文件的相对
+目录；源相对路径仍可供 `path.regex` 提取变量，但不参与输出路径拼接。块内支持完整 classify
+规则参数：`filename`/`path`/`data_columns`/`structure`/`rules`（简单分类，含文件名重分类）、
+`extract`/`classify`（条件分类）、`default`、`rename`（重命名输出文件名）。`extract` 的列参数
+使用转换后的目标列名（如 `REF_RESULT5`）；未命中任何条件时输出到 `classify.default` 目录
+（默认 `unclassified`），保证转换产物不丢失。目录批处理中分类输出若发生同名冲突，会追加递增
+序号避免覆盖；单文件转换继续沿用原目标文件名。
 
 ## 输出与异常汇总
 
