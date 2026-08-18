@@ -422,7 +422,7 @@ rename: '{race}_{name}_{scene}_{filename}'
 
 ### accuracy 块
 
-`--accuracy` 启用时按列名读取参考列与预测列计算准确度。`methods` 与 `thresholds` 的可用取值与 evaluate 规则完全一致（见 [evaluate 规则](#evaluate-规则)）。
+`--accuracy` 启用时按列名读取参考列与预测列计算准确度。`methods` 与 `thresholds` 的可用取值与 evaluate 规则完全一致（见 [evaluate 规则](#evaluate-规则)）。规则显式声明 `methods` 时替代默认方法，`thresholds` 则始终作为额外的自定义命名指标；命令行 `--accuracy-thresholds` 只替换 `methods` 中固定数值形式的 `within_N`，不会删除其他方法或命名的固定/百分比指标。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -673,9 +673,9 @@ default_category: other
 | `bias` | 偏差（平均误差） |
 | `correlation` | 相关系数 |
 | `r2` | 决定系数 R² |
-| `within_N` | 误差 `|ref-pred| <= N` 的样本占比（%），如 `within_5`、`within_10` |
+| `within_N` | 默认统计误差 `|ref-pred| < N` 的样本占比（%），如 `within_5`、`within_10`；使用 `--accuracy-inclusive` 后改为 `<= N` |
 
-未指定 `methods` 时默认 `[mae, rmse, std]`。
+规则显式声明 `methods` 时优先使用规则配置；未指定时默认 `[std, rmse, mae, within_5, within_10, within_15]`。内置 SpO2 evaluate 规则显式使用 `within_3`、`within_6`、`within_9`，因此未提供命令行阈值时仍保留 `3/6/9`。显式 `--accuracy-thresholds` 只替换固定数值形式的 `within_N`，其他方法保持原顺序。
 
 ### thresholds 自定义指标
 
@@ -683,9 +683,18 @@ default_category: other
 
 ```yaml
 thresholds:
-  - { name: within_0.5, value: 0.5 }          # 固定阈值：|ref-pred| <= value 的占比(%)
-  - { name: within_10_percent, percent: 10 }   # 百分比阈值：|ref-pred| <= |ref|*percent/100 的占比(%)
+  - { name: within_0.5, value: 0.5 }          # 默认：|ref-pred| < value 的占比(%)
+  - { name: within_10_percent, percent: 10 }  # 默认：|ref-pred| < |ref|*percent/100 的占比(%)
 ```
+
+`thresholds` 中的自定义命名固定阈值和百分比阈值不会被 `--accuracy-thresholds` 替换；
+`--accuracy-inclusive` 会把它们和 `within_N` 一并切换为 `<=`，默认
+`--accuracy-strict` 均使用 `<`。固定阈值未由规则显式声明时默认采用 `5,10,15`。
+
+准确度计算会先统一处理参与的列：没有任意一个 finite 且非 `0` 值的列被禁用，不参与
+边界、比较或汇总。剩余全部启用列共同确定首尾共享边界，即首个和最后一个“所有启用列
+均为 finite 且非 `0`”的行，所有列使用同一切片；切片中间的 `0` 保留参与正常误差计算，
+`NaN`/`Inf` 只在具体参考列与预测列配对计算时过滤。
 
 ## analysis 规则
 

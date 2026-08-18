@@ -23,8 +23,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | `--offline-version` | 离线算法版本；未指定时使用芯片默认版本 |
 | `--no-offline` | 禁止自动离线 PSD 升级 |
 | `--workers` | 数据检查工作数，默认 4 |
-| `--accuracy-thresholds` | 准确度阈值，逗号分隔；默认采用规则或 `5,10,15` |
-| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
+| `--accuracy-thresholds` | 固定准确度阈值，逗号分隔，默认 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 阈值边界包含/严格模式；默认 strict，即 `abs(error) < threshold` |
 | `-v, --verbose` | 显示文件级结果 |
 
 ## 处理阶段
@@ -48,7 +48,7 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 2. **基础数据检查**：调用 `check`。范围、帧、时间戳、ACC、居中和 Ipd 转换只有 `FAIL` 才作为异常原因；`WARNING` 只保留为提示。报告会引用 check 的说明、异常次数、最长连续帧和前 10 个异常帧位置。
 3. **原始光学信号**：检查缺失、平线、饱和、基线漂移、通道一致性和运动幅度。`CH*` 默认按 Rawdata 解释；`CH*`/`Rawdata*` 计算 PI 前减去 chip 规则的 `chip_info.adc_offset`，`Ipd*` 已是 pA，不减 ADC 偏置。PI 只在静止场景使用，动态场景不把 PI 作为证据。
 4. **参考数据**：检查参考值范围、有效比例、跳变和长时间不变化。Polar 局部异常只生成需人工复审的警告，并从准确度样本中隔离；全局分析、原结论和关键图表继续保留。只有 Polar 全局不可用或有效比例低于门槛时，才停止基于参考值的错误归因并输出“证据不足”。
-5. **准确度和异常分段**：调用 `evaluate` 并计算逐样本绝对误差、MAE、最大误差、`±5/±10/±15 bpm` 占比以及持续异常区间。
+5. **准确度和异常分段**：调用 `evaluate` 并计算逐样本绝对误差、MAE、最大误差、动态阈值占比以及持续异常区间。
 6. **心率 PSD 证据**：普通文件仅在证据不足时升级，`--focus` 文件强制升级。离线算法只处理输出工作区副本；时频图统一由 `plot --type psd` 生成。SpO2 和未声明 `hr_psd` 的自定义规则不会使用心率锁频检测。
 7. **结论合成**：按原因优先级匹配结构化条件，依次输出参考数据问题、原始数据问题、算法异常机制、算法性能极限、未发现异常或证据不足。
 
@@ -116,7 +116,27 @@ ghealth_tool analyze -i data/ -o analysis/ --type spo2 \
 - `analysis_report.md`、`analysis_report.pptx`：按 `--report` 生成。
 - `stages/`：check、evaluate 和离线升级的中间产物。
 
-汇总内容包含整体及各场景准确度对比表。心率固定显示 `Online vs Polar` 和 `Offline vs Polar`；只有 Comp 存在且包含非零有效值时才增加 `Comp vs Polar`。每个对比对象分别显示 MAE、最大误差及 `±5 bpm`、`±10 bpm`、`±15 bpm` 准确度占比，占比按有效样本数加权；尚未执行离线算法时保留 `Offline vs Polar` 行并明确标记“未执行”。
+## 准确度统计口径
+
+原始数据评估、已有 PSD、自动 offline 升级、结构化 CSV，以及 Markdown/PPT 报告始终使用
+同一组 `--accuracy-thresholds` 和 strict/inclusive 配置。默认阈值为 `5,10,15`；strict
+模式按 `abs(error) < threshold` 计入，指定 `--accuracy-inclusive` 后改为
+`abs(error) <= threshold`。CSV、Markdown 和 PPT 的阈值列随实际配置动态生成，不固定为
+`±5/±10/±15`。
+
+准确度输入列如果没有任意一个 finite 且非 `0` 的值，则整列禁用，不参与边界、比较或
+汇总。剩余全部启用列共同确定首尾共享边界，即首个和最后一个“所有启用列均为 finite 且
+非 `0`”的行；所有列使用同一切片。切片中间的 `0` 保留并参与正常误差计算，`NaN`/`Inf`
+仅在每个比较对象成对计算时过滤。
+
+PSD 中 Polar 启用时，为所有启用的 Online、Offline、Comp 分别计算 `vs Polar`；Polar
+禁用时，只有 Online 和 Offline 均启用才回退为 `Online vs Offline`。每个比较对象分别使用
+自己的 `samples` 对场景、整体和报告指标加权；未启用或无有效配对样本的比较不会以零值
+补入。尚未执行自动离线算法时，报告可保留 Offline 状态并明确标记“未执行”，但不会伪造
+其准确度样本。
+
+汇总内容包含整体及各场景准确度对比表，并按上述激活条件动态显示比较行。每个比较对象
+显示 MAE、最大误差及当前阈值对应的准确度占比。
 
 汇总同时包含按原始数据、参考数据和算法性能边界归类的异常统计。PPT 将异常归类和整体准确度拆成独立内容页，避免压缩多列准确度表；表格使用紧凑行高、按内容分配列宽，并将单元格文字水平和垂直居中。
 

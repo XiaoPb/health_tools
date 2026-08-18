@@ -31,8 +31,8 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--freq-range` | 频率范围 BPM（默认: 30-240） |
 | `--ref-column` | 参考曲线列名 |
 | `--psd-acc` | PSD 模式下 ACC 绘图: `axis` 三轴 / `rms` 合成（默认: axis） |
-| `--accuracy-thresholds` | PSD 准确度阈值，逗号分隔；默认采用规则或 `5,10,15` |
-| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
+| `--accuracy-thresholds` | PSD 固定准确度阈值，逗号分隔，默认 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | PSD 阈值边界包含/严格模式；默认 strict，即 `abs(error) < threshold` |
 | `--no-show` | 仅保存不显示 |
 | `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |
@@ -107,11 +107,19 @@ FFT 未指定 `--channels` 时也按芯片自动识别所有非零 PPG 通道，
 `--psd-acc rms` 时改为读取 `.accrmspsd`，只绘制 `PPG` 和 `ACCRMS`，不绘制
 `ACCX/ACCY/ACCZ`。
 
-PPG 子图叠加离线、在线和 polar 心率曲线；VSHB 的 comp 列包含正值时，额外使用亮青色
-`#00E5FF` 虚线绘制 comp，并在图例中显示 `comp`。comp 全为 `0` 或缺失时不绘制该曲线。
-顶部出现第三行 `Comp vs Polar` 指标时，绘图区会动态下移，为标题和三行指标保留空间；
-没有 comp 指标时保持原有布局。图例固定在 PPG 子图右上角，允许遮挡部分曲线或 PSD
-内容。
+PSD 准确度默认使用 `5,10,15`，strict 模式按 `abs(error) < threshold` 计入；指定
+`--accuracy-inclusive` 后按 `abs(error) <= threshold` 计入。
+
+VSHB 的 `polar`、`offline`、`online`、`comp` 列中，没有任意一个 finite 且非 `0` 值的列
+被禁用，不参与边界、比较或指标显示。剩余全部启用列共同确定首尾共享边界，即首个和最后
+一个“所有启用列均为 finite 且非 `0`”的行；所有列使用同一切片。切片中间的 `0` 保留并
+参与正常误差计算，`NaN`/`Inf` 仅在每个比较对象成对计算时过滤。
+
+Polar 启用时，顶部为所有启用的 Offline、Online、Comp 分别显示 `vs Polar`；Polar 禁用
+时，只有 Online 和 Offline 均启用才回退显示 `Online vs Offline`。各比较对象独立使用自己
+的 `samples`，与 offline 报告的分类和 `TOTAL` 加权口径一致。Comp 启用时，PPG 子图额外
+使用亮青色 `#00E5FF` 虚线绘制 comp，并在图例中显示 `comp`。绘图区按实际指标行数动态
+下移；图例固定在 PPG 子图右上角，允许遮挡部分曲线或 PSD 内容。
 
 PSD 模式复用 `offline` 命令的 PSD 绘图方式，`--format`、`--dpi`、`--channels`、
 `--sample-rate` 等普通绘图参数不会影响 PSD 输出。直接使用 `plot --type psd` 时只把图片

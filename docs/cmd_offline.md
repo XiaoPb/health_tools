@@ -26,8 +26,8 @@ ghealth_tool offline --list [--chip <chip>]
 | `--ppg-offset` | PPG 自动识别通道的固定偏移，非负整数，默认 `0` |
 | `--ppg-map` | 覆盖已声明 PPG 通道，可重复使用，格式为 `ppg_chN=列名或0-based索引` |
 | `--no-accuracy` | 跳过准确度统计 |
-| `--accuracy-thresholds` | 准确度阈值，逗号分隔；默认 `5,10,15` |
-| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
+| `--accuracy-thresholds` | 固定准确度阈值，逗号分隔，默认 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 阈值边界包含/严格模式；默认 strict，即 `abs(error) < threshold` |
 | `--no-plot` | 跳过 PSD 时频图绘制 |
 | `--no-run` | 跳过跑库，直接整理/统计/绘图已有结果 |
 | `--list` | 列出可用芯片和版本 |
@@ -69,17 +69,26 @@ test1/lzh/sample/sample.csv -> test1_mv/lzh/sample/sample.csv
 算法等级为 `medium`/`med` 或 `basic` 时，PSD 默认绘制 `PPG + ACCRMS`；其他等级默认绘制
 `PPG + ACCX/ACCY/ACCZ`。
 
-准确度默认以 `polar` 金标为参考，报告中 `reference=polar`，同时统计离线、在线和 comp
-相对金标的指标，comp 指标使用 `(comp)` 后缀。带表头的 `.vshb` 依次识别 `comp_hr`、
-`cmp_hr`、`comp` 列；无表头旧格式使用 `polar` 后一列。如果单个文件的 comp 列全为 `0`
-或缺失，该文件跳过 `comp vs polar`，分类平均和 `TOTAL` 也不会把它作为零值纳入 comp
-指标。PSD 图顶部按相同条件显示 `Comp vs Polar`，并动态增加标题留白。只要 comp 列包含
-正值，PPG 子图还会用亮青色 `#00E5FF` 虚线叠加 comp 曲线；该曲线不依赖 polar 是否有效。
-图例固定在 PPG 子图右上角，允许遮挡部分曲线或 PSD 内容。
+准确度阈值默认使用 `5,10,15`。默认 strict 模式按 `abs(error) < threshold` 计入；指定
+`--accuracy-inclusive` 后按 `abs(error) <= threshold` 计入。该配置同时作用于
+`accuracy_report.csv` 和 PSD 图顶部指标。
 
-如果 `.vshb` 中 `polar` 列全为 `0`，表示未提供金标；此时报告改为
-`reference=offline`，只统计 `online_vs_offline` 指标。PSD 图顶部也只显示
-`Online vs Offline` 的准确度说明。
+每个 VSHB 的 `polar`、`offline`、`online`、`comp` 列按同一口径预处理：没有任意一个
+finite 且非 `0` 值的列被禁用，不参与边界、比较、分类汇总或 `TOTAL`。剩余全部启用列共同
+确定首尾共享边界，即首个和最后一个“所有启用列均为 finite 且非 `0`”的行；所有列使用
+同一切片。切片中间的 `0` 保留并参与正常误差计算，`NaN`/`Inf` 仅在各比较对象成对计算
+时过滤。
+
+Polar 启用时，分别为所有启用的 Offline、Online、Comp 计算 `vs Polar`；Polar 禁用时，
+只有 Online 和 Offline 均启用才回退为 `Online vs Offline`，不再生成其他比较。每个比较
+对象使用自己的 `samples` 对分类平均、`TOTAL` 和报告指标加权，缺失的比较不会以零值补入。
+报告在 Polar 启用时写入 `reference=polar`，回退时写入 `reference=offline`。带表头的
+`.vshb` 依次识别 `comp_hr`、`cmp_hr`、`comp` 列；无表头旧格式使用 `polar` 后一列。
+
+PSD 图顶部按相同条件显示 `Offline vs Polar`、`Online vs Polar`、`Comp vs Polar`，或回退
+后的 `Online vs Offline`，并按指标行数动态增加标题留白。Comp 启用时，PPG 子图使用亮青色
+`#00E5FF` 虚线叠加 comp 曲线；该曲线不依赖 Polar 是否启用。图例固定在 PPG 子图右上角，
+允许遮挡部分曲线或 PSD 内容。
 
 ## 多版本跑库
 
