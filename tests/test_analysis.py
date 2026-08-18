@@ -6,8 +6,6 @@ import pytest
 
 import health_tools.core.analysis.raw as raw_analysis
 from health_tools.api import AnalyzeRequest, RequestValidationError, run_analyze
-from health_tools.api.context import ExecutionContext
-from health_tools.api.models import BatchResult, ItemResult, ItemStatus, OfflineResult
 from health_tools.api.analysis_operation import (
     _apply_check_results,
     _apply_evaluate_results,
@@ -15,16 +13,22 @@ from health_tools.api.analysis_operation import (
     _generate_psd_plots,
     _generate_raw_plots,
 )
+from health_tools.api.context import ExecutionContext
+from health_tools.api.models import BatchResult, ItemResult, ItemStatus, OfflineResult
 from health_tools.core.analysis.conditions import matches
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord
 from health_tools.core.analysis.psd import analyze_psd_directory
-from health_tools.core.analysis.reference import analyze_reference
 from health_tools.core.analysis.raw import analyze_raw_file
-from health_tools.core.analysis.reporting import write_ppt
+from health_tools.core.analysis.reference import analyze_reference
+from health_tools.core.analysis.reporting import (
+    _accuracy_rows,
+    write_markdown,
+    write_ppt,
+    write_structured,
+)
 from health_tools.models.rules import AnalysisRule, ChipRule
 from health_tools.rules.loader import RuleLoader
-
 
 CUSTOM_RULE = """version: '1.0'
 type: other
@@ -145,6 +149,140 @@ def test_run_analyze_generates_structured_and_markdown_reports(tmp_path: Path):
     assert "±15 bpm" in report
     assert "异常数据归类" in report
     assert "算法优化" not in report
+
+
+def test_raw_accuracy_uses_shared_boundary_and_dynamic_strict_thresholds(
+    monkeypatch, tmp_path: Path
+):
+    frame = pd.DataFrame(
+        {
+            "time": np.arange(7, dtype=float),
+            "PPG": 1000 + np.arange(7, dtype=float),
+            "REF": [0, 80, 80, 80, 80, 80, 0],
+            "PRED": [0, 0, 85, 0, 80, np.nan, 0],
+        }
+    )
+    monkeypatch.setattr(raw_analysis, "_read", lambda path, chip: (frame, None))
+    rule = AnalysisRule(
+        columns={
+            "reference": "REF",
+            "prediction": "PRED",
+            "timestamp": "time",
+            "ppg_patterns": ["^PPG$"],
+            "acc": [],
+        },
+        sampling={"sample_rate": 1},
+        thresholds={"error": 5, "ref_min": 30, "ref_max": 220},
+    )
+
+    strict, _, _ = analyze_raw_file(
+        tmp_path / "sample.csv",
+        rule,
+        "hr",
+        accuracy_thresholds=(5.0, 12.5),
+    )
+    inclusive, _, _ = analyze_raw_file(
+        tmp_path / "sample.csv",
+        rule,
+        "hr",
+        accuracy_thresholds=(5.0, 12.5),
+        accuracy_inclusive=True,
+    )
+
+    assert strict["metrics"]["samples"] == 3
+    assert strict["metrics"]["mae"] == 28.33
+    assert strict["metrics"]["within_5"] == 33.33
+    assert strict["metrics"]["within_12.5"] == 66.67
+    assert inclusive["metrics"]["within_5"] == 66.67
+    assert strict["metrics"]["error_ratio"] == pytest.approx(1 / 3)
+    assert inclusive["metrics"]["error_ratio"] == strict["metrics"]["error_ratio"]
+    assert strict["segments"] == inclusive["segments"]
+    assert strict["segments"][0]["start_s"] == 3.0
+    assert strict["segments"][0]["end_s"] == 3.0
+
+
+def test_accuracy_report_uses_dynamic_thresholds_and_per_comparison_samples(tmp_path: Path):
+    records = [
+        AnalysisRecord(
+            file="first.csv",
+            source="first.csv",
+            analysis_type="hr",
+            scene="dynamic",
+            metrics={
+                "comparisons": {
+                    "online": {
+                        "samples": 1,
+                        "mae": 10.0,
+                        "max_error": 10.0,
+                        "within_2": 0.0,
+                        "within_7.5": 0.0,
+                    },
+                    "offline": {
+                        "samples": 3,
+                        "mae": 0.0,
+                        "max_error": 0.0,
+                        "within_2": 100.0,
+                        "within_7.5": 100.0,
+                    },
+                }
+            },
+        ),
+        AnalysisRecord(
+            file="second.csv",
+            source="second.csv",
+            analysis_type="hr",
+            scene="dynamic",
+            metrics={
+                "comparisons": {
+                    "online": {
+                        "samples": 3,
+                        "mae": 0.0,
+                        "max_error": 0.0,
+                        "within_2": 100.0,
+                        "within_7.5": 100.0,
+                    }
+                }
+            },
+        ),
+        AnalysisRecord(
+            file="fallback.csv",
+            source="fallback.csv",
+            analysis_type="hr",
+            scene="static",
+            metrics={
+                "comparisons": {
+                    "online_vs_offline": {
+                        "samples": 2,
+                        "mae": 1.0,
+                        "max_error": 1.0,
+                        "within_2": 100.0,
+                        "within_7.5": 100.0,
+                    }
+                }
+            },
+        ),
+    ]
+
+    rows = _accuracy_rows(records, (2.0, 7.5))
+    overall_online = next(
+        row for row in rows if row["scene"] == "整体" and row["comparison"] == "Online vs Polar"
+    )
+    fallback = next(row for row in rows if row["comparison"] == "Online vs Offline")
+    assert overall_online["samples"] == 4
+    assert overall_online["mae"] == 2.5
+    assert overall_online["within_2"] == 75.0
+    assert fallback["samples"] == 2
+
+    structured = write_structured(records, tmp_path / "structured", (2.0, 7.5))
+    columns = pd.read_csv(structured[1]).columns
+    assert "within_2" in columns
+    assert "within_7.5" in columns
+    assert "within_5" not in columns
+    report = write_markdown(records, tmp_path / "report.md", (2.0, 7.5)).read_text(encoding="utf-8")
+    assert "±2 bpm" in report
+    assert "±7.5 bpm" in report
+    assert "75.0%" in report
+    assert "Online vs Offline" in report
 
 
 @pytest.mark.parametrize(
@@ -520,6 +658,8 @@ def test_offline_escalation_uses_copy_and_requested_version(
         root,
         tmp_path / "out",
         offline_version=version,
+        accuracy_thresholds=(2.0, 7.5),
+        accuracy_inclusive=True,
     )
 
     escalated = _escalate(
@@ -538,6 +678,8 @@ def test_offline_escalation_uses_copy_and_requested_version(
     assert source.exists()
     assert requests[0].input_path == tmp_path / "stages" / "offline_input"
     assert requests[0].ver == version
+    assert requests[0].accuracy_thresholds == (2.0, 7.5)
+    assert requests[0].accuracy_inclusive is True
 
 
 def test_no_offline_records_reason_for_evidence_insufficient(tmp_path: Path):
@@ -697,7 +839,7 @@ def test_local_polar_issue_warns_without_replacing_global_psd_diagnosis(tmp_path
     details = pd.read_csv(tmp_path / "out" / "file_diagnosis.csv")
     report = result.reports[0].read_text(encoding="utf-8")
     assert result.conclusion_counts["算法性能极限"] == 1
-    assert summary.iloc[0]["metrics"]["comparisons"]["offline"]["samples"] == 19
+    assert summary.iloc[0]["metrics"]["comparisons"]["offline"]["samples"] == 20
     assert "Polar 警告" in details.iloc[0]["warnings"]
     assert "Polar 警告" in report
     assert "跟随运动主频" in report
@@ -735,6 +877,121 @@ def test_vshb_accuracy_remains_available_when_psd_files_are_missing(tmp_path: Pa
     assert sample["comparisons"]["online"]["mae"] == 5.5
     assert sample["comparisons"]["offline"]["mae"] == 8.0
     assert "comp" not in sample["comparisons"]
+
+
+@pytest.mark.parametrize(("inclusive", "expected"), [(False, 33.33), (True, 66.67)])
+def test_vshb_accuracy_uses_global_boundary_and_keeps_middle_zero(
+    tmp_path: Path, inclusive: bool, expected: float
+):
+    source = tmp_path / "result"
+    source.mkdir()
+    (source / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n"
+        "1,0,0,0,0\n"
+        "2,80,0,0,0\n"
+        "3,80,80,0,85\n"
+        "4,80,0,0,0\n"
+        "5,80,80,0,80\n"
+        "6,80,nan,0,nan\n"
+        "7,0,0,0,0\n",
+        encoding="utf-8",
+    )
+
+    details = analyze_psd_directory(
+        source,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+        accuracy_thresholds=(5.0, 12.5),
+        accuracy_inclusive=inclusive,
+    )
+
+    comparisons = details["sample.csv"]["comparisons"]
+    assert comparisons["offline"]["samples"] == 3
+    assert comparisons["offline"]["within_5"] == 66.67
+    assert comparisons["online"]["samples"] == 3
+    assert comparisons["online"]["within_5"] == expected
+    assert comparisons["online"]["within_12.5"] == 66.67
+    assert "comp" not in comparisons
+
+
+def test_vshb_accuracy_enables_comp_and_falls_back_without_polar(tmp_path: Path):
+    polar_source = tmp_path / "polar"
+    polar_source.mkdir()
+    (polar_source / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n" "1,100,100,105,100\n" "2,100,100,100,100\n",
+        encoding="utf-8",
+    )
+    fallback_source = tmp_path / "fallback"
+    fallback_source.mkdir()
+    (fallback_source / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n"
+        "1,0,0,0,0\n"
+        "2,0,100,0,105\n"
+        "3,0,100,0,0\n"
+        "4,0,100,0,100\n"
+        "5,0,0,0,0\n",
+        encoding="utf-8",
+    )
+    rule = RuleLoader.load_analysis_rule("analysis_hr.yaml")
+
+    polar = analyze_psd_directory(polar_source, rule)["sample.csv"]["comparisons"]
+    fallback = analyze_psd_directory(fallback_source, rule)["sample.csv"]["comparisons"]
+
+    assert set(polar) == {"offline", "online", "comp"}
+    assert polar["comp"]["within_5"] == 50.0
+    assert set(fallback) == {"online_vs_offline"}
+    assert fallback["online_vs_offline"]["samples"] == 3
+    assert fallback["online_vs_offline"]["mae"] == 35.0
+
+
+def test_analyze_propagates_dynamic_accuracy_to_psd_plot_and_report(monkeypatch, tmp_path: Path):
+    source = tmp_path / "result"
+    source.mkdir()
+    (source / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n" "1,100,100,0,105\n" "2,100,100,0,100\n",
+        encoding="utf-8",
+    )
+    requests = []
+
+    def fake_run_plot(request, *, context=None):
+        requests.append(request)
+        return BatchResult("plot")
+
+    monkeypatch.setattr("health_tools.api.file_operations.run_plot", fake_run_plot)
+
+    result = run_analyze(
+        AnalyzeRequest(
+            source,
+            tmp_path / "out",
+            report="markdown",
+            allow_offline=False,
+            accuracy_thresholds=(5.0,),
+            accuracy_inclusive=True,
+        )
+    )
+
+    report = result.reports[0].read_text(encoding="utf-8")
+    summary = pd.read_json(result.summary_path)
+    assert requests[0].accuracy_thresholds == (5.0,)
+    assert requests[0].accuracy_inclusive is True
+    assert summary.iloc[0]["metrics"]["within_5"] == 100.0
+    assert "±5 bpm" in report
+    assert "±10 bpm" not in report
+    assert "100.0%" in report
+
+
+def test_analyze_rejects_invalid_accuracy_thresholds(tmp_path: Path):
+    source = tmp_path / "input.csv"
+    _write_csv(source)
+
+    with pytest.raises(RequestValidationError, match="准确度阈值不能为空"):
+        run_analyze(
+            AnalyzeRequest(
+                source,
+                tmp_path / "out",
+                accuracy_thresholds=(),
+                allow_offline=False,
+            )
+        )
 
 
 def test_ppt_report_uses_packaged_template(tmp_path: Path):
@@ -780,6 +1037,44 @@ def test_ppt_report_uses_packaged_template(tmp_path: Path):
     assert "±15 bpm" in table_text
     assert "异常数据归类" in text
     assert "分析完成" in text
+
+
+def test_ppt_report_uses_dynamic_accuracy_columns(tmp_path: Path):
+    pytest.importorskip("pptx")
+    output = write_ppt(
+        [
+            AnalysisRecord(
+                file="sample.csv",
+                source="sample.csv",
+                analysis_type="hr",
+                metrics={
+                    "samples": 2,
+                    "mae": 2.5,
+                    "max_error": 5.0,
+                    "within_2": 50.0,
+                    "within_7.5": 100.0,
+                },
+            )
+        ],
+        tmp_path / "report.pptx",
+        (2.0, 7.5),
+    )
+
+    from pptx import Presentation
+
+    deck = Presentation(str(output))
+    table_text = "\n".join(
+        cell.text
+        for slide in deck.slides
+        for shape in slide.shapes
+        if shape.has_table
+        for row in shape.table.rows
+        for cell in row.cells
+    )
+    assert "±2 bpm" in table_text
+    assert "±7.5 bpm" in table_text
+    assert "±5 bpm" not in table_text
+    assert "50.0%" in table_text
 
 
 def test_ppt_summary_table_is_compact_and_centered(tmp_path: Path):

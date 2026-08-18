@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import pandas as pd
 
 from health_tools.core.analysis.reference import analyze_reference
 from health_tools.core.vshb import read_vshb_result
@@ -50,64 +51,111 @@ def _find_psd(base: Path, suffixes: List[str]) -> Optional[Path]:
 
 
 def _comparison_metrics(
-    reference: np.ndarray, prediction: np.ndarray, reference_mask: np.ndarray
+    reference: np.ndarray,
+    prediction: np.ndarray,
+    accuracy_thresholds: Optional[Sequence[float]],
+    accuracy_inclusive: bool,
 ) -> Dict[str, Any]:
-    valid = reference_mask & np.isfinite(prediction)
-    errors = np.abs(reference[valid] - prediction[valid])
-    if not len(errors):
+    from health_tools.utils.accuracy import (
+        DEFAULT_ACCURACY_THRESHOLDS,
+        calculate_accuracy,
+        normalize_accuracy_thresholds,
+        resolve_accuracy_methods,
+    )
+
+    thresholds = normalize_accuracy_thresholds(accuracy_thresholds) or DEFAULT_ACCURACY_THRESHOLDS
+    methods = resolve_accuracy_methods(["mae", "within_5", "within_10", "within_15"], thresholds)
+    metrics = calculate_accuracy(
+        pd.DataFrame({"ref": reference, "pred": prediction}),
+        "ref",
+        "pred",
+        methods,
+        inclusive=accuracy_inclusive,
+        trim_zero_padding=False,
+    )
+    if not metrics.get("samples"):
         return {}
-    return {
-        "samples": int(len(errors)),
-        "mae": float(np.mean(errors)),
-        "max_error": float(np.max(errors)),
-        "within_5": float(np.mean(errors <= 5)),
-        "within_10": float(np.mean(errors <= 10)),
-        "within_15": float(np.mean(errors <= 15)),
-    }
+    finite = np.isfinite(reference) & np.isfinite(prediction)
+    metrics["max_error"] = round(float(np.max(np.abs(reference[finite] - prediction[finite]))), 2)
+    return metrics
 
 
 def _accuracy_features(
-    overlay, error_threshold: float, thresholds: Dict[str, Any]
+    overlay,
+    error_threshold: float,
+    thresholds: Dict[str, Any],
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
 ) -> Dict[str, Any]:
+    from health_tools.utils.accuracy import (
+        DEFAULT_ACCURACY_THRESHOLDS,
+        format_accuracy_threshold,
+        normalize_accuracy_thresholds,
+        prepare_accuracy_columns,
+    )
+
+    resolved_thresholds = (
+        normalize_accuracy_thresholds(accuracy_thresholds) or DEFAULT_ACCURACY_THRESHOLDS
+    )
+    empty_accuracy = {
+        "mae": 0.0,
+        "max_error": 0.0,
+        "error_ratio": 0.0,
+        **{f"within_{format_accuracy_threshold(value)}": 0.0 for value in resolved_thresholds},
+        "samples": 0,
+        "comparisons": {},
+    }
     if overlay.empty:
         return {
             "reference_valid": False,
             "algorithm_abnormal": False,
-            "mae": 0.0,
-            "max_error": 0.0,
-            "error_ratio": 0.0,
-            "within_5": 0.0,
-            "within_10": 0.0,
-            "within_15": 0.0,
-            "samples": 0,
-            "comparisons": {},
+            **empty_accuracy,
             "polar_review_required": True,
             "polar_issues": ["Polar 数据缺失，需人工复审"],
         }
-    ref = np.asarray(overlay["ref"], dtype=float)
-    offline = np.asarray(overlay["offline"], dtype=float)
-    online = np.asarray(overlay["online"], dtype=float)
-    comp = np.asarray(overlay["comp"], dtype=float)
-    reference, valid_ref = analyze_reference(ref, thresholds, sample_rate=1.0)
-    valid_offline = valid_ref & np.isfinite(offline)
-    errors = np.abs(ref[valid_offline] - offline[valid_offline])
+    prepared = prepare_accuracy_columns(
+        {
+            "polar": np.asarray(overlay["ref"], dtype=float),
+            "offline": np.asarray(overlay["offline"], dtype=float),
+            "online": np.asarray(overlay["online"], dtype=float),
+            "comp": np.asarray(overlay["comp"], dtype=float),
+        }
+    )
+    columns = prepared.columns
+    active = set(prepared.active_columns)
+    reference, _ = analyze_reference(columns["polar"], thresholds, sample_rate=1.0)
+    comparison_columns = []
+    if "polar" in active:
+        comparison_columns.extend(
+            (name, "polar", name) for name in ("offline", "online", "comp") if name in active
+        )
+    elif {"offline", "online"}.issubset(active):
+        comparison_columns.append(("online_vs_offline", "offline", "online"))
     comparisons = {
-        "offline": _comparison_metrics(ref, offline, valid_ref),
-        "online": _comparison_metrics(ref, online, valid_ref),
+        name: _comparison_metrics(
+            columns[reference_name],
+            columns[prediction_name],
+            accuracy_thresholds,
+            accuracy_inclusive,
+        )
+        for name, reference_name, prediction_name in comparison_columns
     }
-    if np.any(np.isfinite(comp) & (comp > 0)):
-        comparisons["comp"] = _comparison_metrics(ref, comp, valid_ref)
+    comparisons = {name: metrics for name, metrics in comparisons.items() if metrics}
+    primary_name = "offline" if "offline" in comparisons else "online_vs_offline"
+    primary = comparisons.get(primary_name, {})
+    if primary:
+        reference_name = "polar" if primary_name == "offline" else "offline"
+        prediction_name = "offline" if primary_name == "offline" else "online"
+        finite = np.isfinite(columns[reference_name]) & np.isfinite(columns[prediction_name])
+        errors = np.abs(columns[reference_name][finite] - columns[prediction_name][finite])
+    else:
+        errors = np.array([], dtype=float)
     return {
         **reference,
         "algorithm_abnormal": bool(len(errors) and np.any(errors > error_threshold)),
-        "mae": float(np.mean(errors)) if len(errors) else 0.0,
-        "max_error": float(np.max(errors)) if len(errors) else 0.0,
+        **({**empty_accuracy, **primary} if primary else empty_accuracy),
         "error_ratio": float(np.mean(errors > error_threshold)) if len(errors) else 0.0,
-        "within_5": float(np.mean(errors <= 5)) if len(errors) else 0.0,
-        "within_10": float(np.mean(errors <= 10)) if len(errors) else 0.0,
-        "within_15": float(np.mean(errors <= 15)) if len(errors) else 0.0,
-        "samples": int(len(errors)),
-        "comparisons": {name: value for name, value in comparisons.items() if value},
+        "comparisons": comparisons,
     }
 
 
@@ -119,7 +167,12 @@ def _scene(logical: str) -> str:
     return "unknown"
 
 
-def analyze_psd_directory(result_dir: Path, rule: AnalysisRule) -> Dict[str, Dict[str, Any]]:
+def analyze_psd_directory(
+    result_dir: Path,
+    rule: AnalysisRule,
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
+) -> Dict[str, Dict[str, Any]]:
     results: Dict[str, Dict[str, Any]] = {}
     clarity_threshold = float(rule.thresholds.get("psd_clarity", 3))
     lock_hz = float(rule.thresholds.get("psd_lock_hz", 0.2))
@@ -131,7 +184,11 @@ def analyze_psd_directory(result_dir: Path, rule: AnalysisRule) -> Dict[str, Dic
         base = vshb.parent / base_name
         overlay = read_vshb_result(vshb, positional_online_col=30)
         accuracy = _accuracy_features(
-            overlay, float(rule.thresholds.get("error", 10)), rule.thresholds
+            overlay,
+            float(rule.thresholds.get("error", 10)),
+            rule.thresholds,
+            accuracy_thresholds,
+            accuracy_inclusive,
         )
         ppg_path = _find_psd(base, ["0.prepsd", ".prepsd"])
         acc_path = _find_psd(base, [".accrmspsd", ".accxpsd", ".accypsd", ".acczpsd"])

@@ -12,6 +12,7 @@ import fnmatch
 import re
 import shutil
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -56,6 +57,20 @@ def _validate(request: AnalyzeRequest) -> None:
         raise RequestValidationError("sample_rate 必须大于 0")
     if request.workers < 1:
         raise RequestValidationError("workers 必须大于 0")
+
+
+def _normalize_accuracy_request(request: AnalyzeRequest) -> AnalyzeRequest:
+    from health_tools.utils.accuracy import normalize_accuracy_thresholds
+
+    try:
+        thresholds = normalize_accuracy_thresholds(request.accuracy_thresholds)
+    except ValueError as exc:
+        raise RequestValidationError(str(exc)) from exc
+    return replace(request, accuracy_thresholds=thresholds)
+
+
+def _custom_accuracy(request: AnalyzeRequest) -> bool:
+    return request.accuracy_thresholds is not None or request.accuracy_inclusive
 
 
 def _raw_files(source: Path) -> Tuple[Path, List[Path]]:
@@ -357,17 +372,32 @@ def _raw_records(
         context.check_cancelled("raw", records)
         name = _logical(path, root)
         try:
-            result, frame, _ = analyze_raw_file(
-                path,
-                rule,
-                request.analysis_type,
-                chip_name=request.chip_name,
-                sample_rate=request.sample_rate,
-                ref_column=request.ref_column,
-                pred_column=request.pred_column,
-                timestamp_column=request.timestamp_column,
-                scene_override=request.scene,
-            )
+            if _custom_accuracy(request):
+                result, frame, _ = analyze_raw_file(
+                    path,
+                    rule,
+                    request.analysis_type,
+                    chip_name=request.chip_name,
+                    sample_rate=request.sample_rate,
+                    ref_column=request.ref_column,
+                    pred_column=request.pred_column,
+                    timestamp_column=request.timestamp_column,
+                    scene_override=request.scene,
+                    accuracy_thresholds=request.accuracy_thresholds,
+                    accuracy_inclusive=request.accuracy_inclusive,
+                )
+            else:
+                result, frame, _ = analyze_raw_file(
+                    path,
+                    rule,
+                    request.analysis_type,
+                    chip_name=request.chip_name,
+                    sample_rate=request.sample_rate,
+                    ref_column=request.ref_column,
+                    pred_column=request.pred_column,
+                    timestamp_column=request.timestamp_column,
+                    scene_override=request.scene,
+                )
             features = result["features"]
             features.update(result["metrics"])
             decision = diagnose(features, rule)
@@ -462,6 +492,8 @@ def _escalate(
                 output_path=output / "offline",
                 chip_name=chip,
                 ver=request.offline_version,
+                accuracy_thresholds=request.accuracy_thresholds,
+                accuracy_inclusive=request.accuracy_inclusive,
             ),
             context=context,
         )
@@ -469,7 +501,15 @@ def _escalate(
         for record in candidates:
             record.notes.append(f"离线 PSD 分析未完成: {exc}")
         return paths
-    psd_results = analyze_psd_directory(result.output_dir or output / "offline", rule)
+    if _custom_accuracy(request):
+        psd_results = analyze_psd_directory(
+            result.output_dir or output / "offline",
+            rule,
+            request.accuracy_thresholds,
+            request.accuracy_inclusive,
+        )
+    else:
+        psd_results = analyze_psd_directory(result.output_dir or output / "offline", rule)
     for record in candidates:
         matches = [
             value for key, value in psd_results.items() if Path(key).stem == Path(record.file).stem
@@ -486,6 +526,8 @@ def _generate_psd_plots(
     records: List[AnalysisRecord],
     output: Path,
     context: ExecutionContext,
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
 ) -> None:
     if not source.exists() or not any(source.rglob("*_result.vshb")):
         return
@@ -500,6 +542,10 @@ def _generate_psd_plots(
                 plot_type="psd",
                 psd_acc=acc_mode,
                 no_show=True,
+                accuracy_thresholds=(
+                    tuple(accuracy_thresholds) if accuracy_thresholds is not None else None
+                ),
+                accuracy_inclusive=accuracy_inclusive,
             ),
             context=context,
         )
@@ -600,9 +646,22 @@ def _generate_raw_plots(
 def _offline_records(
     request: AnalyzeRequest, source: Path, rule
 ) -> Tuple[List[AnalysisRecord], Set[str]]:
+    from health_tools.utils.accuracy import (
+        DEFAULT_ACCURACY_THRESHOLDS,
+        format_accuracy_threshold,
+    )
+
     if "hr_psd" not in rule.detectors:
         raise RequestValidationError("当前 analysis 规则未启用 hr_psd，不能应用心率 PSD 检测")
-    psd_results = analyze_psd_directory(source, rule)
+    if _custom_accuracy(request):
+        psd_results = analyze_psd_directory(
+            source,
+            rule,
+            request.accuracy_thresholds,
+            request.accuracy_inclusive,
+        )
+    else:
+        psd_results = analyze_psd_directory(source, rule)
     if not psd_results:
         raise RequestValidationError(f"结果目录未找到 _result.vshb: {source}")
     focused = _focus(list(psd_results), request.focus)
@@ -614,6 +673,14 @@ def _offline_records(
         features.setdefault("signal_flat", False)
         features.setdefault("scene", psd.get("scene", "unknown"))
         decision = diagnose(features, rule)
+        thresholds = request.accuracy_thresholds or DEFAULT_ACCURACY_THRESHOLDS
+        metric_names = [
+            "samples",
+            "mae",
+            "max_error",
+            "error_ratio",
+            *(f"within_{format_accuracy_threshold(value)}" for value in thresholds),
+        ]
         records.append(
             AnalysisRecord(
                 file=name,
@@ -622,18 +689,7 @@ def _offline_records(
                 scene=str(features.get("scene", "unknown")),
                 focused=name in focused,
                 features=features,
-                metrics={
-                    key: psd.get(key)
-                    for key in (
-                        "samples",
-                        "mae",
-                        "max_error",
-                        "error_ratio",
-                        "within_5",
-                        "within_10",
-                        "within_15",
-                    )
-                },
+                metrics={key: psd.get(key) for key in metric_names},
                 psd=psd,
                 cause=decision["cause"],
                 conclusion=decision["conclusion"],
@@ -653,6 +709,7 @@ def run_analyze(
 ) -> AnalyzeResult:
     """分析原始 CSV 或已有离线 PSD 结果，并生成结构化及人类可读报告。"""
     _validate(request)
+    request = _normalize_accuracy_request(request)
     ctx = _context(context)
     source = _require_path(request.input_path)
     output = Path(request.output_path)
@@ -673,7 +730,14 @@ def run_analyze(
     escalated: List[Path] = []
     if source.is_dir() and any(source.rglob("*_result.vshb")):
         records, _ = _offline_records(request, source, rule)
-        _generate_psd_plots(source, records, figures / "psd", ctx)
+        _generate_psd_plots(
+            source,
+            records,
+            figures / "psd",
+            ctx,
+            request.accuracy_thresholds,
+            request.accuracy_inclusive,
+        )
     else:
         records, root, raw_files, _, chip = _raw_records(request, source, rule, ctx)
         stage_notes, check_path, evaluate_path = _run_supporting_stages(
@@ -685,7 +749,14 @@ def run_analyze(
         _apply_check_results(records, check_path, rule)
         _apply_evaluate_results(records, evaluate_path, rule)
         escalated = _escalate(request, records, root, chip, rule, stages, ctx)
-        _generate_psd_plots(stages / "offline", records, figures / "psd", ctx)
+        _generate_psd_plots(
+            stages / "offline",
+            records,
+            figures / "psd",
+            ctx,
+            request.accuracy_thresholds,
+            request.accuracy_inclusive,
+        )
         _generate_raw_plots(request, records, chip, figures / "raw", rule, ctx)
     for index, record in enumerate(records):
         if (
@@ -694,12 +765,35 @@ def run_analyze(
             and (record.cause or {}).get("id") == "data_incomplete"
         ):
             write_evidence_figure(record, figures / f"{index:04d}_{_safe_name(record.file)}.png")
-    detail_paths = write_structured(records, output)
+    if _custom_accuracy(request):
+        detail_paths = write_structured(records, output, request.accuracy_thresholds)
+    else:
+        detail_paths = write_structured(records, output)
     reports: List[Path] = []
     if request.report in {"markdown", "all"}:
-        reports.append(write_markdown(records, output / "analysis_report.md"))
+        if _custom_accuracy(request):
+            reports.append(
+                write_markdown(
+                    records,
+                    output / "analysis_report.md",
+                    request.accuracy_thresholds,
+                    request.accuracy_inclusive,
+                )
+            )
+        else:
+            reports.append(write_markdown(records, output / "analysis_report.md"))
     if request.report in {"pptx", "all"}:
-        reports.append(write_ppt(records, output / "analysis_report.pptx"))
+        if _custom_accuracy(request):
+            reports.append(
+                write_ppt(
+                    records,
+                    output / "analysis_report.pptx",
+                    request.accuracy_thresholds,
+                    request.accuracy_inclusive,
+                )
+            )
+        else:
+            reports.append(write_ppt(records, output / "analysis_report.pptx"))
     items = tuple(
         ItemResult(
             ItemStatus.OK if record.conclusion == "未发现异常" else ItemStatus.WARN,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -84,21 +84,16 @@ def _error_segments(
     sample_rate: float,
     threshold: float,
     reference_mask: Optional[np.ndarray] = None,
+    time_axis: Optional[np.ndarray] = None,
 ) -> Tuple[List[dict], Dict[str, float]]:
-    valid = ref.notna() & pred.notna() & (ref > 0)
+    valid = np.isfinite(ref) & np.isfinite(pred) & (ref > 0)
     if reference_mask is not None:
         valid = valid & pd.Series(reference_mask, index=ref.index)
     error = (ref - pred).abs().where(valid)
     values = error.dropna().to_numpy(dtype=float)
     if len(values) == 0:
         return [], {
-            "samples": 0,
-            "mae": 0.0,
-            "max_error": 0.0,
             "error_ratio": 0.0,
-            "within_5": 0.0,
-            "within_10": 0.0,
-            "within_15": 0.0,
         }
     mask = error.fillna(0).to_numpy() > threshold
     segments: List[dict] = []
@@ -111,8 +106,16 @@ def _error_segments(
             if len(part) > 0:
                 segments.append(
                     {
-                        "start_s": start / sample_rate,
-                        "end_s": (index - 1) / sample_rate,
+                        "start_s": (
+                            float(time_axis[start])
+                            if time_axis is not None
+                            else start / sample_rate
+                        ),
+                        "end_s": (
+                            float(time_axis[index - 1])
+                            if time_axis is not None
+                            else (index - 1) / sample_rate
+                        ),
                         "samples": int(len(part)),
                         "mean_error": float(part.mean()),
                         "max_error": float(part.max()),
@@ -120,14 +123,46 @@ def _error_segments(
                 )
             start = None
     return segments, {
-        "samples": int(len(values)),
-        "mae": float(np.mean(values)),
-        "max_error": float(np.max(values)),
         "error_ratio": float(np.mean(values > threshold)),
-        "within_5": float(np.mean(values <= 5)),
-        "within_10": float(np.mean(values <= 10)),
-        "within_15": float(np.mean(values <= 15)),
     }
+
+
+def _accuracy_metrics(
+    ref: np.ndarray,
+    pred: np.ndarray,
+    thresholds: Optional[Sequence[float]],
+    inclusive: bool,
+) -> Dict[str, Any]:
+    from health_tools.utils.accuracy import (
+        DEFAULT_ACCURACY_THRESHOLDS,
+        calculate_accuracy,
+        format_accuracy_threshold,
+        normalize_accuracy_thresholds,
+        resolve_accuracy_methods,
+    )
+
+    resolved_thresholds = normalize_accuracy_thresholds(thresholds) or DEFAULT_ACCURACY_THRESHOLDS
+    methods = resolve_accuracy_methods(
+        ["mae", "within_5", "within_10", "within_15"], resolved_thresholds
+    )
+    metrics = calculate_accuracy(
+        pd.DataFrame({"ref": ref, "pred": pred}),
+        "ref",
+        "pred",
+        methods,
+        inclusive=inclusive,
+        trim_zero_padding=False,
+    )
+    if not metrics.get("samples"):
+        return {
+            "samples": 0,
+            "mae": 0.0,
+            "max_error": 0.0,
+            **{f"within_{format_accuracy_threshold(value)}": 0.0 for value in resolved_thresholds},
+        }
+    finite = np.isfinite(ref) & np.isfinite(pred)
+    metrics["max_error"] = round(float(np.max(np.abs(ref[finite] - pred[finite]))), 2)
+    return metrics
 
 
 def analyze_raw_file(
@@ -140,7 +175,11 @@ def analyze_raw_file(
     pred_column: Optional[str] = None,
     timestamp_column: Optional[str] = None,
     scene_override: str = "auto",
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
 ) -> Tuple[Dict[str, Any], pd.DataFrame, Optional[ChipRule]]:
+    from health_tools.utils.accuracy import prepare_accuracy_columns
+
     chip = chip_name or detect_chip(path)
     frame, chip_rule = _read(path, chip)
     columns = rule.columns
@@ -157,6 +196,16 @@ def analyze_raw_file(
     if not all(column in frame.columns for column in acc_columns):
         acc_columns = resolve_acc_columns(frame, chip_rule.acc_columns if chip_rule else None)
     threshold = float(rule.thresholds.get("error", 10 if analysis_type == "hr" else 3))
+    accuracy_columns = {}
+    if ref is not None:
+        accuracy_columns["ref"] = ref.to_numpy(dtype=float)
+    if pred is not None:
+        accuracy_columns["pred"] = pred.to_numpy(dtype=float)
+    prepared = prepare_accuracy_columns(accuracy_columns)
+    shared_ref = prepared.columns.get("ref", np.array([], dtype=float))
+    shared_pred = prepared.columns.get("pred", np.array([], dtype=float))
+    time_axis = np.arange(len(frame), dtype=float) / (rate or 1.0)
+    shared_time = time_axis[prepared.start : prepared.end]
     reference_features: Dict[str, Any] = {
         "reference_valid": False,
         "reference_issues": [],
@@ -166,16 +215,44 @@ def analyze_raw_file(
     reference_mask: Optional[np.ndarray] = None
     if ref is not None:
         reference_features, reference_mask = analyze_reference(
-            ref.to_numpy(), rule.thresholds, sample_rate=rate
+            shared_ref, rule.thresholds, sample_rate=rate
         )
         if analysis_type != "hr":
             reference_features["polar_review_required"] = False
             reference_features["polar_issues"] = []
-    segments, metrics = (
-        _error_segments(ref, pred, rate or 1.0, threshold, reference_mask)
-        if ref is not None and pred is not None
-        else ([], {})
-    )
+    ref_active = "ref" in prepared.active_columns
+    pred_active = "pred" in prepared.active_columns
+    if ref_active and pred_active and prepared.start < prepared.end:
+        shared_ref_series = pd.Series(shared_ref)
+        shared_pred_series = pd.Series(shared_pred)
+        segments, analysis_metrics = _error_segments(
+            shared_ref_series,
+            shared_pred_series,
+            rate or 1.0,
+            threshold,
+            reference_mask,
+            shared_time,
+        )
+        metrics = {
+            **_accuracy_metrics(
+                shared_ref,
+                shared_pred,
+                accuracy_thresholds,
+                accuracy_inclusive,
+            ),
+            **analysis_metrics,
+        }
+    else:
+        segments = []
+        metrics = {
+            **_accuracy_metrics(
+                np.array([], dtype=float),
+                np.array([], dtype=float),
+                accuracy_thresholds,
+                accuracy_inclusive,
+            ),
+            "error_ratio": 0.0,
+        }
     missing_ratio = float(frame.isna().mean().mean()) if not frame.empty else 1.0
     data_complete = not frame.empty and missing_ratio <= float(
         rule.thresholds.get("missing_ratio", 0.01)

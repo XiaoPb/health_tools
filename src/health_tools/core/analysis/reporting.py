@@ -6,7 +6,7 @@ import csv
 import json
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +17,28 @@ plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial Unicode M
 plt.rcParams["axes.unicode_minus"] = False
 
 
-def _accuracy_rows(records: List[AnalysisRecord]) -> List[Dict[str, Any]]:
+def _accuracy_thresholds(
+    thresholds: Optional[Sequence[float]],
+) -> Tuple[float, ...]:
+    from health_tools.utils.accuracy import (
+        DEFAULT_ACCURACY_THRESHOLDS,
+        normalize_accuracy_thresholds,
+    )
+
+    return normalize_accuracy_thresholds(thresholds) or DEFAULT_ACCURACY_THRESHOLDS
+
+
+def _accuracy_keys(thresholds: Optional[Sequence[float]]) -> List[str]:
+    from health_tools.utils.accuracy import format_accuracy_threshold
+
+    return [
+        f"within_{format_accuracy_threshold(value)}" for value in _accuracy_thresholds(thresholds)
+    ]
+
+
+def _accuracy_rows(
+    records: List[AnalysisRecord], accuracy_thresholds: Optional[Sequence[float]] = None
+) -> List[Dict[str, Any]]:
     groups: Dict[str, List[AnalysisRecord]] = {"整体": records}
     for record in records:
         groups.setdefault(record.scene, []).append(record)
@@ -25,7 +46,9 @@ def _accuracy_rows(records: List[AnalysisRecord]) -> List[Dict[str, Any]]:
         "online": "Online vs Polar",
         "offline": "Offline vs Polar",
         "comp": "Comp vs Polar",
+        "online_vs_offline": "Online vs Offline",
     }
+    accuracy_keys = _accuracy_keys(accuracy_thresholds)
     rows: List[Dict[str, Any]] = []
     for name, items in groups.items():
         comparison_items: Dict[str, List[Dict[str, Any]]] = {}
@@ -40,6 +63,8 @@ def _accuracy_rows(records: List[AnalysisRecord]) -> List[Dict[str, Any]]:
         names = ["online", "offline"]
         if comparison_items.get("comp"):
             names.append("comp")
+        if comparison_items.get("online_vs_offline"):
+            names.append("online_vs_offline")
         for comparison in names:
             metrics_list = comparison_items.get(comparison, [])
             samples = sum(int(metrics.get("samples") or 0) for metrics in metrics_list)
@@ -51,12 +76,10 @@ def _accuracy_rows(records: List[AnalysisRecord]) -> List[Dict[str, Any]]:
                 "available": samples > 0,
                 "mae": None,
                 "max_error": None,
-                "within_5": None,
-                "within_10": None,
-                "within_15": None,
+                **{key: None for key in accuracy_keys},
             }
             if samples:
-                for metric in ("mae", "within_5", "within_10", "within_15"):
+                for metric in ("mae", *accuracy_keys):
                     row[metric] = (
                         sum(
                             float(values.get(metric) or 0) * int(values.get("samples") or 0)
@@ -129,8 +152,13 @@ def write_evidence_figure(record: AnalysisRecord, output: Path):
     return output
 
 
-def write_structured(records: Iterable[AnalysisRecord], output_dir: Path) -> List[Path]:
+def write_structured(
+    records: Iterable[AnalysisRecord],
+    output_dir: Path,
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+) -> List[Path]:
     records = list(records)
+    accuracy_keys = _accuracy_keys(accuracy_thresholds)
     output_dir.mkdir(parents=True, exist_ok=True)
     summary = output_dir / "analysis_summary.json"
     summary.write_text(
@@ -154,9 +182,7 @@ def write_structured(records: Iterable[AnalysisRecord], output_dir: Path) -> Lis
                 "mae",
                 "max_error",
                 "error_ratio",
-                "within_5",
-                "within_10",
-                "within_15",
+                *accuracy_keys,
             ],
         )
         writer.writeheader()
@@ -176,9 +202,7 @@ def write_structured(records: Iterable[AnalysisRecord], output_dir: Path) -> Lis
                     "mae": record.metrics.get("mae", ""),
                     "max_error": record.metrics.get("max_error", ""),
                     "error_ratio": record.metrics.get("error_ratio", ""),
-                    "within_5": record.metrics.get("within_5", ""),
-                    "within_10": record.metrics.get("within_10", ""),
-                    "within_15": record.metrics.get("within_15", ""),
+                    **{key: record.metrics.get(key, "") for key in accuracy_keys},
                 }
             )
     segments = output_dir / "segment_diagnosis.csv"
@@ -194,8 +218,17 @@ def write_structured(records: Iterable[AnalysisRecord], output_dir: Path) -> Lis
     return [summary, detail, segments]
 
 
-def write_markdown(records: Iterable[AnalysisRecord], output: Path) -> Path:
+def write_markdown(
+    records: Iterable[AnalysisRecord],
+    output: Path,
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
+) -> Path:
+    from health_tools.utils.accuracy import format_accuracy_threshold
+
     records = list(records)
+    thresholds = _accuracy_thresholds(accuracy_thresholds)
+    accuracy_keys = _accuracy_keys(thresholds)
     output.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# PPG 数据分析报告", "", f"文件数：{len(records)}", ""]
     counts: Dict[str, int] = {}
@@ -208,24 +241,28 @@ def write_markdown(records: Iterable[AnalysisRecord], output: Path) -> Path:
         [
             "## 整体准确度对比",
             "",
-            "| 对比对象 | 场景 | 文件数 | 样本数 | MAE | 最大误差 | ±5 bpm | ±10 bpm | ±15 bpm |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            "绝对误差"
+            + ("不超过" if accuracy_inclusive else "小于")
+            + "对应阈值的有效样本占比如下。",
+            "",
+            "| 对比对象 | 场景 | 文件数 | 样本数 | MAE | 最大误差 | "
+            + " | ".join(f"±{format_accuracy_threshold(value)} bpm" for value in thresholds)
+            + " |",
+            "|---|---|---:|---:|---:|---:|" + "---:|" * len(thresholds),
         ]
     )
-    for row in _accuracy_rows(records):
+    for row in _accuracy_rows(records, thresholds):
         if row["available"]:
             values = (
                 f"{row['mae']:.2f}",
                 f"{row['max_error']:.2f}",
-                f"{row['within_5']:.1%}",
-                f"{row['within_10']:.1%}",
-                f"{row['within_15']:.1%}",
+                *(f"{row[key]:.1f}%" for key in accuracy_keys),
             )
             files = str(row["files"])
             samples = str(row["samples"])
         else:
             files, samples = "0", "-"
-            values = ("未执行", "-", "-", "-", "-")
+            values = ("未执行", "-", *("-" for _ in accuracy_keys))
         lines.append(
             f"| {row['comparison']} | {row['scene']} | {files} | {samples} | "
             + " | ".join(values)
@@ -445,34 +482,48 @@ def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
     return "\n".join(body_lines)
 
 
-def _populate_accuracy(slide, records: List[AnalysisRecord]) -> None:
+def _populate_accuracy(
+    slide,
+    records: List[AnalysisRecord],
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
+) -> None:
     from pptx.dml.color import RGBColor
     from pptx.enum.shapes import PP_PLACEHOLDER
     from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
     from pptx.util import Inches, Pt
+
+    from health_tools.utils.accuracy import format_accuracy_threshold
 
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
     body = _placeholder(slide, PP_PLACEHOLDER.BODY)
     if title:
         _set_text(title, "整体准确度对比")
+    thresholds = _accuracy_thresholds(accuracy_thresholds)
+    accuracy_keys = _accuracy_keys(thresholds)
+    threshold_labels = " / ".join(f"±{format_accuracy_threshold(value)}" for value in thresholds)
     if body:
-        _set_text(body, "±5 / ±10 / ±15 bpm 为绝对误差不超过对应阈值的有效样本占比。")
+        relation = "不超过" if accuracy_inclusive else "小于"
+        _set_text(body, f"{threshold_labels} bpm 为绝对误差{relation}对应阈值的有效样本占比。")
     if not content:
         return
-    rows = _accuracy_rows(records)
+    rows = _accuracy_rows(records, thresholds)
     left, top, width = content.left, content.top, content.width
     content._element.getparent().remove(content._element)
     row_height = Inches(0.46)
     table = slide.shapes.add_table(
         len(rows) + 1,
-        9,
+        6 + len(thresholds),
         left,
         top,
         width,
         row_height * (len(rows) + 1),
     ).table
-    column_ratios = (0.20, 0.11, 0.08, 0.10, 0.10, 0.11, 0.10, 0.10, 0.10)
+    fixed_ratios = (0.20, 0.11, 0.08, 0.10, 0.10, 0.11)
+    remaining = max(1.0 - sum(fixed_ratios), 0.0)
+    threshold_ratio = remaining / len(thresholds)
+    column_ratios = (*fixed_ratios, *(threshold_ratio for _ in thresholds))
     for column, ratio in zip(table.columns, column_ratios):
         column.width = int(width * ratio)
     for row in table.rows:
@@ -484,9 +535,7 @@ def _populate_accuracy(slide, records: List[AnalysisRecord]) -> None:
         "样本数",
         "MAE",
         "最大误差",
-        "±5 bpm",
-        "±10 bpm",
-        "±15 bpm",
+        *(f"±{format_accuracy_threshold(value)} bpm" for value in thresholds),
     ]
     for column, header in enumerate(headers):
         cell = table.cell(0, column)
@@ -513,12 +562,18 @@ def _populate_accuracy(slide, records: List[AnalysisRecord]) -> None:
                 str(row["samples"]),
                 f"{row['mae']:.2f}",
                 f"{row['max_error']:.2f}",
-                f"{row['within_5']:.1%}",
-                f"{row['within_10']:.1%}",
-                f"{row['within_15']:.1%}",
+                *(f"{row[key]:.1f}%" for key in accuracy_keys),
             ]
         else:
-            values = [row["comparison"], row["scene"], "0", "-", "未执行", "-", "-", "-", "-"]
+            values = [
+                row["comparison"],
+                row["scene"],
+                "0",
+                "-",
+                "未执行",
+                "-",
+                *("-" for _ in accuracy_keys),
+            ]
         for column, value in enumerate(values):
             cell = table.cell(row_index, column)
             cell.text = value
@@ -537,7 +592,12 @@ def _populate_accuracy(slide, records: List[AnalysisRecord]) -> None:
                     run.font.size = Pt(10.5)
 
 
-def write_ppt(records: Iterable[AnalysisRecord], output: Path) -> Path:
+def write_ppt(
+    records: Iterable[AnalysisRecord],
+    output: Path,
+    accuracy_thresholds: Optional[Sequence[float]] = None,
+    accuracy_inclusive: bool = False,
+) -> Path:
     try:
         from pptx import Presentation
         from pptx.enum.shapes import PP_PLACEHOLDER
@@ -563,7 +623,12 @@ def write_ppt(records: Iterable[AnalysisRecord], output: Path) -> Path:
     summary_text = "\n".join(f"{name}：{count} 个文件" for name, count in counts.items())
     cause_summary = _populate_summary(content, records)
     accuracy_slide = _add_slide_before_ending(prs, prs.slide_layouts[5])
-    _populate_accuracy(accuracy_slide, records)
+    _populate_accuracy(
+        accuracy_slide,
+        records,
+        accuracy_thresholds,
+        accuracy_inclusive,
+    )
     detail_records = [
         record
         for record in records
