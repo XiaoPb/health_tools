@@ -141,11 +141,20 @@ def _accuracy_features(
         for name, reference_name, prediction_name in comparison_columns
     }
     comparisons = {name: metrics for name, metrics in comparisons.items() if metrics}
-    primary_name = "offline" if "offline" in comparisons else "online_vs_offline"
+    primary_name = next(
+        (
+            name
+            for name in ("offline", "online", "comp", "online_vs_offline")
+            if int(comparisons.get(name, {}).get("samples") or 0) > 0
+        ),
+        "",
+    )
     primary = comparisons.get(primary_name, {})
     if primary:
-        reference_name = "polar" if primary_name == "offline" else "offline"
-        prediction_name = "offline" if primary_name == "offline" else "online"
+        if primary_name == "online_vs_offline":
+            reference_name, prediction_name = "offline", "online"
+        else:
+            reference_name, prediction_name = "polar", primary_name
         finite = np.isfinite(columns[reference_name]) & np.isfinite(columns[prediction_name])
         errors = np.abs(columns[reference_name][finite] - columns[prediction_name][finite])
     else:

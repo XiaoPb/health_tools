@@ -285,6 +285,49 @@ def test_accuracy_report_uses_dynamic_thresholds_and_per_comparison_samples(tmp_
     assert "Online vs Offline" in report
 
 
+def test_accuracy_report_files_exclude_zero_sample_comparisons():
+    records = [
+        AnalysisRecord(
+            file="empty.csv",
+            source="empty.csv",
+            analysis_type="hr",
+            metrics={
+                "comparisons": {
+                    "online": {
+                        "samples": 0,
+                        "mae": 0.0,
+                        "max_error": 0.0,
+                        "within_5": 0.0,
+                    }
+                }
+            },
+        ),
+        AnalysisRecord(
+            file="valid.csv",
+            source="valid.csv",
+            analysis_type="hr",
+            metrics={
+                "comparisons": {
+                    "online": {
+                        "samples": 2,
+                        "mae": 1.0,
+                        "max_error": 2.0,
+                        "within_5": 100.0,
+                    }
+                }
+            },
+        ),
+    ]
+
+    rows = _accuracy_rows(records)
+    overall_online = next(
+        row for row in rows if row["scene"] == "整体" and row["comparison"] == "Online vs Polar"
+    )
+
+    assert overall_online["files"] == 1
+    assert overall_online["samples"] == 2
+
+
 @pytest.mark.parametrize(
     ("status", "expected_conclusion"),
     [("FAIL", "原始数据问题"), ("WARNING", "未发现异常")],
@@ -943,6 +986,24 @@ def test_vshb_accuracy_enables_comp_and_falls_back_without_polar(tmp_path: Path)
     assert fallback["online_vs_offline"]["mae"] == 35.0
 
 
+def test_vshb_accuracy_uses_online_as_primary_when_offline_is_disabled(tmp_path: Path):
+    source = tmp_path / "result"
+    source.mkdir()
+    (source / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n" "1,100,0,0,130\n" "2,100,0,0,130\n",
+        encoding="utf-8",
+    )
+
+    sample = analyze_psd_directory(source, RuleLoader.load_analysis_rule("analysis_hr.yaml"))[
+        "sample.csv"
+    ]
+
+    assert set(sample["comparisons"]) == {"online"}
+    assert sample["samples"] == 2
+    assert sample["mae"] == 30.0
+    assert sample["algorithm_abnormal"] is True
+
+
 def test_analyze_propagates_dynamic_accuracy_to_psd_plot_and_report(monkeypatch, tmp_path: Path):
     source = tmp_path / "result"
     source.mkdir()
@@ -1097,6 +1158,54 @@ def test_ppt_report_uses_dynamic_accuracy_columns(tmp_path: Path):
     assert "±7.5 bpm" in table_text
     assert "±5 bpm" not in table_text
     assert "50.0%" in table_text
+
+
+def test_ppt_accuracy_tables_paginate_thresholds_and_rows_with_readable_geometry(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    thresholds = tuple(float(value) for value in range(1, 9))
+    records = [
+        AnalysisRecord(
+            file=f"sample_{index}.csv",
+            source=f"sample_{index}.csv",
+            analysis_type="hr",
+            scene=f"scene_{index}",
+            conclusion="未发现异常",
+            metrics={
+                "samples": 2,
+                "mae": 1.0,
+                "max_error": 2.0,
+                **{f"within_{value}": 100.0 for value in range(1, 9)},
+            },
+        )
+        for index in range(10)
+    ]
+
+    output = write_ppt(records, tmp_path / "report.pptx", thresholds)
+    deck = Presentation(str(output))
+    accuracy_slides = [
+        slide
+        for slide in deck.slides
+        if any(getattr(shape, "text", "").startswith("整体准确度对比") for shape in slide.shapes)
+    ]
+
+    assert len(accuracy_slides) > 1
+    table_text: list[str] = []
+    for slide in accuracy_slides:
+        shapes = [shape for shape in slide.shapes if shape.has_table]
+        assert len(shapes) == 1
+        shape = shapes[0]
+        table = shape.table
+        assert len(table.columns) <= 10
+        assert len(table.rows) <= 7
+        assert min(column.width for column in table.columns) >= Inches(0.8)
+        assert shape.left + shape.width <= deck.slide_width
+        assert shape.top + shape.height <= deck.slide_height
+        table_text.extend(cell.text for row in table.rows for cell in row.cells)
+    assert {f"±{value} bpm" for value in range(1, 9)}.issubset(table_text)
+    assert {f"scene_{index}" for index in range(10)}.issubset(table_text)
 
 
 def test_ppt_summary_table_is_compact_and_centered(tmp_path: Path):

@@ -56,9 +56,9 @@ def _accuracy_rows(
             comparisons = item.metrics.get("comparisons")
             if isinstance(comparisons, dict):
                 for comparison, metrics in comparisons.items():
-                    if isinstance(metrics, dict) and metrics:
+                    if isinstance(metrics, dict) and int(metrics.get("samples") or 0) > 0:
                         comparison_items.setdefault(str(comparison), []).append(metrics)
-            elif item.metrics.get("samples") is not None:
+            elif int(item.metrics.get("samples") or 0) > 0:
                 comparison_items.setdefault("online", []).append(item.metrics)
         names = ["online", "offline"]
         if comparison_items.get("comp"):
@@ -484,9 +484,11 @@ def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
 
 def _populate_accuracy(
     slide,
-    records: List[AnalysisRecord],
-    accuracy_thresholds: Optional[Sequence[float]] = None,
+    rows: List[Dict[str, Any]],
+    thresholds: Sequence[float],
     accuracy_inclusive: bool = False,
+    page_number: int = 1,
+    page_count: int = 1,
 ) -> None:
     from pptx.dml.color import RGBColor
     from pptx.enum.shapes import PP_PLACEHOLDER
@@ -499,8 +501,11 @@ def _populate_accuracy(
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
     body = _placeholder(slide, PP_PLACEHOLDER.BODY)
     if title:
-        _set_text(title, "整体准确度对比")
-    thresholds = _accuracy_thresholds(accuracy_thresholds)
+        title_text = "整体准确度对比"
+        if page_count > 1:
+            title_text += f"（{page_number}/{page_count}）"
+        _set_text(title, title_text)
+    thresholds = tuple(thresholds)
     accuracy_keys = _accuracy_keys(thresholds)
     threshold_labels = " / ".join(f"±{format_accuracy_threshold(value)}" for value in thresholds)
     if body:
@@ -508,7 +513,6 @@ def _populate_accuracy(
         _set_text(body, f"{threshold_labels} bpm 为绝对误差{relation}对应阈值的有效样本占比。")
     if not content:
         return
-    rows = _accuracy_rows(records, thresholds)
     left, top, width = content.left, content.top, content.width
     content._element.getparent().remove(content._element)
     row_height = Inches(0.46)
@@ -622,13 +626,37 @@ def write_ppt(
         counts[record.conclusion] = counts.get(record.conclusion, 0) + 1
     summary_text = "\n".join(f"{name}：{count} 个文件" for name, count in counts.items())
     cause_summary = _populate_summary(content, records)
+    from pptx.util import Inches
+
+    thresholds = _accuracy_thresholds(accuracy_thresholds)
+    rows = _accuracy_rows(records, thresholds)
+    threshold_pages = [thresholds[index : index + 3] for index in range(0, len(thresholds), 3)]
     accuracy_slide = _add_slide_before_ending(prs, prs.slide_layouts[5])
-    _populate_accuracy(
-        accuracy_slide,
-        records,
-        accuracy_thresholds,
-        accuracy_inclusive,
+    accuracy_content = _placeholder(accuracy_slide, PP_PLACEHOLDER.OBJECT)
+    row_height = Inches(0.46)
+    rows_per_page = (
+        max(int(accuracy_content.height // row_height) - 1, 1) if accuracy_content else 1
     )
+    row_pages = [
+        rows[index : index + rows_per_page] for index in range(0, len(rows), rows_per_page)
+    ]
+    pages = [
+        (row_page, threshold_page) for row_page in row_pages for threshold_page in threshold_pages
+    ]
+    for page_index, (page_rows, page_thresholds) in enumerate(pages):
+        slide = (
+            accuracy_slide
+            if page_index == 0
+            else _add_slide_before_ending(prs, prs.slide_layouts[5])
+        )
+        _populate_accuracy(
+            slide,
+            page_rows,
+            page_thresholds,
+            accuracy_inclusive,
+            page_index + 1,
+            len(pages),
+        )
     detail_records = [
         record
         for record in records
