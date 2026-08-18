@@ -2,9 +2,12 @@
 
 from pathlib import Path
 
+import pandas as pd
+
 from health_tools.api import ClassifyRequest, ExecutionContext, run_classify
 from health_tools.core.classifier import DataClassifier
 from health_tools.models.rules import ClassifyRule, DataColumn
+from health_tools.utils.accuracy import AccuracyCalculator
 
 
 def _write_csv(path: Path, rows: int = 200) -> Path:
@@ -12,6 +15,72 @@ def _write_csv(path: Path, rows: int = 200) -> Path:
     lines = ["time,value\n"] + [f"{i},{i}\n" for i in range(rows)]
     path.write_text("".join(lines), encoding="utf-8")
     return path
+
+
+def test_classify_accuracy_calculator_keeps_custom_thresholds_and_override():
+    methods = ["std", "mae", "within_1", "within_2", "within_3", "within_5"]
+    custom = [
+        {"name": "within_0.5", "value": 0.5},
+        {"name": "within_10_percent", "percent": 10},
+    ]
+
+    calculator = AccuracyCalculator(
+        "ref",
+        "pred",
+        methods=["std", "mae", "within_5", "within_10", "within_15"],
+        thresholds=custom,
+        inclusive=False,
+    )
+
+    assert methods != calculator.methods
+    assert calculator.methods == ["std", "mae", "within_5", "within_10", "within_15"]
+    assert calculator.thresholds == custom
+    assert calculator.inclusive is False
+
+
+def test_run_classify_applies_accuracy_override_and_keeps_custom_thresholds(tmp_path: Path):
+    source = tmp_path / "input"
+    source.mkdir()
+    (source / "sample.csv").write_text(
+        "ref,pred\n80,0\n81,81\n82,87\n0,0\n84,89\n85,85\n86,0\n",
+        encoding="utf-8",
+    )
+    rule_path = tmp_path / "classify.yaml"
+    rule_path.write_text(
+        """version: '1.0'
+accuracy:
+  ref_column: ref
+  pred_column: pred
+  methods: [mae, within_1, within_2]
+  thresholds:
+    - {name: within_0.5, value: 0.5}
+    - {name: within_10_percent, percent: 10}
+structure: {placeholder: ''}
+rules:
+  - target: group
+default: unclassified
+""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    run_classify(
+        ClassifyRequest(
+            source,
+            output,
+            rule_file=str(rule_path),
+            enable_accuracy=True,
+            accuracy_thresholds=(5.0, 10.0),
+        )
+    )
+
+    report = pd.read_csv(output / "accuracy_summary.csv")
+    assert {"within_5", "within_10", "within_0.5", "within_10_percent"}.issubset(report.columns)
+    assert "within_1" not in report.columns
+    assert "within_2" not in report.columns
+    total = report.loc[report["category"] == "total"].iloc[0]
+    assert total["samples"] == 5
+    assert total["within_5"] == 60.0
 
 
 def test_path_regex_named_groups_extract_variables(tmp_path: Path):

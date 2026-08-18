@@ -1,13 +1,17 @@
 """批量准确度评估模块"""
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import EvaluateRule
-from health_tools.utils.accuracy import calculate_accuracy
+from health_tools.utils.accuracy import (
+    calculate_accuracy,
+    prepare_accuracy_columns,
+    resolve_accuracy_methods,
+)
 from health_tools.utils.csv_handler import CSVHandler
 from health_tools.utils.errors import REASON_EMPTY_FILE, REASON_MISSING_COLUMN
 from health_tools.utils.progress import progress_track
@@ -84,11 +88,15 @@ class BatchEvaluator:
         chip_rule=None,
         ref_column_col: Optional[int] = None,
         pred_column_col: Optional[int] = None,
+        accuracy_thresholds: Optional[Tuple[float, ...]] = None,
+        accuracy_inclusive: bool = False,
     ):
         self.rule = rule
         self.chip_rule = chip_rule
         self.ref_column_col = ref_column_col
         self.pred_column_col = pred_column_col
+        self.accuracy_thresholds = accuracy_thresholds
+        self.accuracy_inclusive = accuracy_inclusive
         self.csv_handler = CSVHandler(chip_rule)
         self.detector = PolarAnomalyDetector(
             diff_threshold=rule.diff_threshold,
@@ -179,17 +187,44 @@ class BatchEvaluator:
         anomaly_mask = self.detector.detect(df[ref_col])
         anomaly_info = self.detector.summarize(anomaly_mask)
 
-        methods = self.rule.methods or ["mae", "rmse", "std"]
+        methods = resolve_accuracy_methods(self.rule.methods, self.accuracy_thresholds)
         thresholds = self.rule.thresholds or []
 
-        all_metrics = calculate_accuracy(df, ref_col, pred_col, methods, thresholds)
-
-        clean_df = df[~anomaly_mask]
-        if len(clean_df) > 0:
-            filtered_metrics = calculate_accuracy(clean_df, ref_col, pred_col, methods, thresholds)
+        prepared = prepare_accuracy_columns(
+            {
+                "ref": pd.to_numeric(df[ref_col], errors="coerce").to_numpy(dtype=float),
+                "pred": pd.to_numeric(df[pred_col], errors="coerce").to_numpy(dtype=float),
+            }
+        )
+        if set(prepared.active_columns) == {"ref", "pred"} and prepared.start < prepared.end:
+            accuracy_df = df.iloc[prepared.start : prepared.end]
+            accuracy_anomaly = anomaly_mask.iloc[prepared.start : prepared.end]
         else:
-            filtered_metrics = {m: 0.0 for m in methods}
-            filtered_metrics["samples"] = 0
+            accuracy_df = df.iloc[:0]
+            accuracy_anomaly = anomaly_mask.iloc[:0]
+        all_metrics = calculate_accuracy(
+            accuracy_df,
+            ref_col,
+            pred_col,
+            methods,
+            thresholds,
+            inclusive=self.accuracy_inclusive,
+            trim_zero_padding=False,
+        )
+
+        clean_df = accuracy_df[~accuracy_anomaly]
+        if len(clean_df) > 0:
+            filtered_metrics = calculate_accuracy(
+                clean_df,
+                ref_col,
+                pred_col,
+                methods,
+                thresholds,
+                inclusive=self.accuracy_inclusive,
+                trim_zero_padding=False,
+            )
+        else:
+            filtered_metrics = {"samples": 0}
 
         result = {
             "file": file_path.name,

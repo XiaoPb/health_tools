@@ -578,8 +578,13 @@ def run_evaluate(
     """批量评估心率或血氧结果。"""
     from health_tools.core.evaluator import BatchEvaluator
     from health_tools.rules.loader import RuleLoader
+    from health_tools.utils.accuracy import normalize_accuracy_thresholds
 
     ctx = _context(context)
+    try:
+        accuracy_thresholds = normalize_accuracy_thresholds(request.accuracy_thresholds)
+    except ValueError as exc:
+        raise RequestValidationError(str(exc)) from exc
     source = _require_path(request.input_path, "输入目录")
     if request.eval_type not in {"hr", "spo2"}:
         raise RequestValidationError("eval_type 仅支持 hr 或 spo2")
@@ -601,6 +606,8 @@ def run_evaluate(
         chip_rule,
         ref_column_col=request.ref_column_col,
         pred_column_col=request.pred_column_col,
+        accuracy_thresholds=accuracy_thresholds,
+        accuracy_inclusive=request.accuracy_inclusive,
     )
     ctx.check_cancelled("evaluate")
     ctx.emit(ProgressEvent("evaluate", "evaluate", 0, 1, "评估目录", str(source)))

@@ -462,13 +462,21 @@ def run_classify(
     """按分类规则复制、移动或链接 CSV。"""
     from health_tools.core.classifier import DataClassifier
     from health_tools.rules.loader import RuleLoader
-    from health_tools.utils.accuracy import AccuracyCalculator
+    from health_tools.utils.accuracy import (
+        AccuracyCalculator,
+        normalize_accuracy_thresholds,
+        resolve_accuracy_methods,
+    )
     from health_tools.utils.csv_handler import CSVHandler
 
     if request.mode not in {"copy", "move", "symlink"}:
         raise RequestValidationError("mode 仅支持 copy、move 或 symlink")
     if request.conflict not in {"skip", "rename", "overwrite"}:
         raise RequestValidationError("conflict 仅支持 skip、rename 或 overwrite")
+    try:
+        accuracy_thresholds = normalize_accuracy_thresholds(request.accuracy_thresholds)
+    except ValueError as exc:
+        raise RequestValidationError(str(exc)) from exc
     ctx = _context(context)
     source = _require_path(request.input_path)
     rule = _load_rule(
@@ -507,10 +515,9 @@ def run_classify(
             accuracy = AccuracyCalculator(
                 ref_column=ref,
                 pred_column=pred,
-                methods=config.get(
-                    "methods", ["std", "rmse", "mae", "within_1", "within_2", "within_3"]
-                ),
+                methods=resolve_accuracy_methods(config.get("methods"), accuracy_thresholds),
                 thresholds=config.get("thresholds", []),
+                inclusive=request.accuracy_inclusive,
             )
     handler = CSVHandler(chip_rule)
     items: List[ItemResult] = []
