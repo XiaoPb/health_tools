@@ -80,7 +80,14 @@ def _classify_default(converter) -> str:
 
 
 def _convert_one(
-    source, destination, converter, input_config, output_config, input_root=None
+    source,
+    destination,
+    converter,
+    input_config,
+    output_config,
+    *,
+    output_root,
+    input_root=None,
 ) -> ItemResult:
     def _output_name(index=None) -> str:
         """输出文件名：classify 配置 rename 时用模板（先分类再取字段），否则沿用 destination。"""
@@ -123,7 +130,7 @@ def _convert_one(
                         classifier.classify_frame(chunk, source, input_root=input_root)
                         or default_category
                     )
-                    chunk_path = destination.parent / category / _output_name(index)
+                    chunk_path = output_root / category / _output_name(index)
                     categories.add(category)
                 else:
                     chunk_path = destination.parent / _output_name(index)
@@ -150,7 +157,7 @@ def _convert_one(
             category = (
                 classifier.classify_frame(result, source, input_root=input_root) or default_category
             )
-        write_path = destination.parent / category / _output_name() if category else destination
+        write_path = output_root / category / _output_name() if category else destination
         _write_convert_csv(result, write_path, output_config)
         return ItemResult(
             ItemStatus.OK,
@@ -291,7 +298,14 @@ def run_convert(
 
     if source.is_file():
         for _, path in _events("convert", "files", [source], ctx, items):
-            item = _convert_one(path, destination, converter, input_config, output_config)
+            item = _convert_one(
+                path,
+                destination,
+                converter,
+                input_config,
+                output_config,
+                output_root=destination.parent,
+            )
             items.append(item)
             if item.status == ItemStatus.OK:
                 artifacts.extend(Path(path) for path in item.output.split(";"))
@@ -412,6 +426,7 @@ def run_convert(
                     converter,
                     input_config,
                     output_config,
+                    output_root=destination,
                     input_root=source,
                 )
                 items.append(item)

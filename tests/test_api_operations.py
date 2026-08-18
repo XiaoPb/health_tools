@@ -422,7 +422,7 @@ def test_run_convert_single_file_with_classify_writes_category_dir(tmp_path: Pat
     assert (tmp_path / "low" / "out.csv").exists()
 
 
-def test_run_convert_directory_with_classify_preserves_subdirs(tmp_path: Path):
+def test_run_convert_directory_with_classify_discards_relative_subdirs(tmp_path: Path):
     input_dir = tmp_path / "input"
     (input_dir / "sub").mkdir(parents=True)
     (input_dir / "sub" / "a.csv").write_text("frame,value\n0,5\n1,6\n", encoding="utf-8")
@@ -434,7 +434,9 @@ def test_run_convert_directory_with_classify_preserves_subdirs(tmp_path: Path):
     result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule)))
 
     assert result.ok_count == 1
-    assert (output / "sub" / "high" / "a.csv").exists()
+    assert result.artifacts == (output / "high" / "a.csv",)
+    assert (output / "high" / "a.csv").exists()
+    assert not (output / "sub" / "high" / "a.csv").exists()
 
 
 def test_run_convert_merge_with_classify_writes_category_dir(tmp_path: Path):
@@ -544,6 +546,28 @@ def test_run_convert_classify_no_match_uses_default(tmp_path: Path):
     assert (tmp_path / "unclassified" / "out.csv").exists()
 
 
+def test_run_convert_directory_classify_no_match_discards_relative_subdirs(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    (input_dir / "sub").mkdir(parents=True)
+    (input_dir / "sub" / "a.csv").write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        _CLASSIFY_RULE.replace("'val_median >= 3'", "'val_median >= 999'").replace(
+            "'val_median < 3'", "'val_median < 0'"
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule)))
+
+    assert result.ok_count == 1
+    assert result.artifacts == (output / "unclassified" / "a.csv",)
+    assert (output / "unclassified" / "a.csv").exists()
+    assert not (output / "sub" / "unclassified" / "a.csv").exists()
+
+
 def test_run_convert_split_with_classify_classifies_each_chunk(tmp_path: Path):
     source = tmp_path / "source.csv"
     source.write_text("frame,value\n0,1\n1,2\n2,3\n3,4\n", encoding="utf-8")
@@ -566,6 +590,31 @@ def test_run_convert_split_with_classify_classifies_each_chunk(tmp_path: Path):
     assert len(result.artifacts) == 2
     assert (tmp_path / "low" / "out_1.csv").exists()
     assert (tmp_path / "high" / "out_2.csv").exists()
+
+
+def test_run_convert_directory_split_with_classify_discards_relative_subdirs(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    (input_dir / "sub").mkdir(parents=True)
+    (input_dir / "sub" / "a.csv").write_text("frame,value\n0,1\n1,2\n2,3\n3,4\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "split_classify.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        _CLASSIFY_RULE.replace(
+            "classify:",
+            "split:\n  by_size: 2\nclassify:",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule)))
+
+    assert result.ok_count == 1
+    assert result.artifacts == (output / "low" / "a_1.csv", output / "high" / "a_2.csv")
+    assert (output / "low" / "a_1.csv").exists()
+    assert (output / "high" / "a_2.csv").exists()
+    assert not (output / "sub").exists()
 
 
 def test_run_convert_classify_filename_reclassification(tmp_path: Path):
@@ -628,8 +677,9 @@ def test_run_convert_classify_rename_output_filename(tmp_path: Path):
 
 def test_run_convert_directory_classify_path_regex(tmp_path: Path):
     input_dir = tmp_path / "input"
-    (input_dir / "sit").mkdir(parents=True)
-    (input_dir / "sit" / "a.csv").write_text("value\n1\n2\n", encoding="utf-8")
+    source_dir = input_dir / "Abigail" / "Abigail_操场跑_左手"
+    source_dir.mkdir(parents=True)
+    (source_dir / "data.csv").write_text("value\n1\n2\n", encoding="utf-8")
     rule = tmp_path / "convert" / "classify_path.yaml"
     rule.parent.mkdir()
     rule.write_text(
@@ -637,11 +687,12 @@ def test_run_convert_directory_classify_path_regex(tmp_path: Path):
         "column_mapping:\n  value: VALUE\n"
         "classify:\n"
         "  path:\n"
-        "    regex: '(?P<scene>\\w+)/[^/]+\\.csv'\n"
+        "    regex: '(?P<name>[^/]+)/(?P=name)_(?P<scene>[^_]+)_(?P<side>[^/]+)/[^/]+\\.csv'\n"
         "  structure:\n"
-        "    sit: ''\n"
+        "    操场跑: ''\n"
         "  rules:\n"
         "    - target: '{scene}'\n"
+        "  rename: '{name}_{scene}_{side}_{filename}'\n"
         "  default: unclassified\n",
         encoding="utf-8",
     )
@@ -650,7 +701,9 @@ def test_run_convert_directory_classify_path_regex(tmp_path: Path):
     result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule)))
 
     assert result.ok_count == 1
-    assert (output / "sit" / "sit" / "a.csv").exists()
+    assert result.artifacts == (output / "操场跑" / "Abigail_操场跑_左手_data.csv",)
+    assert (output / "操场跑" / "Abigail_操场跑_左手_data.csv").exists()
+    assert not (output / "Abigail").exists()
 
 
 def test_run_convert_split_with_classify_and_rename_appends_index(tmp_path: Path):
