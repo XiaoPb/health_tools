@@ -439,6 +439,26 @@ def test_run_convert_directory_with_classify_discards_relative_subdirs(tmp_path:
     assert not (output / "sub" / "high" / "a.csv").exists()
 
 
+def test_run_convert_directory_with_classify_renames_duplicate_outputs(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    (input_dir / "x").mkdir(parents=True)
+    (input_dir / "y").mkdir(parents=True)
+    (input_dir / "x" / "a.csv").write_text("frame,value\n0,5\n", encoding="utf-8")
+    (input_dir / "y" / "a.csv").write_text("frame,value\n1,6\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify.yaml"
+    rule.parent.mkdir()
+    rule.write_text(_CLASSIFY_RULE, encoding="utf-8")
+    output = tmp_path / "output"
+
+    result = run_convert(ConvertRequest(input_dir, output, rule_file=str(rule)))
+
+    first = output / "high" / "a.csv"
+    second = output / "high" / "a_1.csv"
+    assert result.artifacts == (first, second)
+    assert first.read_text(encoding="utf-8") == "FRAME_ID,VALUE\n0,5\n"
+    assert second.read_text(encoding="utf-8") == "FRAME_ID,VALUE\n1,6\n"
+
+
 def test_run_convert_merge_with_classify_writes_category_dir(tmp_path: Path):
     input_dir = tmp_path / "input"
     input_dir.mkdir()

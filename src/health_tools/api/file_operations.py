@@ -79,6 +79,18 @@ def _classify_default(converter) -> str:
     return default or "unclassified"
 
 
+def _available_classify_path(path: Path) -> Path:
+    """分类输出重名时追加递增序号，避免覆盖已有文件。"""
+    if not path.exists():
+        return path
+    index = 1
+    while True:
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
 def _convert_one(
     source,
     destination,
@@ -130,7 +142,9 @@ def _convert_one(
                         classifier.classify_frame(chunk, source, input_root=input_root)
                         or default_category
                     )
-                    chunk_path = output_root / category / _output_name(index)
+                    chunk_path = _available_classify_path(
+                        output_root / category / _output_name(index)
+                    )
                     categories.add(category)
                 else:
                     chunk_path = destination.parent / _output_name(index)
@@ -157,7 +171,11 @@ def _convert_one(
             category = (
                 classifier.classify_frame(result, source, input_root=input_root) or default_category
             )
-        write_path = output_root / category / _output_name() if category else destination
+        write_path = (
+            _available_classify_path(output_root / category / _output_name())
+            if category
+            else destination
+        )
         _write_convert_csv(result, write_path, output_config)
         return ItemResult(
             ItemStatus.OK,
