@@ -100,6 +100,7 @@ def _convert_one(
     *,
     output_root,
     input_root=None,
+    avoid_classify_conflicts=False,
 ) -> ItemResult:
     def _output_name(index=None) -> str:
         """输出文件名：classify 配置 rename 时用模板（先分类再取字段），否则沿用 destination。"""
@@ -142,9 +143,9 @@ def _convert_one(
                         classifier.classify_frame(chunk, source, input_root=input_root)
                         or default_category
                     )
-                    chunk_path = _available_classify_path(
-                        output_root / category / _output_name(index)
-                    )
+                    chunk_path = output_root / category / _output_name(index)
+                    if avoid_classify_conflicts:
+                        chunk_path = _available_classify_path(chunk_path)
                     categories.add(category)
                 else:
                     chunk_path = destination.parent / _output_name(index)
@@ -171,11 +172,9 @@ def _convert_one(
             category = (
                 classifier.classify_frame(result, source, input_root=input_root) or default_category
             )
-        write_path = (
-            _available_classify_path(output_root / category / _output_name())
-            if category
-            else destination
-        )
+        write_path = output_root / category / _output_name() if category else destination
+        if category and avoid_classify_conflicts:
+            write_path = _available_classify_path(write_path)
         _write_convert_csv(result, write_path, output_config)
         return ItemResult(
             ItemStatus.OK,
@@ -446,6 +445,7 @@ def run_convert(
                     output_config,
                     output_root=destination,
                     input_root=source,
+                    avoid_classify_conflicts=True,
                 )
                 items.append(item)
                 if item.status == ItemStatus.OK:

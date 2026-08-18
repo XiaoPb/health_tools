@@ -422,6 +422,24 @@ def test_run_convert_single_file_with_classify_writes_category_dir(tmp_path: Pat
     assert (tmp_path / "low" / "out.csv").exists()
 
 
+def test_run_convert_single_file_with_classify_repeated_run_overwrites_target(tmp_path: Path):
+    source = tmp_path / "source.csv"
+    source.write_text("frame,value\n0,1\n1,2\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "classify.yaml"
+    rule.parent.mkdir()
+    rule.write_text(_CLASSIFY_RULE, encoding="utf-8")
+    output = tmp_path / "out.csv"
+    request = ConvertRequest(source, output, rule_file=str(rule))
+
+    run_convert(request)
+    result = run_convert(request)
+
+    target = tmp_path / "low" / "out.csv"
+    assert result.artifacts == (target,)
+    assert target.exists()
+    assert not (tmp_path / "low" / "out_1.csv").exists()
+
+
 def test_run_convert_directory_with_classify_discards_relative_subdirs(tmp_path: Path):
     input_dir = tmp_path / "input"
     (input_dir / "sub").mkdir(parents=True)
@@ -610,6 +628,36 @@ def test_run_convert_split_with_classify_classifies_each_chunk(tmp_path: Path):
     assert len(result.artifacts) == 2
     assert (tmp_path / "low" / "out_1.csv").exists()
     assert (tmp_path / "high" / "out_2.csv").exists()
+
+
+def test_run_convert_single_file_split_with_classify_repeated_run_overwrites_targets(
+    tmp_path: Path,
+):
+    source = tmp_path / "source.csv"
+    source.write_text("frame,value\n0,1\n1,2\n2,3\n3,4\n", encoding="utf-8")
+    rule = tmp_path / "convert" / "split_classify.yaml"
+    rule.parent.mkdir()
+    rule.write_text(
+        _CLASSIFY_RULE.replace(
+            "classify:",
+            "split:\n  by_size: 2\nclassify:",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.csv"
+    request = ConvertRequest(source, output, rule_file=str(rule))
+
+    run_convert(request)
+    result = run_convert(request)
+
+    low = tmp_path / "low" / "out_1.csv"
+    high = tmp_path / "high" / "out_2.csv"
+    assert result.artifacts == (low, high)
+    assert low.exists()
+    assert high.exists()
+    assert not (tmp_path / "low" / "out_1_1.csv").exists()
+    assert not (tmp_path / "high" / "out_2_1.csv").exists()
 
 
 def test_run_convert_directory_split_with_classify_discards_relative_subdirs(tmp_path: Path):
