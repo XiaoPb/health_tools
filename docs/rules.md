@@ -689,7 +689,9 @@ thresholds:
 
 `thresholds` 中的自定义命名固定阈值和百分比阈值不会被 `--accuracy-thresholds` 替换；
 `--accuracy-inclusive` 会把它们和 `within_N` 一并切换为 `<=`，默认
-`--accuracy-strict` 均使用 `<`。固定阈值未由规则显式声明时默认采用 `5,10,15`。
+`--accuracy-strict` 均使用 `<`。未指定命令行阈值时，只有整个 `methods` 缺失或为空才使用
+包含 `within_5`、`within_10`、`within_15` 的默认方法；显式配置 `methods: [mae]` 等列表时，
+不会自动补充固定 `within_N` 方法。
 
 准确度计算会先统一处理参与的列：没有任意一个 finite 且非 `0` 值的列被禁用，不参与
 边界、比较或汇总。剩余全部启用列共同确定首尾共享边界，即首个和最后一个“所有启用列
