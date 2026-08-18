@@ -27,6 +27,13 @@ _LAZY_IMPORTS = {
     "calculate_accuracy": "health_tools.utils.accuracy",
     "AccuracyCalculator": "health_tools.utils.accuracy",
     "ACCURACY_FUNCTIONS": "health_tools.utils.accuracy",
+    "DEFAULT_ACCURACY_THRESHOLDS": "health_tools.utils.accuracy",
+    "PreparedAccuracyColumns": "health_tools.utils.accuracy",
+    "calculate_within_percent": "health_tools.utils.accuracy",
+    "calculate_within_threshold": "health_tools.utils.accuracy",
+    "normalize_accuracy_thresholds": "health_tools.utils.accuracy",
+    "prepare_accuracy_columns": "health_tools.utils.accuracy",
+    "resolve_accuracy_methods": "health_tools.utils.accuracy",
 }
 
 __all__ = list(_LAZY_IMPORTS)
