@@ -76,6 +76,22 @@ def test_resolve_accuracy_methods_replaces_within_methods_stably() -> None:
     ]
 
 
+def test_resolve_accuracy_methods_preserves_high_precision_thresholds() -> None:
+    methods = resolve_accuracy_methods(["mae", "within_5"], [1.0000001, 1.0000002])
+
+    assert methods == ["mae", "within_1.0000001", "within_1.0000002"]
+
+    result = calculate_accuracy(
+        pd.DataFrame({"ref": [10.0], "pred": [8.99999985]}),
+        "ref",
+        "pred",
+        methods=methods,
+        trim_zero_padding=False,
+    )
+    assert result["within_1.0000001"] == 0.0
+    assert result["within_1.0000002"] == 100.0
+
+
 def test_prepare_accuracy_columns_uses_common_boundaries_and_keeps_internal_zero() -> None:
     prepared = prepare_accuracy_columns(
         {

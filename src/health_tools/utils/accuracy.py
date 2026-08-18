@@ -55,7 +55,9 @@ def normalize_accuracy_thresholds(
 
 
 def _format_accuracy_threshold(threshold: float) -> str:
-    return format(threshold, "g")
+    if threshold.is_integer():
+        return str(int(threshold))
+    return repr(threshold)
 
 
 def _is_within_method(method: str) -> bool:
