@@ -5,12 +5,14 @@ from typing import List, Optional
 import click
 from rich.console import Console
 
+from health_tools.commands.accuracy_options import accuracy_options
 from health_tools.utils.reporting import FileResult, ResultCollector
 
 console = Console()
 
 
 @click.command()
+@accuracy_options
 @click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-o", "--output", "output_path", required=True, help="输出图片目录")
 @click.option("-c", "--chip", "chip_name", help="芯片类型（指定CSV格式）")
@@ -62,6 +64,8 @@ def plot_cmd(
     psd_acc: str,
     no_show: bool,
     filter_name: Optional[str],
+    accuracy_thresholds,
+    accuracy_inclusive: bool,
     verbose: bool,
 ) -> None:
     """绘制PPG数据的时域、频域、AC/PI、FFT和时频图"""
@@ -92,6 +96,8 @@ def plot_cmd(
                     psd_acc=psd_acc,
                     no_show=no_show,
                     filter_name=filter_name,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_inclusive=accuracy_inclusive,
                 ),
                 context=context,
             )

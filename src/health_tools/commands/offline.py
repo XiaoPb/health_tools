@@ -9,6 +9,8 @@ import pandas as pd
 from rich.console import Console
 from rich.table import Table
 
+from health_tools.commands.accuracy_options import accuracy_options
+
 if TYPE_CHECKING:
     from health_tools.core.offline import OfflineRunner
 
@@ -19,6 +21,7 @@ TIMEOUT_SECONDS_PER_EXTRA_FILE = 20
 
 
 @click.command("offline")
+@accuracy_options
 @click.option("-i", "--input", "input_path", type=click.Path(), help="输入数据目录")
 @click.option("-o", "--output", "output_path", type=click.Path(), help="输出结果目录")
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)")
@@ -70,6 +73,8 @@ def offline_cmd(
     do_list: bool,
     timeout: int,
     settle_timeout: int,
+    accuracy_thresholds: Optional[Tuple[float, ...]],
+    accuracy_inclusive: bool,
     verbose: bool,
 ) -> None:
     """离线跑库（调用TEE_Algorithm.exe）"""
@@ -98,6 +103,8 @@ def offline_cmd(
                     do_list=do_list,
                     timeout=timeout,
                     settle_timeout=settle_timeout,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_inclusive=accuracy_inclusive,
                 ),
                 context=context,
             )

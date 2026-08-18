@@ -1,8 +1,11 @@
 """CLI 命令测试。"""
 
+import click
+import pytest
 from click.testing import CliRunner
 
 from health_tools.cli import main
+from health_tools.commands.accuracy_options import accuracy_options
 
 
 def test_cli_help():
@@ -53,3 +56,47 @@ def test_cli_split_help():
     runner = CliRunner()
     result = runner.invoke(main, ["split", "--help"])
     assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("command", ["evaluate", "classify", "offline", "plot", "analyze"])
+def test_accuracy_commands_expose_shared_options(command):
+    result = CliRunner().invoke(main, [command, "--help"])
+
+    assert result.exit_code == 0
+    assert "--accuracy-thresholds" in result.output
+    assert "--accuracy-inclusive" in result.output
+    assert "--accuracy-strict" in result.output
+
+
+@click.command()
+@accuracy_options
+def _accuracy_option_command(accuracy_thresholds, accuracy_inclusive):
+    click.echo(f"{accuracy_thresholds}|{accuracy_inclusive}")
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["--accuracy-thresholds", "5,10,15"], "(5.0, 10.0, 15.0)|False"),
+        (
+            ["--accuracy-thresholds", "3.5,6", "--accuracy-inclusive"],
+            "(3.5, 6.0)|True",
+        ),
+    ],
+)
+def test_accuracy_options_parse_valid_values(args, expected):
+    result = CliRunner().invoke(_accuracy_option_command, args)
+
+    assert result.exit_code == 0
+    assert result.output.strip() == expected
+
+
+@pytest.mark.parametrize("value", ["", "5,0", "5,-1", "5,5", "5,nan", "5,inf"])
+def test_accuracy_options_reject_invalid_values(value):
+    result = CliRunner().invoke(
+        _accuracy_option_command,
+        ["--accuracy-thresholds", value],
+    )
+
+    assert result.exit_code != 0
+    assert "Invalid value" in result.output

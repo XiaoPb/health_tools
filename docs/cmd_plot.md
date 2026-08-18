@@ -31,6 +31,8 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--freq-range` | 频率范围 BPM（默认: 30-240） |
 | `--ref-column` | 参考曲线列名 |
 | `--psd-acc` | PSD 模式下 ACC 绘图: `axis` 三轴 / `rms` 合成（默认: axis） |
+| `--accuracy-thresholds` | PSD 准确度阈值，逗号分隔；默认采用规则或 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
 | `--no-show` | 仅保存不显示 |
 | `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
 | `-v/--verbose` | 详细输出 |

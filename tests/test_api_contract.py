@@ -3,20 +3,25 @@ from pathlib import Path
 import pytest
 
 from health_tools.api import (
+    AnalyzeRequest,
     BatchResult,
     CallbackError,
-    ExecutionContext,
-    ItemResult,
-    ItemStatus,
-    OperationCancelled,
-    ParseRequest,
-    ProgressEvent,
+    ClassifyRequest,
     ConfigAction,
     ConfigRequest,
     ConfigResult,
+    EvaluateRequest,
+    ExecutionContext,
+    ItemResult,
+    ItemStatus,
     OfflineCatalogRequest,
     OfflineCatalogResult,
+    OfflineRequest,
     OfflineVersionInfo,
+    OperationCancelled,
+    ParseRequest,
+    PlotRequest,
+    ProgressEvent,
     RuleCatalogResult,
     RuleDocumentResult,
     RuleInfo,
@@ -26,11 +31,11 @@ from health_tools.api import (
     RuleSource,
     RuleType,
     RuleVariantInfo,
+    run_info,
     run_list_rules,
     run_offline_catalog,
     run_read_rule,
     run_save_rule,
-    run_info,
 )
 
 
@@ -135,3 +140,20 @@ def test_new_request_defaults_and_config_compatibility():
         callable(function)
         for function in (run_list_rules, run_read_rule, run_save_rule, run_offline_catalog)
     )
+
+
+@pytest.mark.parametrize(
+    "request_model",
+    [
+        PlotRequest(Path("in"), Path("out")),
+        ClassifyRequest(Path("in"), Path("out")),
+        EvaluateRequest(Path("in"), Path("out")),
+        OfflineRequest(),
+        AnalyzeRequest(Path("in"), Path("out")),
+    ],
+)
+def test_accuracy_request_defaults(request_model):
+    assert request_model.accuracy_thresholds is None
+    assert request_model.accuracy_inclusive is False
+    EvaluateRequest,
+    OfflineRequest,

@@ -5,10 +5,13 @@ from pathlib import Path
 import click
 from rich.console import Console
 
+from health_tools.commands.accuracy_options import accuracy_options
+
 console = Console()
 
 
 @click.command("evaluate")
+@accuracy_options
 @click.option(
     "-i", "--input", "input_path", required=True, type=click.Path(exists=True), help="输入目录"
 )
@@ -43,6 +46,8 @@ def evaluate_cmd(
     diff_threshold,
     stale_minutes,
     filter_name,
+    accuracy_thresholds,
+    accuracy_inclusive,
     verbose,
 ):
     """批量准确度评估（心率/血氧）"""
@@ -65,6 +70,8 @@ def evaluate_cmd(
                     diff_threshold=diff_threshold,
                     stale_minutes=stale_minutes,
                     filter_name=filter_name,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_inclusive=accuracy_inclusive,
                 ),
                 context=context,
             )

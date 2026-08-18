@@ -23,6 +23,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | `--offline-version` | 离线算法版本；未指定时使用芯片默认版本 |
 | `--no-offline` | 禁止自动离线 PSD 升级 |
 | `--workers` | 数据检查工作数，默认 4 |
+| `--accuracy-thresholds` | 准确度阈值，逗号分隔；默认采用规则或 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
 | `-v, --verbose` | 显示文件级结果 |
 
 ## 处理阶段

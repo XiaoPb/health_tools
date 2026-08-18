@@ -25,6 +25,8 @@ ghealth_tool eval -i <input_dir> -o <output_dir> [options]
 | `--diff-threshold` | 参考值差分异常阈值 |
 | `--stale-minutes` | 参考值长时间不变异常阈值（分钟） |
 | `--filter` | 仅处理文件名包含指定字符的 CSV |
+| `--accuracy-thresholds` | 准确度阈值，逗号分隔；默认采用规则或 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
 | `-v/--verbose` | 显示失败/跳过文件明细 |
 
 ## 输出文件

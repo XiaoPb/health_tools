@@ -19,6 +19,8 @@ ghealth_tool classify -i <input> -o <output> -r <rule.yaml> [options]
 | `--accuracy` | 启用准确率计算 |
 | `--ref-column` | 参考列名（覆盖规则配置） |
 | `--pred-column` | 预测列名（覆盖规则配置） |
+| `--accuracy-thresholds` | 准确度阈值，逗号分隔；默认采用规则或 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
 | `--copy` | 复制文件（默认） |
 | `--move` | 移动文件 |
 | `--symlink` | 创建符号链接 |

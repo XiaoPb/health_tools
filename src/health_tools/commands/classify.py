@@ -5,10 +5,13 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from health_tools.commands.accuracy_options import accuracy_options
+
 console = Console()
 
 
 @click.command()
+@accuracy_options
 @click.option("-i", "--input", "input_path", required=True, help="输入CSV文件或目录")
 @click.option("-o", "--output", "output_path", required=True, help="输出目录")
 @click.option(
@@ -71,6 +74,8 @@ def classify_cmd(
     min_rows: Optional[int],
     min_size_kb: Optional[float],
     conflict: str,
+    accuracy_thresholds: Optional[Tuple[float, ...]],
+    accuracy_inclusive: bool,
     verbose: bool,
 ) -> None:
     """根据规则对数据进行分类保存"""
@@ -97,6 +102,8 @@ def classify_cmd(
                     min_size_kb=min_size_kb,
                     dry_run=dry_run,
                     conflict=conflict,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_inclusive=accuracy_inclusive,
                 ),
                 context=context,
             )

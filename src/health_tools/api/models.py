@@ -254,6 +254,8 @@ class PlotRequest:
     psd_acc: str = "axis"
     no_show: bool = False
     filter_name: Optional[str] = None
+    accuracy_thresholds: Optional[Tuple[float, ...]] = None
+    accuracy_inclusive: bool = False
 
 
 @dataclass(frozen=True)
@@ -274,6 +276,8 @@ class ClassifyRequest:
     min_size_kb: Optional[float] = None
     dry_run: bool = False
     conflict: str = "skip"
+    accuracy_thresholds: Optional[Tuple[float, ...]] = None
+    accuracy_inclusive: bool = False
 
 
 @dataclass(frozen=True)
@@ -394,6 +398,8 @@ class EvaluateRequest:
     diff_threshold: Optional[float] = None
     stale_minutes: Optional[float] = None
     filter_name: Optional[str] = None
+    accuracy_thresholds: Optional[Tuple[float, ...]] = None
+    accuracy_inclusive: bool = False
 
 
 @dataclass(frozen=True)
@@ -416,6 +422,8 @@ class OfflineRequest:
     do_list: bool = False
     timeout: int = 300
     settle_timeout: int = 10
+    accuracy_thresholds: Optional[Tuple[float, ...]] = None
+    accuracy_inclusive: bool = False
 
 
 @dataclass(frozen=True)
@@ -435,6 +443,8 @@ class AnalyzeRequest:
     offline_version: Optional[str] = None
     allow_offline: bool = True
     workers: int = 4
+    accuracy_thresholds: Optional[Tuple[float, ...]] = None
+    accuracy_inclusive: bool = False
 
 
 @dataclass(frozen=True)

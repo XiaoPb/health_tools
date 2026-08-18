@@ -6,10 +6,13 @@ from typing import Optional, Tuple
 import click
 from rich.console import Console
 
+from health_tools.commands.accuracy_options import accuracy_options
+
 console = Console()
 
 
 @click.command("analyze")
+@accuracy_options
 @click.option("-i", "--input", "input_path", required=True, type=click.Path(exists=True))
 @click.option("-o", "--output", "output_path", required=True, type=click.Path())
 @click.option("--type", "analysis_type", type=click.Choice(["hr", "spo2", "other"]), default="hr")
@@ -42,6 +45,8 @@ def analyze_cmd(
     offline_version: Optional[str],
     no_offline: bool,
     workers: int,
+    accuracy_thresholds: Optional[Tuple[float, ...]],
+    accuracy_inclusive: bool,
     verbose: bool,
 ) -> None:
     """自动分析原始数据或离线 PSD，并生成诊断报告。"""
@@ -67,6 +72,8 @@ def analyze_cmd(
                     offline_version=offline_version,
                     allow_offline=not no_offline,
                     workers=workers,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_inclusive=accuracy_inclusive,
                 ),
                 context=context,
             )

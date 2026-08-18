@@ -26,6 +26,8 @@ ghealth_tool offline --list [--chip <chip>]
 | `--ppg-offset` | PPG 自动识别通道的固定偏移，非负整数，默认 `0` |
 | `--ppg-map` | 覆盖已声明 PPG 通道，可重复使用，格式为 `ppg_chN=列名或0-based索引` |
 | `--no-accuracy` | 跳过准确度统计 |
+| `--accuracy-thresholds` | 准确度阈值，逗号分隔；默认 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 阈值使用 `<=` 或 `<`；默认 strict |
 | `--no-plot` | 跳过 PSD 时频图绘制 |
 | `--no-run` | 跳过跑库，直接整理/统计/绘图已有结果 |
 | `--list` | 列出可用芯片和版本 |
