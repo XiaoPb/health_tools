@@ -571,7 +571,11 @@ class TestCheckResultStatus:
             chip="gh3036",
             results=[
                 CheckResult(
-                    "数据居中", False, "异常", status="FAIL", channel_metrics={
+                    "数据居中",
+                    False,
+                    "异常",
+                    status="FAIL",
+                    channel_metrics={
                         "Rawdata0": {
                             "abnormal_count": 2,
                             "total_count": 5,
@@ -581,11 +585,15 @@ class TestCheckResultStatus:
                             "near_zero_ratio": 20.0,
                             "near_full_ratio": 20.0,
                         }
-                    }
+                    },
                 ),
-                CheckResult("AGC调光", True, "已统计", status="PASS", channel_metrics={
-                    "AGC_INFO_CH0": {"change_count": 3}
-                }),
+                CheckResult(
+                    "AGC调光",
+                    True,
+                    "已统计",
+                    status="PASS",
+                    channel_metrics={"AGC_INFO_CH0": {"change_count": 3}},
+                ),
             ],
         )
         output = tmp_path / "check_report_compact.csv"

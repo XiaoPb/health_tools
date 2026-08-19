@@ -70,6 +70,12 @@ def analyze_reference(
     if timestamps is not None:
         time_values = np.asarray(timestamps, dtype=float)
         delta = np.diff(time_values)
+        invalid_time = ~np.isfinite(delta) | (delta <= 0)
+        if np.any(invalid_time):
+            issues.append(f"参考时间轴非递增或缺失，位置(前10)={_positions(invalid_time)}")
+            affected = np.zeros(len(ref), dtype=bool)
+            affected[np.flatnonzero(invalid_time) + 1] = True
+            in_range = in_range & ~affected
     else:
         delta = np.full(max(len(ref) - 1, 0), 1.0 / rate if rate > 0 else 1.0)
     differences = np.abs(np.diff(ref))

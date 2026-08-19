@@ -19,6 +19,7 @@ class AnalysisRecord:
     source: str
     analysis_type: str
     scene: str = "unknown"
+    activity: str = "other"
     focused: bool = False
     features: Dict[str, Any] = field(default_factory=dict)
     metrics: Dict[str, Any] = field(default_factory=dict)
@@ -30,6 +31,7 @@ class AnalysisRecord:
     notes: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     figure: Optional[str] = None
+    secondary_figure: Optional[str] = None
     plot_data: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property

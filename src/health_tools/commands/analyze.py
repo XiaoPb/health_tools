@@ -19,6 +19,14 @@ console = Console()
 @click.option("--rule", "rule_file", help="analysis 规则文件；other 类型必填")
 @click.option("--chip", "chip_name", help="芯片型号")
 @click.option("--scene", type=click.Choice(["auto", "static", "dynamic"]), default="auto")
+@click.option(
+    "--activity",
+    type=click.Choice(
+        ["auto", "rest", "walk", "run", "cycle", "strength", "interval", "recovery", "other"]
+    ),
+    default="auto",
+    help="活动场景细分标签",
+)
 @click.option("--sample-rate", type=float, help="采样率 Hz")
 @click.option("--ref-column", help="参考值列")
 @click.option("--pred-column", help="算法结果列")
@@ -51,6 +59,7 @@ def analyze_cmd(
     rule_file: Optional[str],
     chip_name: Optional[str],
     scene: str,
+    activity: str,
     sample_rate: Optional[float],
     ref_column: Optional[str],
     pred_column: Optional[str],
@@ -83,6 +92,7 @@ def analyze_cmd(
                     rule_file=rule_file,
                     chip_name=chip_name,
                     scene=scene,
+                    activity=activity,
                     sample_rate=sample_rate,
                     ref_column=ref_column,
                     pred_column=pred_column,

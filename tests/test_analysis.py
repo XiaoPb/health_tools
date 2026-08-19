@@ -8,6 +8,7 @@ import health_tools.core.analysis.raw as raw_analysis
 from health_tools.api import AnalyzeRequest, RequestValidationError, run_analyze
 from health_tools.api.analysis_operation import (
     _apply_check_results,
+    _apply_compact_check_results,
     _apply_evaluate_results,
     _escalate,
     _generate_psd_plots,
@@ -21,7 +22,7 @@ from health_tools.core.analysis.conditions import matches
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord
 from health_tools.core.analysis.psd import analyze_psd_directory
-from health_tools.core.analysis.raw import analyze_raw_file
+from health_tools.core.analysis.raw import analyze_raw_file, infer_activity
 from health_tools.core.analysis.reference import analyze_reference
 from health_tools.core.analysis.reporting import (
     _accuracy_rows,
@@ -1441,7 +1442,6 @@ def test_ppt_body_uses_scene_filename_slots_and_compact_body_font(tmp_path: Path
     pytest.importorskip("pptx")
     from pptx import Presentation
     from pptx.enum.shapes import PP_PLACEHOLDER
-    from pptx.util import Pt
 
     output = write_ppt(
         [
@@ -1475,8 +1475,8 @@ def test_ppt_body_uses_scene_filename_slots_and_compact_body_font(tmp_path: Path
     assert title._element.xpath(".//a:defRPr")[0].get("sz") == "3000"
     assert filename._element.xpath(".//a:defRPr")[0].get("sz") == "2000"
     body = placeholders[PP_PLACEHOLDER.BODY]
-    assert body.text_frame.paragraphs[0].runs[0].font.size == Pt(12)
     assert body.text_frame.paragraphs[0].line_spacing == 1
+    assert body.text_frame.paragraphs[0].runs[0].font.size is None
 
 
 def test_ppt_includes_psd_page_for_evidence_insufficient(tmp_path: Path):
@@ -1539,3 +1539,117 @@ def test_ppt_places_polar_warning_on_separate_review_page(tmp_path: Path):
     assert len(warning_pages) == 1
     assert "位置(前10)=5，8，13" in warning_pages[0]
     assert "不作为算法或原始数据错误归因" in warning_pages[0]
+
+
+@pytest.mark.parametrize(
+    ("path", "explicit", "expected"),
+    [("run/a.csv", "auto", "run"), ("cycle/a.csv", "auto", "cycle"), ("x.csv", "rest", "rest")],
+)
+def test_activity_uses_explicit_value_then_path_hint(path: str, explicit: str, expected: str):
+    assert infer_activity(Path(path), explicit=explicit) == expected
+
+
+def test_hr_wear_causes_require_combined_evidence():
+    from health_tools.core.analysis.diagnosis import diagnose
+
+    rule = RuleLoader.load_analysis_rule(
+        str(Path(__file__).parents[1] / "src/health_tools/rules/analysis/analysis_hr.yaml")
+    )
+
+    base = {
+        "raw_valid": True,
+        "reference_valid": True,
+        "algorithm_abnormal": False,
+        "data_complete": True,
+    }
+    decision = diagnose(
+        base | {"scene": "dynamic", "agc_unstable": True, "baseline_drift": True}, rule
+    )
+    assert decision["cause"]["id"] == "loose_wear"
+
+
+def test_compact_check_metrics_feed_diagnosis_features(tmp_path: Path):
+    report = tmp_path / "check_report_compact.csv"
+    pd.DataFrame(
+        [
+            {
+                "文件名": "a.csv",
+                "文件相对路径": "dynamic/a.csv",
+                "检查项": "数据居中",
+                "状态": "FAIL",
+                "通道": "Rawdata3",
+                "异常占比": 15.0,
+                "近0占比": 2.5,
+                "近满量程占比": 12.5,
+                "AGC变化次数": 8,
+            }
+        ]
+    ).to_csv(report, index=False, encoding="utf-8-sig")
+    record = AnalysisRecord("dynamic/a.csv", "a.csv", "hr", scene="dynamic")
+
+    _apply_compact_check_results(
+        [record], report, RuleLoader.load_analysis_rule("analysis_hr.yaml")
+    )
+
+    assert record.features["near_full_ratio"] == pytest.approx(12.5)
+    assert record.features["agc_change_count"] == 8
+    assert record.features["check_channel_metrics"]["Rawdata3"]["abnormal_ratio"] == 15.0
+
+
+def test_ppt_uses_activity_and_two_template_picture_areas(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from PIL import Image
+    from pptx import Presentation
+
+    primary = tmp_path / "primary.png"
+    secondary = tmp_path / "secondary.png"
+    Image.new("RGB", (640, 360), "white").save(primary)
+    Image.new("RGB", (640, 180), "gray").save(secondary)
+    output = write_ppt(
+        [
+            AnalysisRecord(
+                "run/a.csv",
+                "a.csv",
+                "hr",
+                activity="run",
+                focused=True,
+                conclusion="算法性能极限",
+                cause={
+                    "id": "frequency_lock",
+                    "title": "疑似锁频",
+                    "origin": "algorithm",
+                    "actions": ["不应展示"],
+                },
+                notes=["运动主频与算法频率一致"],
+                figure=str(primary),
+                secondary_figure=str(secondary),
+            )
+        ],
+        tmp_path / "report.pptx",
+    )
+    deck = Presentation(str(output))
+    slide = next(s for s in deck.slides if any(getattr(x, "text", "") == "跑步" for x in s.shapes))
+    assert sum(1 for shape in slide.shapes if shape.shape_type == 13) == 2
+    text = "\n".join(getattr(shape, "text", "") for shape in slide.shapes)
+    assert "不应展示" not in text
+    assert "建议：" not in text
+
+
+@pytest.mark.parametrize(
+    ("feature", "cause_id"),
+    [
+        ("rise_lag", "rise_lag"),
+        ("recovery_lag", "recovery_lag"),
+        ("output_plateau", "output_plateau"),
+    ],
+)
+def test_algorithm_strategy_causes_never_offer_actions(feature: str, cause_id: str):
+    rule = RuleLoader.load_analysis_rule(
+        str(Path(__file__).parents[1] / "src/health_tools/rules/analysis/analysis_hr.yaml")
+    )
+    decision = diagnose(
+        {"raw_valid": True, "reference_valid": True, "algorithm_abnormal": True, feature: True},
+        rule,
+    )
+    assert decision["cause"]["id"] == cause_id
+    assert decision["actions"] == []
