@@ -88,3 +88,14 @@ ghealth_tool analyze -i data/ -o analysis/ --type hr --report all --focus "动�
 PI 计算时把 `CH*` 视为 Rawdata：`CH*`/`Rawdata*` 先减 chip 的 `adc_offset`，`Ipd*` 已是 pA，不能减偏置。SpO2 只分析静止测试，并以最低有效光学通道 PI 判断低灌注。
 
 Polar 可能只在局部异常。局部越界、跳变等样本应从准确度中隔离，继续全局分析并同时保留原结论、关键图和独立 Polar 人工复审警告；不能把 Polar 警告当作算法或原始数据错误原因。只有 Polar 全局不可用或有效比例不足时才停止参考归因。
+### 已跑库数据生成报告
+
+先准备摘选 CSV 和 check 报告，再将跑库目录、PNG 目录通过 `analyze` 参数传入：
+
+```bash
+ghealth_tool analyze -i fail_category -o report \
+  --check-report fail_category/check_report.csv \
+  --offline-result data_gh3036_offline/01-10 \
+  --figure-dir data_gh3036_offline/01-10/plots \
+  --report pptx --no-offline --resume
+```

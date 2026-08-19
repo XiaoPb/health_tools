@@ -39,3 +39,8 @@
 
 CLI 显式参数通常覆盖规则或配置默认值。芯片结构来自 `--chip`，转换/绘图也可通过
 `--rule` 指定格式。无法确认优先级时读取命令实现和对应文档，不组合两个来源猜测结果。
+### analyze 快速复用
+
+`analyze` 支持 `--check-report`、`--offline-result` 和可重复的 `--figure-dir`，用于在
+CSV 与跑库目录分离时直接生成报告；`--resume` 复用 `analysis_state.json` 中的完成阶段，
+`--restart` 清理分析工作区后重跑。

@@ -27,6 +27,21 @@ console = Console()
 @click.option("--report", type=click.Choice(["markdown", "pptx", "all"]), default="all")
 @click.option("--offline-version", help="离线算法版本；默认使用已配置默认版本")
 @click.option("--no-offline", is_flag=True, help="禁止自动离线 PSD 升级")
+@click.option(
+    "--check-report", type=click.Path(exists=True, path_type=Path), help="复用已有 check 报告"
+)
+@click.option(
+    "--offline-result", type=click.Path(exists=True, path_type=Path), help="复用已有离线跑库目录"
+)
+@click.option(
+    "--figure-dir",
+    "figure_dirs",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="复用已有 PNG 目录，可重复",
+)
+@click.option("--resume/--no-resume", default=True, help="复用输出目录中已完成阶段")
+@click.option("--restart", is_flag=True, help="清理分析状态后重新开始")
 @click.option("--workers", type=int, default=4, help="并行工作数（默认 4）")
 @click.option("-v", "--verbose", is_flag=True, help="显示文件级结果")
 def analyze_cmd(
@@ -44,6 +59,11 @@ def analyze_cmd(
     report: str,
     offline_version: Optional[str],
     no_offline: bool,
+    check_report: Optional[Path],
+    offline_result: Optional[Path],
+    figure_dirs: Tuple[Path, ...],
+    resume: bool,
+    restart: bool,
     workers: int,
     accuracy_thresholds: Optional[Tuple[float, ...]],
     accuracy_inclusive: bool,
@@ -71,6 +91,11 @@ def analyze_cmd(
                     report=report,
                     offline_version=offline_version,
                     allow_offline=not no_offline,
+                    check_report_path=check_report,
+                    offline_result_path=offline_result,
+                    figure_paths=figure_dirs,
+                    resume=resume,
+                    restart=restart,
                     workers=workers,
                     accuracy_thresholds=accuracy_thresholds,
                     accuracy_inclusive=accuracy_inclusive,

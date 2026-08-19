@@ -448,6 +448,20 @@ class AnalyzeRequest:
     workers: int = 4
     accuracy_thresholds: Optional[Tuple[float, ...]] = None
     accuracy_inclusive: bool = False
+    check_report_path: Optional[Path] = None
+    offline_result_path: Optional[Path] = None
+    figure_paths: Tuple[Path, ...] = ()
+    resume: bool = True
+    restart: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "input_path", Path(self.input_path))
+        object.__setattr__(self, "output_path", Path(self.output_path))
+        if self.check_report_path is not None:
+            object.__setattr__(self, "check_report_path", Path(self.check_report_path))
+        if self.offline_result_path is not None:
+            object.__setattr__(self, "offline_result_path", Path(self.offline_result_path))
+        object.__setattr__(self, "figure_paths", tuple(Path(path) for path in self.figure_paths))
 
 
 @dataclass(frozen=True)

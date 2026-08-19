@@ -9,7 +9,7 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | 选项 | 说明 |
 |---|---|
 | `-i, --input` | 原始 CSV 文件/目录，或已有 offline 结果目录 |
-| `-o, --output` | 分析输出目录；已有核心产物时拒绝覆盖 |
+| `-o, --output` | 分析输出目录；带状态清单时可断点续跑 |
 | `--type` | `hr`、`spo2` 或 `other`，默认 `hr` |
 | `--rule` | analysis 规则文件；`other` 类型必填 |
 | `--chip` | 芯片型号；无法从信息行识别时必填 |
@@ -22,6 +22,11 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | `--report` | `markdown`、`pptx` 或 `all`，默认 `all` |
 | `--offline-version` | 离线算法版本；未指定时使用芯片默认版本 |
 | `--no-offline` | 禁止自动离线 PSD 升级 |
+| `--check-report` | 复用已有详细 check CSV；可与输入数据目录分离 |
+| `--offline-result` | 复用已有离线跑库结果目录，不再次跑库 |
+| `--figure-dir` | 复用已有 PNG 目录，可重复指定 |
+| `--resume/--no-resume` | 是否复用输出目录已完成阶段，默认启用 |
+| `--restart` | 清理分析状态和中间产物后重新开始，不删除外部输入 |
 | `--workers` | 数据检查工作数，默认 4 |
 | `--accuracy-thresholds` | 固定准确度阈值，逗号分隔，默认 `5,10,15` |
 | `--accuracy-inclusive/--accuracy-strict` | 阈值边界包含/严格模式；默认 strict，即 `abs(error) < threshold` |
@@ -143,3 +148,17 @@ PSD 中 Polar 启用时，为所有启用的 Online、Offline、Comp 分别计�
 Polar 警告不会替换原分析结论。存在局部 Polar 异常的文件仍保留原原因、证据文字和关键图表，并在 Markdown、PPT、JSON 和逐文件 CSV 中并列显示警告及异常位置。
 
 算法原因只说明可能机制和证据，不输出算法优化方向。原始数据问题才会给出采集、佩戴、参考设备或时间对齐措施；没有可行原始数据措施时，报告为算法性能极限或证据不足。
+
+## 已有产物快速模式
+
+CSV、check 报告、离线跑库结果和 PNG 可以来自不同目录：
+
+```bash
+ghealth_tool analyze -i E:/data/fail_category -o E:/reports/analysis \
+  --check-report E:/data/fail_category/check_report.csv \
+  --offline-result E:/data/01-10 --figure-dir E:/data/01-10/plots \
+  --report pptx --no-offline
+```
+
+输出目录中的 `analysis_state.json` 记录阶段状态。报告生成失败后再次使用相同参数并保留
+`--resume` 会复用已完成阶段；需要完全重跑时使用 `--restart`。

@@ -118,6 +118,25 @@ offline = run_offline(
 config = run_config(ConfigRequest(ConfigAction.SHOW))
 ```
 
+`AnalyzeRequest` 支持复用已有产物并断点续跑：
+
+```python
+from health_tools.api import AnalyzeRequest, run_analyze
+
+result = run_analyze(
+    AnalyzeRequest(
+        Path("fail_category"),
+        Path("reports/analysis"),
+        check_report_path=Path("fail_category/check_report.csv"),
+        offline_result_path=Path("data_gh3036_offline/01-10"),
+        figure_paths=(Path("data_gh3036_offline/01-10/plots"),),
+        report="pptx",
+        allow_offline=False,
+        resume=True,
+    )
+)
+```
+
 ## 配置操作
 
 ```python

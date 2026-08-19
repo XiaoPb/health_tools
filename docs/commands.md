@@ -49,7 +49,7 @@ ghealth_tool --help
 | [`evaluate`](cmd_evaluate.md) | `eval` | 结果目录 | 明细、异常和准确度汇总 |
 | [`offline`](cmd_offline.md) | 无 | 芯片 CSV 目录 | 版本目录、PSD、准确度报告 |
 | [`check`](cmd_check.md) | `chk` | CSV 或检查报告 | `check_report.csv`、`check_report_compact.csv` 或分拣目录 |
-| [`analyze`](cmd_analyze.md) | `ana` | CSV 或 offline 结果目录 | JSON/CSV、证据图、Markdown/PPT |
+| [`analyze`](cmd_analyze.md) | `ana` | CSV/数据目录，可分离 check、跑库、PNG 目录 | JSON/CSV、证据图、Markdown/PPT |
 
 ## 批量命令约定
 
