@@ -395,6 +395,13 @@ def _body_shape(slide):
     return _placeholder(slide, PP_PLACEHOLDER.BODY)
 
 
+def _check_shape(slide):
+    return next(
+        (shape for shape in slide.shapes if shape.name == "内容占位符 6"),
+        None,
+    )
+
+
 def _primary_picture(slide):
     named = next(
         (
@@ -493,10 +500,7 @@ def _populate_content(
     content = _primary_picture(slide)
     subtitle = _filename_shape(slide)
     secondary = _secondary_picture(slide)
-    check_shape = next(
-        (shape for shape in slide.shapes if shape.name == "内容占位符 6"),
-        None,
-    )
+    check_shape = _check_shape(slide)
     if title:
         _set_text(title, title_text)
     if subtitle:
@@ -521,7 +525,7 @@ def _populate_warning(slide, record: AnalysisRecord) -> None:
     from pptx.enum.shapes import PP_PLACEHOLDER
 
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
-    body = _placeholder(slide, PP_PLACEHOLDER.BODY)
+    body = _body_shape(slide)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
     subtitle = _filename_shape(slide)
     if title:
@@ -552,7 +556,7 @@ def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
         "未发现异常数据"
     ]
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
-    body = _placeholder(slide, PP_PLACEHOLDER.BODY)
+    body = _body_shape(slide)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
     subtitle = _filename_shape(slide)
     if title:
@@ -629,7 +633,7 @@ def _populate_accuracy(
 
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
-    body = _placeholder(slide, PP_PLACEHOLDER.BODY)
+    body = _body_shape(slide)
     subtitle = _filename_shape(slide)
     if title:
         title_text = "整体准确度对比"
@@ -769,7 +773,7 @@ def write_ppt(
     accuracy_content = _placeholder(accuracy_slide, PP_PLACEHOLDER.OBJECT)
     row_height = Inches(0.46)
     rows_per_page = (
-        max(int(accuracy_content.height // row_height) - 1, 1) if accuracy_content else 1
+        min(max(int(accuracy_content.height // row_height) - 1, 1), 6) if accuracy_content else 1
     )
     row_pages = [
         rows[index : index + rows_per_page] for index in range(0, len(rows), rows_per_page)

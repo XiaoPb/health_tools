@@ -1440,6 +1440,8 @@ def test_ppt_summary_table_is_compact_and_centered(tmp_path: Path):
 
 def test_ppt_body_uses_scene_filename_slots_and_compact_body_font(tmp_path: Path):
     pytest.importorskip("pptx")
+    from importlib.resources import files
+
     from pptx import Presentation
     from pptx.enum.shapes import PP_PLACEHOLDER
 
@@ -1463,20 +1465,45 @@ def test_ppt_body_uses_scene_filename_slots_and_compact_body_font(tmp_path: Path
         for slide in deck.slides
         if any("测试文件.csv" in getattr(shape, "text", "") for shape in slide.shapes)
     )
-    placeholders = {
-        shape.placeholder_format.type: shape
+    template = Presentation(str(files("health_tools") / "templates" / "analysis_report.pptx"))
+    template_slide = template.slides[1]
+    title = next(
+        shape
         for shape in detail_slide.shapes
-        if shape.is_placeholder
-    }
-    filename = next(shape for shape in detail_slide.shapes if shape.name == "文件名副标题")
-    title = placeholders[PP_PLACEHOLDER.TITLE]
+        if shape.is_placeholder and shape.placeholder_format.type == PP_PLACEHOLDER.TITLE
+    )
+    filename = next(
+        shape
+        for shape in detail_slide.shapes
+        if shape.name in {"文件名副标题", "文本框 8", "文本占位符 4"}
+    )
+    body = next(
+        shape
+        for shape in detail_slide.shapes
+        if shape.name == "文本占位符 5"
+        or (
+            shape.is_placeholder
+            and shape.placeholder_format.type == PP_PLACEHOLDER.BODY
+            and shape.shape_id != filename.shape_id
+        )
+    )
+    template_shapes = {shape.name: shape for shape in template_slide.shapes}
     assert title.text == "dynamic"
     assert filename.text == "测试文件.csv"
-    assert title._element.xpath(".//a:defRPr")[0].get("sz") == "3000"
-    assert filename._element.xpath(".//a:defRPr")[0].get("sz") == "2000"
-    body = placeholders[PP_PLACEHOLDER.BODY]
+    for shape in (title, filename, body):
+        expected = template_shapes[shape.name]
+        assert (shape.left, shape.top, shape.width, shape.height) == (
+            expected.left,
+            expected.top,
+            expected.width,
+            expected.height,
+        )
+        assert all(
+            run.font.size is None
+            for paragraph in shape.text_frame.paragraphs
+            for run in paragraph.runs
+        )
     assert body.text_frame.paragraphs[0].line_spacing == 1
-    assert body.text_frame.paragraphs[0].runs[0].font.size is None
 
 
 def test_ppt_includes_psd_page_for_evidence_insufficient(tmp_path: Path):
