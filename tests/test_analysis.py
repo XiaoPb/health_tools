@@ -558,6 +558,80 @@ def test_check_report_changes_diagnosis_only_for_failures(
     assert record.features["check_failures"] == (["帧完整性"] if status == "FAIL" else [])
 
 
+def test_check_report_prefers_relative_path_for_duplicate_filenames(tmp_path: Path):
+    report = tmp_path / "check_report.csv"
+    pd.DataFrame(
+        [
+            {
+                "文件名": "x.csv",
+                "文件相对路径": "a/x.csv",
+                "总异常(结果)": "FAIL",
+                "帧完整性(结果)": "FAIL",
+                "IPD范围(结果)": "PASS",
+            },
+            {
+                "文件名": "x.csv",
+                "文件相对路径": "b/x.csv",
+                "总异常(结果)": "FAIL",
+                "帧完整性(结果)": "PASS",
+                "IPD范围(结果)": "FAIL",
+            },
+        ]
+    ).to_csv(report, index=False, encoding="utf-8-sig")
+    records = [
+        AnalysisRecord(
+            "a/x.csv",
+            "x.csv",
+            "hr",
+            features={
+                "data_complete": True,
+                "raw_valid": True,
+                "reference_valid": True,
+                "algorithm_abnormal": False,
+            },
+        ),
+        AnalysisRecord(
+            "b/x.csv",
+            "x.csv",
+            "hr",
+            features={
+                "data_complete": True,
+                "raw_valid": True,
+                "reference_valid": True,
+                "algorithm_abnormal": False,
+            },
+        ),
+    ]
+
+    _apply_check_results(records, report, RuleLoader.load_analysis_rule("analysis_hr.yaml"))
+
+    assert records[0].features["check_failures"] == ["帧完整性"]
+    assert records[1].features["check_failures"] == ["IPD范围"]
+
+
+def test_check_report_skips_ambiguous_basename_fallback(tmp_path: Path):
+    report = tmp_path / "check_report.csv"
+    pd.DataFrame(
+        [
+            {
+                "文件名": "x.csv",
+                "文件相对路径": "",
+                "总异常(结果)": "FAIL",
+                "帧完整性(结果)": "FAIL",
+            }
+        ]
+    ).to_csv(report, index=False, encoding="utf-8-sig")
+    records = [
+        AnalysisRecord("a/x.csv", "x.csv", "hr", features={"raw_valid": True}),
+        AnalysisRecord("b/x.csv", "x.csv", "hr", features={"raw_valid": True}),
+    ]
+
+    _apply_check_results(records, report, RuleLoader.load_analysis_rule("analysis_hr.yaml"))
+
+    assert "check_failures" not in records[0].features
+    assert "check_failures" not in records[1].features
+
+
 def test_acc_check_evidence_includes_description_and_positions(tmp_path: Path):
     report = tmp_path / "check_report.csv"
     pd.DataFrame(
@@ -596,6 +670,39 @@ def test_acc_check_evidence_includes_description_and_positions(tmp_path: Path):
     assert "检测到ACC异常帧 16/100" in record.notes[0]
     assert "静止最长连续帧=11" in record.notes[0]
     assert "静止异常帧位置(前10)=40，52，61，70" in record.notes[0]
+
+
+def test_evaluate_results_prefer_relative_path_for_duplicate_filenames(tmp_path: Path):
+    evaluate = tmp_path / "file_details.csv"
+    pd.DataFrame(
+        [
+            {"file": "a/x.csv", "mae": 3.0, "samples": 100},
+            {"file": "b/x.csv", "mae": 7.0, "samples": 120},
+        ]
+    ).to_csv(evaluate, index=False)
+    records = [
+        AnalysisRecord("a/x.csv", "x.csv", "hr"),
+        AnalysisRecord("b/x.csv", "x.csv", "hr"),
+    ]
+
+    _apply_evaluate_results(records, evaluate, RuleLoader.load_analysis_rule("analysis_hr.yaml"))
+
+    assert records[0].metrics["evaluate_mae"] == 3.0
+    assert records[1].metrics["evaluate_mae"] == 7.0
+
+
+def test_evaluate_results_skip_ambiguous_basename_fallback(tmp_path: Path):
+    evaluate = tmp_path / "file_details.csv"
+    pd.DataFrame([{"file": "x.csv", "mae": 3.0, "samples": 100}]).to_csv(evaluate, index=False)
+    records = [
+        AnalysisRecord("a/x.csv", "x.csv", "hr"),
+        AnalysisRecord("b/x.csv", "x.csv", "hr"),
+    ]
+
+    _apply_evaluate_results(records, evaluate, RuleLoader.load_analysis_rule("analysis_hr.yaml"))
+
+    assert "evaluate_mae" not in records[0].metrics
+    assert "evaluate_mae" not in records[1].metrics
 
 
 def test_spo2_raw_evidence_uses_plot_ac(monkeypatch, tmp_path: Path):

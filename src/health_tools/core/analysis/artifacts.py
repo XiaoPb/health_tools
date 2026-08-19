@@ -103,13 +103,21 @@ class ArtifactIndex:
         normalized = relative_path.replace("\\", "/")
         if normalized in self.items:
             return self.items[normalized]
-        matches = [
-            item
-            for item in self.items.values()
-            if Path(item.csv_path).name == Path(normalized).name
+        target = Path(normalized)
+        name_matches = [
+            item for item in self.items.values() if Path(item.relative_path).name == target.name
         ]
-        if len(matches) == 1:
-            return matches[0]
+        if len(name_matches) == 1:
+            return name_matches[0]
+        if len(name_matches) > 1:
+            raise ArtifactAmbiguityError(f"文件名匹配存在歧义: {relative_path}")
+        stem_matches = [
+            item for item in self.items.values() if Path(item.relative_path).stem == target.stem
+        ]
+        if len(stem_matches) == 1:
+            return stem_matches[0]
+        if len(stem_matches) > 1:
+            raise ArtifactAmbiguityError(f"stem 匹配存在歧义: {relative_path}")
         return None
 
     def figure_for(self, relative_path: str) -> Optional[Path]:
@@ -164,6 +172,8 @@ def _match_figures(
     candidates = same_relative
     if not candidates:
         candidates = [figure for figure in figures if figure.name == f"{csv_file.stem}.png"]
+        if len(candidates) > 1:
+            raise ArtifactAmbiguityError(f"图片文件名匹配存在歧义: {csv_file}")
     if not candidates:
         by_stem = [
             figure
@@ -198,19 +208,34 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
     ]
     if not columns:
         return []
-    values = [str(value) for value in frame[columns[0]].dropna().tolist()]
     result: List[_ReportCsvEntry] = []
     usable = [path for path in available if _casefold_resolve(path) != _casefold_resolve(report)]
+    root = _common_root(usable[0], usable) if usable else report.parent
+    by_relative = {_relative(path, root): path for path in usable}
     by_unique_name = _unique_by(lambda path: path.name, usable)
-    for value in values:
+    by_name = _group_by(lambda path: path.name, usable)
+    by_unique_stem = _unique_by(lambda path: path.stem, usable)
+    by_stem = _group_by(lambda path: path.stem, usable)
+    for _, row in frame.iterrows():
+        value = _first_non_empty(row.get(column) for column in columns)
+        if value is None:
+            continue
         relative_path = value.replace("\\", "/")
         candidate = Path(value)
         if candidate.is_file():
             csv_path = candidate
         elif not candidate.is_absolute() and (report.parent / candidate).is_file():
             csv_path = report.parent / candidate
+        elif relative_path in by_relative:
+            csv_path = by_relative[relative_path]
+        elif candidate.name in by_name and candidate.name not in by_unique_name:
+            raise ArtifactAmbiguityError(f"CSV 文件名匹配存在歧义: {value}")
         elif candidate.name in by_unique_name:
             csv_path = by_unique_name[candidate.name]
+        elif candidate.stem in by_stem and candidate.stem not in by_unique_stem:
+            raise ArtifactAmbiguityError(f"CSV stem 匹配存在歧义: {value}")
+        elif candidate.stem in by_unique_stem:
+            csv_path = by_unique_stem[candidate.stem]
         else:
             csv_path = report.parent / candidate
         if csv_path.exists():
@@ -228,10 +253,23 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
 
 
 def _unique_by(key_func: Callable[[Path], str], paths: Sequence[Path]) -> Dict[str, Path]:
+    grouped = _group_by(key_func, paths)
+    return {key: values[0] for key, values in grouped.items() if len(values) == 1}
+
+
+def _group_by(key_func: Callable[[Path], str], paths: Sequence[Path]) -> Dict[str, List[Path]]:
     grouped: Dict[str, List[Path]] = {}
     for path in paths:
         grouped.setdefault(key_func(path), []).append(path)
-    return {key: values[0] for key, values in grouped.items() if len(values) == 1}
+    return grouped
+
+
+def _first_non_empty(values: Iterable[object]) -> Optional[str]:
+    for value in values:
+        text = "" if value is None else str(value).strip()
+        if text and text.lower() != "nan":
+            return text
+    return None
 
 
 def _casefold_resolve(path: Path) -> str:
