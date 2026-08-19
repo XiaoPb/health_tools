@@ -95,15 +95,17 @@ def _custom_accuracy(request: AnalyzeRequest) -> bool:
     return request.accuracy_thresholds is not None or request.accuracy_inclusive
 
 
-def _raw_files(source: Path) -> Tuple[Path, List[Path]]:
+def _raw_files(source: Path, excluded_root: Optional[Path] = None) -> Tuple[Path, List[Path]]:
     root = source.parent if source.is_file() else source
     if source.is_file():
         files = [source]
     else:
+        excluded = excluded_root.resolve() if excluded_root is not None else None
         files = [
             path
             for path in sorted(source.rglob("*.csv"))
             if path.name.lower() not in ANALYSIS_AUXILIARY_CSVS
+            and (excluded is None or not _inside(path, excluded))
         ]
     return root, files
 
@@ -1107,7 +1109,7 @@ def run_analyze(
     current_raw_root: Optional[Path] = None
     current_raw_files: List[Path] = []
     if not source_offline_result and not source_psd_result:
-        current_raw_root, current_raw_files = _raw_files(source)
+        current_raw_root, current_raw_files = _raw_files(source, output)
         current_input_artifacts = list(current_raw_files)
     elif source_offline_result:
         offline_result_path = request.offline_result_path
@@ -1169,7 +1171,7 @@ def run_analyze(
         if current_raw_root is not None:
             root, raw_files = current_raw_root, current_raw_files
         else:
-            root, raw_files = _raw_files(source)
+            root, raw_files = _raw_files(source, output)
         if not raw_files:
             raise RequestValidationError(f"未找到可分析的原始 CSV: {source}")
         discover_fingerprint = _stage_fingerprint("discover", request_key)
