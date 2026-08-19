@@ -252,6 +252,7 @@ class PlotRequest:
     freq_bpm: bool = True
     freq_range: str = "30-240"
     ref_column: Optional[str] = None
+    r_column: Optional[str] = None
     psd_acc: str = "axis"
     no_show: bool = False
     filter_name: Optional[str] = None

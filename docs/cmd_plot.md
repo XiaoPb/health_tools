@@ -30,6 +30,7 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--freq-bpm` | Y 轴显示 BPM（默认: 是） |
 | `--freq-range` | 频率范围 BPM（默认: 30-240） |
 | `--ref-column` | 参考曲线列名 |
+| `--r-column` | AC 模式 R 曲线列名；未指定时要求包含 CH0、CH1，并按 `CH0_PI/CH1_PI*10000` 计算 |
 | `--psd-acc` | PSD 模式下 ACC 绘图: `axis` 三轴 / `rms` 合成（默认: axis） |
 | `--accuracy-thresholds` | PSD 固定准确度阈值，逗号分隔，默认 `5,10,15` |
 | `--accuracy-inclusive/--accuracy-strict` | PSD 阈值边界包含/严格模式；默认 strict，即 `abs(error) < threshold` |
@@ -43,8 +44,10 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 指定 `--type ac` 时，每个通道组生成一张包含三个纵向子图的图片：
 
 1. 原始 ACCX、ACCY、ACCZ 三轴；
-2. 去基线并经过 `--bandpass` 带通滤波后的 PPG；
-3. 各 PPG 通道的 PI 百分比。
+2. 去基线并经过 `--bandpass` 带通滤波后的 PPG；Y 轴上下限根据峰值数量最多通道的峰高分布同步确定；
+3. 各 PPG 通道的 PI 百分比，并叠加 R 曲线。R 可由 `--r-column` 指定 CSV 列；未指定时要求当前图包含 CH0、CH1，并按 `CH0_PI/CH1_PI*10000` 计算。
+
+  第一个 ACC 子图仍叠加 ACCX、ACCY、ACCZ，但三轴分别使用独立的 Y 轴刻度。
 
 同一通道在 PPG 和 PI 子图中使用相同颜色。每组最多包含 4 个 PPG 通道，PI 使用居中的
 完整 5 秒滑动窗口计算：

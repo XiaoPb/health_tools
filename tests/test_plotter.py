@@ -19,7 +19,7 @@ def _analysis_df(sample_rate: int = 10, seconds: int = 10) -> pd.DataFrame:
             "ACCY": np.cos(time),
             "ACCZ": np.sin(time * 2),
             "CH0": 100 + 3 * np.sin(2 * np.pi * time),
-            "CH2": 200 + 5 * np.sin(2 * np.pi * 1.2 * time),
+            "CH1": 200 + 5 * np.sin(2 * np.pi * 1.2 * time),
         }
     )
 
@@ -36,17 +36,90 @@ def test_plot_ac_draws_three_subplots_and_keeps_channel_colors(monkeypatch, tmp_
     output = tmp_path / "ac.png"
 
     DataPlotter(sample_rate=10).plot_ac(
-        _analysis_df(), output, ["CH0", "CH2"], ["ACCX", "ACCY", "ACCZ"]
+        _analysis_df(), output, ["CH0", "CH1"], ["ACCX", "ACCY", "ACCZ"]
     )
 
     fig = saved[0]
     assert output.stat().st_size > 0
-    assert len(fig.axes) == 3
-    assert [line.get_label() for line in fig.axes[0].lines] == ["ACCX", "ACCY", "ACCZ"]
-    assert [line.get_label() for line in fig.axes[1].lines] == ["CH0", "CH2"]
-    assert [line.get_label() for line in fig.axes[2].lines] == ["CH0", "CH2"]
+    assert len(fig.axes) == 6
+    assert [line.get_label() for line in fig.axes[0].lines] == ["ACCX"]
+    assert [line.get_label() for line in fig.axes[3].lines] == ["ACCY"]
+    assert [line.get_label() for line in fig.axes[4].lines] == ["ACCZ"]
+    assert [line.get_label() for line in fig.axes[1].lines] == ["CH0", "CH1"]
+    assert [line.get_label() for line in fig.axes[2].lines] == ["CH0", "CH1"]
+    assert [line.get_label() for line in fig.axes[5].lines] == ["R"]
     assert fig.axes[1].lines[0].get_color() == fig.axes[2].lines[0].get_color()
     assert fig.axes[1].lines[1].get_color() == fig.axes[2].lines[1].get_color()
+
+
+def test_plot_ac_uses_symmetric_limits_from_dominant_peak_distribution(monkeypatch, tmp_path: Path):
+    filtered = {
+        "CH0": np.array([0.0, 1.0, 0.0, 1.1, 0.0, 0.9, 0.0, 20.0, 0.0]),
+        "CH1": np.array([0.0, 2.0, 0.0, 2.1, 0.0, 1.9, 0.0, 2.2, 0.0]),
+    }
+
+    monkeypatch.setattr(
+        "health_tools.core.plotter.bandpass_signal",
+        lambda raw, *args, **kwargs: filtered["CH0" if raw[0] == 100 else "CH1"],
+    )
+    monkeypatch.setattr(
+        "health_tools.core.plotter.compute_pi",
+        lambda raw, ac, sample_rate: pd.Series(np.ones(len(ac))),
+    )
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+
+    df = pd.DataFrame(
+        {
+            "ACCX": np.zeros(9),
+            "ACCY": np.zeros(9),
+            "ACCZ": np.zeros(9),
+            "CH0": np.full(9, 100.0),
+            "CH1": np.full(9, 200.0),
+        }
+    )
+    DataPlotter(sample_rate=10).plot_ac(
+        df, tmp_path / "ac.png", ["CH0", "CH1"], ["ACCX", "ACCY", "ACCZ"]
+    )
+
+    lower, upper = saved[0].axes[1].get_ylim()
+    assert lower == pytest.approx(-upper)
+    assert upper < 20
+
+
+def test_plot_ac_reads_explicit_r_column(tmp_path: Path, monkeypatch):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = _analysis_df()
+    df["R_VALUE"] = np.linspace(1.0, 2.0, len(df))
+
+    DataPlotter(sample_rate=10).plot_ac(
+        df,
+        tmp_path / "ac.png",
+        ["CH0", "CH1"],
+        ["ACCX", "ACCY", "ACCZ"],
+        r_column="R_VALUE",
+    )
+
+    assert np.array_equal(saved[0].axes[5].lines[0].get_ydata(), df["R_VALUE"].to_numpy())
+
+
+def test_plot_ac_calculates_r_from_ch0_and_ch1_pi(tmp_path: Path, monkeypatch):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    monkeypatch.setattr(
+        "health_tools.core.plotter.compute_pi",
+        lambda raw, ac, sample_rate: pd.Series(np.full(len(ac), 2.0 if raw[0] < 150 else 4.0)),
+    )
+
+    DataPlotter(sample_rate=10).plot_ac(
+        _analysis_df(),
+        tmp_path / "ac.png",
+        ["CH0", "CH1"],
+        ["ACCX", "ACCY", "ACCZ"],
+    )
+
+    assert np.all(saved[0].axes[5].lines[0].get_ydata() == 5000.0)
 
 
 def test_plot_ac_rejects_more_than_four_channels(tmp_path: Path):
@@ -58,7 +131,7 @@ def test_plot_ac_rejects_more_than_four_channels(tmp_path: Path):
         DataPlotter(sample_rate=10).plot_ac(
             df,
             tmp_path / "ac.png",
-            ["CH0", "CH2", "CH3", "CH4", "CH5"],
+            ["CH0", "CH1", "CH3", "CH4", "CH5"],
             ["ACCX", "ACCY", "ACCZ"],
         )
 

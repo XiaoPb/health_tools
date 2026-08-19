@@ -44,6 +44,39 @@ def _downsample(data: np.ndarray, max_points: int = MAX_PLOT_POINTS) -> np.ndarr
     return data[::step]
 
 
+def _peak_symmetric_limit(signals: List[np.ndarray]) -> float:
+    """按峰值数量最多的信号峰高分布确定对称 Y 轴半幅。"""
+    candidates = []
+    for values in signals:
+        finite = np.asarray(values, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if finite.size < 3:
+            candidates.append((0, 0.0))
+            continue
+        peaks, _ = signal.find_peaks(np.abs(finite))
+        heights = np.abs(finite[peaks])
+        heights = heights[heights > np.finfo(float).eps]
+        candidates.append((len(heights), float(np.max(heights)) if heights.size else 0.0))
+
+    if not candidates:
+        return 1.0
+    dominant_index = max(range(len(candidates)), key=lambda index: candidates[index][0])
+    dominant = np.asarray(signals[dominant_index], dtype=float)
+    dominant = dominant[np.isfinite(dominant)]
+    peaks, _ = signal.find_peaks(np.abs(dominant))
+    heights = np.abs(dominant[peaks])
+    heights = heights[heights > np.finfo(float).eps]
+    if heights.size:
+        bins = min(10, max(3, int(np.sqrt(len(heights)))))
+        _, edges = np.histogram(heights, bins=bins)
+        counts, _ = np.histogram(heights, bins=edges)
+        mode = int(np.argmax(counts))
+        limit = float(edges[mode + 1])
+    else:
+        limit = float(np.nanmax(np.abs(dominant))) if dominant.size else 1.0
+    return max(limit * 1.05, np.finfo(float).eps)
+
+
 class DataPlotter:
     def __init__(
         self,
@@ -143,13 +176,16 @@ class DataPlotter:
         output_file: Path,
         channels: List[str],
         acc_columns: List[str],
+        r_column: Optional[str] = None,
     ) -> None:
-        """绘制原始 ACC、滤波后 PPG 和 PI。"""
+        """绘制三轴 ACC、滤波后 PPG、PI 和 R。"""
         if not channels:
             raise SignalAnalysisError("AC 绘图至少需要 1 个 PPG 通道")
         if len(channels) > 4:
             raise SignalAnalysisError("每张 AC 图最多支持 4 个 PPG 通道")
         missing = [column for column in channels + acc_columns if column not in df.columns]
+        if r_column and r_column not in df.columns:
+            missing.append(r_column)
         if missing:
             raise SignalAnalysisError(f"输入缺少绘图列: {', '.join(missing)}")
         if len(acc_columns) != 3:
@@ -157,16 +193,21 @@ class DataPlotter:
 
         time = np.arange(len(df), dtype=float) / self.sample_rate
         fig = _new_figure((14, 10))
-        axes = np.atleast_1d(fig.subplots(3, 1, sharex=True))
+        base_axes = np.atleast_1d(fig.subplots(3, 1, sharex=True))
+        acc_axes = [base_axes[0], base_axes[0].twinx(), base_axes[0].twinx()]
+        acc_axes[2].spines["right"].set_position(("axes", 1.12))
+        r_axis = base_axes[2].twinx()
         colors = rcParams["axes.prop_cycle"].by_key()["color"]
 
-        for column in acc_columns:
+        for axis, column in zip(acc_axes, acc_columns):
             acc = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
-            axes[0].plot(time, acc, linewidth=0.6, label=column)
-        axes[0].set_ylabel("ACC")
-        axes[0].legend(loc="upper right")
-        axes[0].grid(True, alpha=0.3)
+            axis.plot(time, acc, linewidth=0.6, label=column)
+            axis.set_ylabel(column)
+            axis.legend(loc="upper right")
+            axis.grid(True, alpha=0.3)
 
+        filtered_signals = []
+        pi_values = {}
         for index, channel in enumerate(channels):
             raw = prepare_signal(df[channel])
             filtered = bandpass_signal(
@@ -178,14 +219,39 @@ class DataPlotter:
                 baseline_method=self.baseline_method,
             )
             pi = compute_pi(raw, filtered, self.sample_rate)
+            filtered_signals.append(filtered)
+            pi_values[channel] = pi
             color = colors[index % len(colors)]
-            axes[1].plot(time, filtered, linewidth=0.7, color=color, label=channel)
-            axes[2].plot(time, pi, linewidth=0.8, color=color, label=channel)
+            base_axes[1].plot(time, filtered, linewidth=0.7, color=color, label=channel)
+            base_axes[2].plot(time, pi, linewidth=0.8, color=color, label=channel)
 
-        axes[1].set_ylabel("Filtered PPG")
-        axes[2].set_ylabel("PI (%)")
-        axes[2].set_xlabel("Time (s)")
-        for ax in axes[1:]:
+        limit = _peak_symmetric_limit(filtered_signals)
+        base_axes[1].set_ylim(-limit, limit)
+        if r_column:
+            r_values = pd.to_numeric(df[r_column], errors="coerce").to_numpy(dtype=float)
+        else:
+            if "CH0" not in pi_values or "CH1" not in pi_values:
+                raise SignalAnalysisError("AC 绘图未同时包含 CH0 和 CH1，无法计算 R 曲线")
+            denominator = pi_values["CH1"].to_numpy(dtype=float)
+            numerator = pi_values["CH0"].to_numpy(dtype=float)
+            r_values = (
+                np.divide(
+                    numerator,
+                    denominator,
+                    out=np.full_like(numerator, np.nan),
+                    where=np.isfinite(denominator) & (np.abs(denominator) > np.finfo(float).eps),
+                )
+                * 10000.0
+            )
+        r_axis.plot(time, r_values, linewidth=0.8, color="#111827", label="R")
+        r_axis.set_ylabel("R")
+        r_axis.legend(loc="lower right")
+        r_axis.grid(False)
+
+        base_axes[1].set_ylabel("Filtered PPG")
+        base_axes[2].set_ylabel("PI (%)")
+        base_axes[2].set_xlabel("Time (s)")
+        for ax in base_axes[1:]:
             ax.legend(loc="upper right")
             ax.grid(True, alpha=0.3)
         fig.tight_layout()

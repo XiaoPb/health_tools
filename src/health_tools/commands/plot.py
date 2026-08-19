@@ -32,6 +32,7 @@ console = Console()
 @click.option("--freq-bpm", is_flag=True, default=True, help="Y轴显示BPM（默认: 是）")
 @click.option("--freq-range", default="30-240", help="频率范围（BPM，默认: 30-240）")
 @click.option("--ref-column", help="参考曲线列名")
+@click.option("--r-column", help="AC 模式 R 曲线列名；未指定时按 CH0_PI/CH1_PI*10000 计算")
 @click.option(
     "--psd-acc",
     type=click.Choice(["axis", "rms"]),
@@ -68,6 +69,7 @@ def plot_cmd(
     freq_bpm: bool,
     freq_range: str,
     ref_column: Optional[str],
+    r_column: Optional[str],
     psd_acc: str,
     no_show: bool,
     filter_name: Optional[str],
@@ -101,6 +103,7 @@ def plot_cmd(
                     freq_bpm=freq_bpm,
                     freq_range=freq_range,
                     ref_column=ref_column,
+                    r_column=r_column,
                     psd_acc=psd_acc,
                     no_show=no_show,
                     filter_name=filter_name,
@@ -173,6 +176,7 @@ def _plot_file(
     plot_type: str,
     channels: Optional[List[str]],
     ref_column: Optional[str],
+    r_column: Optional[str],
     no_show: bool,
     verbose: bool,
     chip_rule=None,
@@ -239,7 +243,7 @@ def _plot_file(
             for group in groups or []:
                 suffix = "" if automatic else f"_{_safe_channel_suffix(group)}"
                 output_file = output_dir / f"{input_file.stem}_ac{suffix}.{plotter.fmt}"
-                plotter.plot_ac(df, output_file, group, acc_columns)
+                plotter.plot_ac(df, output_file, group, acc_columns, r_column=r_column)
                 output_files.append(str(output_file))
                 if verbose:
                     console.print(f"[green]OK[/green] AC/PI图: {output_file}")

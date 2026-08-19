@@ -915,7 +915,10 @@ def _plot_one(path, output, request, chip_rule, channels, groups) -> ItemResult:
             for group in actual_groups or []:
                 suffix = "" if automatic else f"_{_safe_suffix(group)}"
                 target = output / f"{path.stem}_ac{suffix}.{plotter.fmt}"
-                plotter.plot_ac(frame, target, group, acc)
+                if request.r_column is None:
+                    plotter.plot_ac(frame, target, group, acc)
+                else:
+                    plotter.plot_ac(frame, target, group, acc, r_column=request.r_column)
                 outputs.append(target)
         if request.plot_type == "fft":
             from health_tools.core.ppg_analysis import resolve_ppg_channels
