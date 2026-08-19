@@ -22,6 +22,7 @@ from health_tools.api import (
     ParseRequest,
     PlotRequest,
     ProgressEvent,
+    RequestValidationError,
     RuleCatalogResult,
     RuleDocumentResult,
     RuleInfo,
@@ -31,9 +32,14 @@ from health_tools.api import (
     RuleSource,
     RuleType,
     RuleVariantInfo,
+    run_analyze,
+    run_classify,
+    run_evaluate,
     run_info,
     run_list_rules,
+    run_offline,
     run_offline_catalog,
+    run_plot,
     run_read_rule,
     run_save_rule,
 )
@@ -157,3 +163,39 @@ def test_accuracy_request_defaults(request_model):
     assert request_model.accuracy_inclusive is False
     EvaluateRequest,
     OfflineRequest,
+
+
+@pytest.mark.parametrize(
+    ("operation", "request_model"),
+    [
+        (
+            run_plot,
+            PlotRequest(Path("missing"), Path("out"), accuracy_thresholds=(5.0, 0.0)),
+        ),
+        (
+            run_classify,
+            ClassifyRequest(Path("missing"), Path("out"), accuracy_thresholds=(5.0, 0.0)),
+        ),
+        (
+            run_evaluate,
+            EvaluateRequest(Path("missing"), Path("out"), accuracy_thresholds=(5.0, 0.0)),
+        ),
+        (
+            run_offline,
+            OfflineRequest(
+                input_path=Path("missing"),
+                output_path=Path("out"),
+                accuracy_thresholds=(5.0, 0.0),
+            ),
+        ),
+        (
+            run_analyze,
+            AnalyzeRequest(Path("missing"), Path("out"), accuracy_thresholds=(5.0, 0.0)),
+        ),
+    ],
+)
+def test_accuracy_operations_reject_invalid_thresholds_before_path_validation(
+    operation, request_model
+):
+    with pytest.raises(RequestValidationError, match="有限正数"):
+        operation(request_model)
