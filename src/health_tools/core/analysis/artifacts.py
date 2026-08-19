@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 MATCH_ORDER = ("relative_path", "file_name", "unique_stem")
 _KINDS = ("time", "ac", "psd", "stft", "evidence")
@@ -31,6 +31,14 @@ class ArtifactItem:
         return self.figures[1:]
 
 
+@dataclass(frozen=True)
+class _ReportCsvEntry:
+    relative_path: str
+    csv_path: Path
+    status: str = "OK"
+    reason: str = ""
+
+
 @dataclass
 class ArtifactIndex:
     items: Dict[str, ArtifactItem] = field(default_factory=dict)
@@ -44,10 +52,11 @@ class ArtifactIndex:
         check_report: Optional[Path] = None,
     ) -> "ArtifactIndex":
         csv_files = [Path(path) for path in csv_paths if Path(path).is_file()]
+        report_entries: List[_ReportCsvEntry] = []
         if check_report is not None and Path(check_report).is_file():
-            listed = _csvs_from_report(Path(check_report), csv_files)
-            if listed:
-                csv_files = listed
+            report_entries = _csvs_from_report(Path(check_report), csv_files)
+            if report_entries:
+                csv_files = [entry.csv_path for entry in report_entries]
         roots = [Path(path) for path in figure_dirs]
         figure_files: List[Path] = []
         for root in roots:
@@ -56,6 +65,22 @@ class ArtifactIndex:
             elif root.is_dir():
                 figure_files.extend(sorted(root.rglob("*.png")))
         figure_files = sorted(set(figure_files), key=lambda path: path.as_posix().lower())
+        if report_entries:
+            items: Dict[str, ArtifactItem] = {}
+            for entry in report_entries:
+                figures = (
+                    _match_figures(entry.relative_path, entry.csv_path, figure_files, roots)
+                    if entry.status == "OK"
+                    else ()
+                )
+                items[entry.relative_path] = ArtifactItem(
+                    csv_path=entry.csv_path,
+                    relative_path=entry.relative_path,
+                    figures=figures,
+                    status=entry.status,
+                    reason=entry.reason,
+                )
+            return cls(items=items, figures=tuple(figure_files))
         figures_by_csv: Dict[str, Tuple[Path, ...]] = {}
         for csv_file in csv_files:
             root = _common_root(csv_file, csv_files)
@@ -161,7 +186,7 @@ def _figure_rank(path: Path) -> int:
     return len(_KINDS)
 
 
-def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[Path]:
+def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCsvEntry]:
     try:
         import pandas as pd
 
@@ -174,12 +199,43 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[Path]:
     if not columns:
         return []
     values = [str(value) for value in frame[columns[0]].dropna().tolist()]
-    result: List[Path] = []
-    by_name = {path.name: path for path in available}
+    result: List[_ReportCsvEntry] = []
+    usable = [path for path in available if _casefold_resolve(path) != _casefold_resolve(report)]
+    by_unique_name = _unique_by(lambda path: path.name, usable)
     for value in values:
+        relative_path = value.replace("\\", "/")
         candidate = Path(value)
         if candidate.is_file():
-            result.append(candidate)
-        elif candidate.name in by_name:
-            result.append(by_name[candidate.name])
+            csv_path = candidate
+        elif not candidate.is_absolute() and (report.parent / candidate).is_file():
+            csv_path = report.parent / candidate
+        elif candidate.name in by_unique_name:
+            csv_path = by_unique_name[candidate.name]
+        else:
+            csv_path = report.parent / candidate
+        if csv_path.exists():
+            result.append(_ReportCsvEntry(relative_path=relative_path, csv_path=csv_path))
+        else:
+            result.append(
+                _ReportCsvEntry(
+                    relative_path=relative_path,
+                    csv_path=csv_path,
+                    status="SKIP",
+                    reason="文件不存在",
+                )
+            )
     return result
+
+
+def _unique_by(key_func: Callable[[Path], str], paths: Sequence[Path]) -> Dict[str, Path]:
+    grouped: Dict[str, List[Path]] = {}
+    for path in paths:
+        grouped.setdefault(key_func(path), []).append(path)
+    return {key: values[0] for key, values in grouped.items() if len(values) == 1}
+
+
+def _casefold_resolve(path: Path) -> str:
+    try:
+        return str(path.resolve()).casefold()
+    except OSError:
+        return str(path).casefold()

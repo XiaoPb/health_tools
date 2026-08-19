@@ -45,6 +45,13 @@ from health_tools.core.analysis.reporting import (
 from health_tools.core.analysis.workspace import AnalysisWorkspace, request_fingerprint
 from health_tools.rules.loader import RuleLoader
 
+ANALYSIS_AUXILIARY_CSVS = {
+    "check_report.csv",
+    "check_report_compact.csv",
+    "analysis_summary.csv",
+    "analysis_diagnosis.csv",
+}
+
 
 def _validate(request: AnalyzeRequest) -> None:
     if request.analysis_type not in {"hr", "spo2", "other"}:
@@ -89,7 +96,14 @@ def _custom_accuracy(request: AnalyzeRequest) -> bool:
 
 def _raw_files(source: Path) -> Tuple[Path, List[Path]]:
     root = source.parent if source.is_file() else source
-    files = [source] if source.is_file() else sorted(source.rglob("*.csv"))
+    if source.is_file():
+        files = [source]
+    else:
+        files = [
+            path
+            for path in sorted(source.rglob("*.csv"))
+            if path.name.lower() not in ANALYSIS_AUXILIARY_CSVS
+        ]
     return root, files
 
 
@@ -293,6 +307,8 @@ def _apply_check_results(records: List[AnalysisRecord], report_path: Optional[Pa
         return
     report = pd.read_csv(report_path, encoding="utf-8-sig")
     for record in records:
+        if record.features.get("input_status") == "SKIP":
+            continue
         row = report[
             (report.get("文件相对路径", pd.Series(dtype=str)).astype(str) == record.file)
             | (report.get("文件名", pd.Series(dtype=str)).astype(str) == Path(record.file).name)
@@ -353,6 +369,8 @@ def _apply_compact_check_results(
     if "检查项" not in report.columns:
         return
     for record in records:
+        if record.features.get("input_status") == "SKIP":
+            continue
         relative = (
             report["文件相对路径"].fillna("").astype(str)
             if "文件相对路径" in report.columns
@@ -447,16 +465,30 @@ def _raw_records(
     root, files = _raw_files(source)
     if not files:
         raise RequestValidationError(f"输入目录没有 CSV: {source}")
-    names = [_logical(path, root) for path in files]
+    report_items = []
+    if request.check_report_path is not None and Path(request.check_report_path).is_file():
+        report_index = ArtifactIndex.build(files, check_report=request.check_report_path)
+        report_items = list(report_index.items.values())
+    names = [item.relative_path for item in report_items] or [
+        _logical(path, root) for path in files
+    ]
     focused = _focus(names, request.focus)
-    chip = request.chip_name or detect_chip(files[0])
+    existing_files = [item.csv_path for item in report_items if item.csv_path.exists()] or files
+    chip = request.chip_name or detect_chip(existing_files[0])
     records: List[AnalysisRecord] = []
-    total = len(files)
+    total = len(report_items) if report_items else len(files)
     context.emit(ProgressEvent("analyze", "raw", 0, total, "分析原始数据"))
-    for index, path in enumerate(files, 1):
+    raw_items = (
+        [(item.relative_path, item.csv_path, item.status, item.reason) for item in report_items]
+        if report_items
+        else [(_logical(path, root), path, "OK", "") for path in files]
+    )
+    analyzed_files: List[Path] = []
+    for index, (name, path, status, reason) in enumerate(raw_items, 1):
         context.check_cancelled("raw", records)
-        name = _logical(path, root)
         try:
+            if status != "OK" or not path.exists():
+                raise FileNotFoundError(reason or "文件不存在")
             if _custom_accuracy(request):
                 result, frame, _ = analyze_raw_file(
                     path,
@@ -511,18 +543,23 @@ def _raw_records(
                     request.timestamp_column or rule.columns.get("timestamp"),
                 ),
             )
+            analyzed_files.append(path)
         except Exception as exc:
+            skip_reason = reason if status == "SKIP" else ""
             record = AnalysisRecord(
                 file=name,
                 source=str(path),
                 analysis_type=request.analysis_type,
                 focused=name in focused,
                 conclusion="证据不足",
-                notes=[f"读取或分析失败: {exc}"],
+                features=(
+                    {"input_status": "SKIP", "skip_reason": skip_reason} if status == "SKIP" else {}
+                ),
+                notes=[skip_reason or f"读取或分析失败: {exc}"],
             )
         records.append(record)
         context.emit(ProgressEvent("analyze", "raw", index, total, "完成", name))
-    return records, root, files, focused, chip
+    return records, root, analyzed_files or existing_files, focused, chip
 
 
 def run_raw_stage(request: AnalyzeRequest, source: Path, rule, context: ExecutionContext):
@@ -586,7 +623,12 @@ def _escalate(
     output: Path,
     context: ExecutionContext,
 ) -> List[Path]:
-    candidates = [record for record in records if record.focused or record.conclusion == "证据不足"]
+    candidates = [
+        record
+        for record in records
+        if record.features.get("input_status") != "SKIP"
+        and (record.focused or record.conclusion == "证据不足")
+    ]
     if not candidates:
         return []
     if request.analysis_type != "hr" or not rule.offline.get("enabled"):
@@ -881,6 +923,8 @@ def run_analyze(
             _generate_psd_plots(source, records, figures / "psd", ctx)
     else:
         root, raw_files = _raw_files(source)
+        if not raw_files:
+            raise RequestValidationError(f"未找到可分析的原始 CSV: {source}")
         chip = request.chip_name or detect_chip(raw_files[0])
         check_path: Optional[Path] = request.check_report_path
         if check_path is None and chip:

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ from health_tools.api.analysis_operation import (
     _generate_psd_plots,
     _generate_raw_plots,
     _offline_records,
+    _raw_files,
     _run_supporting_stages,
 )
 from health_tools.api.context import ExecutionContext
@@ -85,6 +87,67 @@ def _write_csv(path: Path, error: float = 0.0) -> None:
         }
     )
     frame.to_csv(path, index=False)
+
+
+def test_raw_files_excludes_analysis_auxiliary_csvs(tmp_path: Path):
+    source = tmp_path / "data"
+    source.mkdir()
+    sample = source / "sample.csv"
+    sample.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+    for name in (
+        "check_report.csv",
+        "check_report_compact.csv",
+        "analysis_summary.csv",
+        "analysis_diagnosis.csv",
+    ):
+        (source / name).write_text("file,result\nsample.csv,FAIL\n", encoding="utf-8")
+
+    root, files = _raw_files(source)
+
+    assert root == source
+    assert files == [sample]
+
+
+def test_run_analyze_rejects_directory_with_only_auxiliary_csvs(tmp_path: Path):
+    source = tmp_path / "data"
+    source.mkdir()
+    (source / "check_report.csv").write_text(
+        "文件名,总异常(结果)\nsample.csv,FAIL\n", encoding="utf-8"
+    )
+
+    with pytest.raises(RequestValidationError, match="未找到可分析的原始 CSV"):
+        run_analyze(AnalyzeRequest(source, tmp_path / "out", chip_name="gh3036"))
+
+
+def test_run_analyze_keeps_missing_rows_from_check_report(tmp_path: Path):
+    source = tmp_path / "data"
+    existing = source / "a" / "one.csv"
+    _write_csv(existing)
+    report = source / "check_report.csv"
+    pd.DataFrame(
+        {
+            "文件相对路径": ["a/one.csv", "b/missing.csv"],
+            "总异常(结果)": ["PASS", "FAIL"],
+        }
+    ).to_csv(report, index=False, encoding="utf-8-sig")
+
+    result = run_analyze(
+        AnalyzeRequest(
+            source,
+            tmp_path / "out",
+            chip_name="gh3036",
+            check_report_path=report,
+            allow_offline=False,
+        )
+    )
+
+    records = json.loads(result.summary_path.read_text(encoding="utf-8"))
+
+    assert [record["file"] for record in records] == ["a/one.csv", "b/missing.csv"]
+    missing = records[1]
+    assert missing["features"]["input_status"] == "SKIP"
+    assert missing["features"]["skip_reason"] == "文件不存在"
+    assert missing["notes"] == ["文件不存在"]
 
 
 def test_structured_conditions_do_not_evaluate_expressions():
