@@ -24,6 +24,7 @@ class CheckResult:
     status: str = ""
     abnormal_ratio: float = 0.0
     threshold_ratio: float = 0.0
+    channel_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.status:
@@ -233,6 +234,12 @@ class DataChecker:
 
         return self.RANGE_MAP.get(self.chip_name, self.RANGE_MAP.get("gh3036", (0, 2**23)))
 
+    def _adc_domain(self) -> Tuple[float, float]:
+        info = self.chip_rule.chip_info or {}
+        return float(info.get("adc_offset", 0)), float(
+            info.get("adc_full_scale", self.ADC_FULL_SCALE)
+        )
+
     def check_data_range(self, df: pd.DataFrame, threshold_ratio: float = 1.0) -> CheckResult:
         """检查原始数据是否在正常范围内"""
         all_data_cols = [c for c in self._get_data_columns() if c in df.columns]
@@ -363,6 +370,10 @@ class DataChecker:
         details: List[str] = []
         total_cells = 0
         total_abnormal = 0
+        channel_metrics: Dict[str, Dict[str, float]] = {}
+        _, full_scale = self._adc_domain()
+        center_low = 0.3 * full_scale
+        center_high = 0.85 * full_scale
 
         for col in data_cols:
             col_data = pd.to_numeric(df[col], errors="coerce").dropna()
@@ -370,9 +381,24 @@ class DataChecker:
                 continue
             total_cells += len(col_data)
             centered = col_data - offset
-            out_low = (centered < self.CENTER_LOW).sum()
-            out_high = (centered > self.CENTER_HIGH).sum()
+            out_low = (centered < center_low).sum()
+            out_high = (centered > center_high).sum()
             out_total = out_low + out_high
+            near_zero = centered <= 0.05 * full_scale
+            near_full = centered >= 0.95 * full_scale
+            channel_metrics[col] = {
+                "abnormal_count": int(out_total),
+                "total_count": int(len(col_data)),
+                "abnormal_ratio": float(out_total / len(col_data) * 100),
+                "low_count": int(out_low),
+                "low_ratio": float(out_low / len(col_data) * 100),
+                "high_count": int(out_high),
+                "high_ratio": float(out_high / len(col_data) * 100),
+                "near_zero_count": int(near_zero.sum()),
+                "near_zero_ratio": float(near_zero.mean() * 100),
+                "near_full_count": int(near_full.sum()),
+                "near_full_ratio": float(near_full.mean() * 100),
+            }
             if out_total > 0:
                 total_abnormal += out_total
                 pct = out_total / len(col_data) * 100
@@ -384,7 +410,7 @@ class DataChecker:
 
         col_names = ", ".join(off_center_cols)
         pct = total_abnormal / total_cells * 100 if total_cells > 0 else 0
-        return self._build_result(
+        result = self._build_result(
             name="数据居中",
             abnormal_count=total_abnormal,
             total_count=total_cells,
@@ -402,6 +428,26 @@ class DataChecker:
                 + (f"；跳过 {len(skipped_cols)} 个全0预留通道" if skipped_cols else "")
             ),
             details=details,
+        )
+        result.channel_metrics = channel_metrics
+        return result
+
+    def check_agc_changes(self, df: pd.DataFrame) -> CheckResult:
+        """统计 AGC_INFO 相邻有效样本的调光变化次数。"""
+        metrics: Dict[str, Dict[str, float]] = {}
+        for column in (name for name in self._get_agc_columns() if name in df.columns):
+            values = pd.to_numeric(df[column], errors="coerce")
+            valid_pairs = values.notna() & values.shift().notna()
+            changes = valid_pairs & values.ne(values.shift())
+            pair_count = int(valid_pairs.sum())
+            change_count = int(changes.sum())
+            metrics[column] = {
+                "change_count": change_count,
+                "total_count": pair_count,
+                "change_ratio": float(change_count / pair_count * 100) if pair_count else 0.0,
+            }
+        return CheckResult(
+            "AGC调光", True, "已统计 AGC 相邻变化", status="PASS", channel_metrics=metrics
         )
 
     def check_timestamp_interval(

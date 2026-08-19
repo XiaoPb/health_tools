@@ -132,6 +132,56 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
             writer.writerow(row)
 
 
+COMPACT_HEADER = [
+    "文件名", "文件相对路径", "芯片", "检查项", "状态", "通道",
+    "异常数", "总数", "异常占比", "偏低占比", "偏高占比", "近0占比",
+    "近满量程占比", "AGC变化次数",
+]
+
+
+def _save_compact_report(reports, output: Path, base: Path) -> None:
+    """保存仅包含 WARNING/FAIL 检查项的通道长表。"""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.DictWriter(handle, fieldnames=COMPACT_HEADER)
+        writer.writeheader()
+        for report in reports:
+            agc_metrics = {}
+            for result in report.results:
+                if result.name == "AGC调光":
+                    agc_metrics = result.channel_metrics
+                    break
+            for result in report.results:
+                if result.status not in {"WARNING", "FAIL"}:
+                    continue
+                metrics = result.channel_metrics or {"-": {}}
+                for channel, metric in metrics.items():
+                    agc_count = metric.get("change_count", "")
+                    if not agc_count and channel != "-":
+                        suffix = channel.lower().replace("rawdata", "").replace("ch", "")
+                        for agc_name, agc_metric in agc_metrics.items():
+                            agc_suffix = agc_name.lower().replace("agc_info_", "").replace("ch", "")
+                            if agc_suffix == suffix:
+                                agc_count = agc_metric.get("change_count", "")
+                                break
+                    writer.writerow({
+                        "文件名": report.file_path.name,
+                        "文件相对路径": _relative_path(report.file_path, base),
+                        "芯片": report.chip,
+                        "检查项": result.name,
+                        "状态": result.status,
+                        "通道": channel,
+                        "异常数": metric.get("abnormal_count", ""),
+                        "总数": metric.get("total_count", ""),
+                        "异常占比": metric.get("abnormal_ratio", result.abnormal_ratio),
+                        "偏低占比": metric.get("low_ratio", ""),
+                        "偏高占比": metric.get("high_ratio", ""),
+                        "近0占比": metric.get("near_zero_ratio", ""),
+                        "近满量程占比": metric.get("near_full_ratio", ""),
+                        "AGC变化次数": agc_count,
+                    })
+
+
 def _write_sort_list(path: Path, rows: List[List[str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8-sig") as handle:
@@ -220,9 +270,10 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             "frame",
             "center",
             "acc",
+            "agc",
         }
     )
-    unknown = checks - {"range", "ipd", "frame", "center", "acc"}
+    unknown = checks - {"range", "ipd", "frame", "center", "acc", "agc"}
     if unknown:
         raise RequestValidationError(f"未知检查项: {', '.join(sorted(unknown))}")
     if request.workers < 1:
@@ -263,6 +314,8 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 report.results.append(checker.check_frame_completeness(frame, request.frame_ratio))
             if "center" in checks:
                 report.results.append(checker.check_data_centering(frame, request.center_ratio))
+            if "agc" in checks:
+                report.results.append(checker.check_agc_changes(frame))
             if request.timestamp_column:
                 report.results.append(
                     checker.check_timestamp_interval(
@@ -337,9 +390,15 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     )
     base = target.parent if target.is_file() else target
     _save_report(reports, acc_reports, report_path, base, request.acc_axis)
-    artifacts = [report_path]
+    compact_report_path = report_path.parent / "check_report_compact.csv"
+    _save_compact_report(reports, compact_report_path, base)
+    artifacts = [report_path, compact_report_path]
     for path, frame in ipd_details.items():
         detail = report_path.parent / f"ipd_detail_{path.stem}.csv"
         frame.to_csv(detail, index=False, encoding="utf-8-sig")
         artifacts.append(detail)
-    return CheckResult(_batch("check", items, artifacts), report_path=report_path)
+    return CheckResult(
+        _batch("check", items, artifacts),
+        report_path=report_path,
+        compact_report_path=compact_report_path,
+    )

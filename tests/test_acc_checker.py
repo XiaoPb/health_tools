@@ -7,8 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from health_tools.api.check_operation import _save_compact_report
 from health_tools.commands.check import _save_report_csv
-from health_tools.core.checker import DataChecker, FileCheckReport
+from health_tools.core.checker import CheckResult, DataChecker, FileCheckReport
 from health_tools.models.rules import ChipRule
 
 
@@ -529,6 +530,71 @@ class TestCheckResultStatus:
         fail_result = chk.check_data_range(fail_df, threshold_ratio=1)
         assert fail_result.status == "FAIL"
         assert not fail_result.passed
+
+    def test_centering_exposes_per_channel_rail_ratios(self):
+        rule = ChipRule(
+            chip="gh3036",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["Rawdata0"],
+            check_columns={"data": ["Rawdata0"]},
+            chip_info={"adc_offset": 2000, "adc_full_scale": 1000},
+        )
+        checker = DataChecker(rule)
+        frame = pd.DataFrame({"Rawdata0": [2000, 2040, 2500, 2960, 3000]})
+
+        result = checker.check_data_centering(frame, threshold_ratio=0)
+
+        metric = result.channel_metrics["Rawdata0"]
+        assert metric["near_zero_count"] == 2
+        assert metric["near_zero_ratio"] == pytest.approx(40.0)
+        assert metric["near_full_count"] == 2
+        assert metric["near_full_ratio"] == pytest.approx(40.0)
+
+    def test_agc_changes_count_only_adjacent_valid_transitions(self):
+        rule = ChipRule(
+            chip="gh3036",
+            csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+            columns=["AGC_INFO_CH0"],
+            check_columns={"agc": ["AGC_INFO_CH0"]},
+        )
+        checker = DataChecker(rule)
+        frame = pd.DataFrame({"AGC_INFO_CH0": [1, 1, 2, None, 2, 3, 3]})
+
+        result = checker.check_agc_changes(frame)
+
+        assert result.status == "PASS"
+        assert result.channel_metrics["AGC_INFO_CH0"]["change_count"] == 2
+
+    def test_compact_report_contains_only_abnormal_channel_rows(self, tmp_path):
+        report = FileCheckReport(
+            file_path=tmp_path / "a.csv",
+            chip="gh3036",
+            results=[
+                CheckResult(
+                    "数据居中", False, "异常", status="FAIL", channel_metrics={
+                        "Rawdata0": {
+                            "abnormal_count": 2,
+                            "total_count": 5,
+                            "abnormal_ratio": 40.0,
+                            "low_ratio": 20.0,
+                            "high_ratio": 20.0,
+                            "near_zero_ratio": 20.0,
+                            "near_full_ratio": 20.0,
+                        }
+                    }
+                ),
+                CheckResult("AGC调光", True, "已统计", status="PASS", channel_metrics={
+                    "AGC_INFO_CH0": {"change_count": 3}
+                }),
+            ],
+        )
+        output = tmp_path / "check_report_compact.csv"
+        _save_compact_report([report], output, tmp_path)
+        rows = list(csv.DictReader(output.open(encoding="utf-8-sig")))
+        assert len(rows) == 1
+        assert rows[0]["状态"] == "FAIL"
+        assert rows[0]["通道"] == "Rawdata0"
+        assert rows[0]["AGC变化次数"] == "3"
 
     def test_frame_ratio_boundary_is_warning(self, checker):
         df = pd.DataFrame({"FRAME_ID": list(range(50)) + list(range(51, 100))})
