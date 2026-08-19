@@ -144,6 +144,7 @@ class ConfigResult:
 class CheckResult:
     batch: BatchResult
     report_path: Optional[Path] = None
+    compact_report_path: Optional[Path] = None
     sort_counts: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
