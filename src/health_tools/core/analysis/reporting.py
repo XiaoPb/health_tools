@@ -367,13 +367,55 @@ def _placeholder(slide, placeholder_type):
 def _filename_shape(slide):
     from pptx.enum.shapes import PP_PLACEHOLDER
 
+    named = next(
+        (
+            shape
+            for shape in slide.shapes
+            if shape.name in {"文件名副标题", "文本框 8", "文本占位符 4"}
+        ),
+        None,
+    )
+    if named is not None:
+        return named
     subtitle = _placeholder(slide, PP_PLACEHOLDER.SUBTITLE)
     if subtitle:
         return subtitle
-    return next(
-        (shape for shape in slide.shapes if shape.name in {"文件名副标题", "文本框 8"}),
+    return None
+
+
+def _body_shape(slide):
+    named = next(
+        (shape for shape in slide.shapes if shape.name == "文本占位符 5"),
         None,
     )
+    if named is not None:
+        return named
+    from pptx.enum.shapes import PP_PLACEHOLDER
+
+    return _placeholder(slide, PP_PLACEHOLDER.BODY)
+
+
+def _primary_picture(slide):
+    named = next(
+        (
+            shape
+            for shape in slide.shapes
+            if shape.name in {"内容占位符 1", "内容占位符 3", "主图占位符"}
+        ),
+        None,
+    )
+    if named is not None:
+        return named
+    from pptx.enum.shapes import PP_PLACEHOLDER
+
+    objects = [
+        shape
+        for shape in slide.shapes
+        if shape.is_placeholder
+        and shape.placeholder_format.type == PP_PLACEHOLDER.OBJECT
+        and shape.name not in {"内容占位符 6", "内容占位符 2", "副图占位符"}
+    ]
+    return min(objects, key=lambda shape: shape.top) if objects else None
 
 
 def _remove_secondary_picture(slide) -> None:
@@ -389,16 +431,29 @@ def _remove_secondary_picture(slide) -> None:
         secondary._element.getparent().remove(secondary._element)
 
 
-def _set_compact_body_text(shape, text: str) -> None:
-    from pptx.util import Pt
+def _secondary_picture(slide):
+    from pptx.enum.shapes import PP_PLACEHOLDER
 
+    named = next(
+        (shape for shape in slide.shapes if shape.name in {"副图占位符", "内容占位符 2"}),
+        None,
+    )
+    if named is not None:
+        return named
+    objects = [
+        shape
+        for shape in slide.shapes
+        if shape.is_placeholder and shape.placeholder_format.type == PP_PLACEHOLDER.OBJECT
+    ]
+    return max(objects, key=lambda shape: shape.top) if len(objects) > 1 else None
+
+
+def _set_compact_body_text(shape, text: str) -> None:
     _set_text(shape, text)
     for paragraph in shape.text_frame.paragraphs:
         paragraph.line_spacing = 1
-        paragraph.space_before = Pt(0)
-        paragraph.space_after = Pt(0)
-        for run in paragraph.runs:
-            run.font.size = Pt(12)
+        paragraph.space_before = 0
+        paragraph.space_after = 0
 
 
 def _add_picture(slide, placeholder, image_path: str) -> None:
@@ -428,25 +483,38 @@ def _populate_content(
     body_text: str,
     figure: str = "",
     subtitle_text: str = "",
+    secondary_figure: str = "",
+    check_text: str = "",
 ) -> None:
     from pptx.enum.shapes import PP_PLACEHOLDER
 
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
-    body = _placeholder(slide, PP_PLACEHOLDER.BODY)
-    content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
+    body = _body_shape(slide)
+    content = _primary_picture(slide)
     subtitle = _filename_shape(slide)
+    secondary = _secondary_picture(slide)
+    check_shape = next(
+        (shape for shape in slide.shapes if shape.name == "内容占位符 6"),
+        None,
+    )
     if title:
         _set_text(title, title_text)
     if subtitle:
         _set_text(subtitle, subtitle_text)
     if body:
         _set_compact_body_text(body, body_text)
+    if check_shape:
+        _set_text(check_shape, check_text or "未发现 check 异常")
     if content:
         if figure:
             _add_picture(slide, content, figure)
         else:
             content._element.getparent().remove(content._element)
-    _remove_secondary_picture(slide)
+    if secondary:
+        if secondary_figure:
+            _add_picture(slide, secondary, secondary_figure)
+        else:
+            secondary._element.getparent().remove(secondary._element)
 
 
 def _populate_warning(slide, record: AnalysisRecord) -> None:
@@ -731,23 +799,50 @@ def write_ppt(
         or bool(record.warnings)
         or (record.conclusion == "证据不足" and bool(record.figure))
     ]
+    activity_names = {
+        "rest": "静息",
+        "walk": "步行",
+        "run": "跑步",
+        "cycle": "骑行",
+        "strength": "力量训练",
+        "interval": "间歇训练",
+        "recovery": "恢复阶段",
+        "other": "其他场景",
+    }
     for record in detail_records:
         slide = _duplicate_slide(prs, content)
         cause = (record.cause or {}).get("title", "无")
-        action = "；".join((record.cause or {}).get("actions", [])) or "无"
+        origin = (record.cause or {}).get("origin")
+        actions = [] if origin == "algorithm" else list((record.cause or {}).get("actions", []))
         evidence = record.notes[0] if record.notes else "无"
-        ppt_evidence = evidence.replace("；", "\n")
-        body_text = (
-            f"场景：{record.scene}\n结论：{record.conclusion}\n"
-            f"置信度：{record.confidence:.0%}\n原因：{cause}\n"
-            f"证据：{ppt_evidence}\n原始数据措施：{action}"
-        )
+        body_lines = [
+            f"结论：{cause if cause != '无' else record.conclusion}",
+            f"置信度：{record.confidence:.0%}",
+            f"关键证据：{evidence}",
+        ]
+        if actions:
+            body_lines.append(f"建议：{'；'.join(actions)}")
+        check_metrics = record.features.get("check_channel_metrics", {})
+        check_lines = []
+        if isinstance(check_metrics, dict):
+            for channel, metrics in check_metrics.items():
+                if not isinstance(metrics, dict):
+                    continue
+                ratio = metrics.get("abnormal_ratio")
+                if ratio is not None:
+                    check_lines.append(f"{channel} 异常占比 {float(ratio):.1f}%")
         _populate_content(
             slide,
-            record.scene,
-            body_text,
+            (
+                activity_names.get(record.activity, record.activity)
+                if record.activity and record.activity != "other"
+                else record.scene
+            ),
+            "\n".join(body_lines),
             record.figure or "",
             subtitle_text=record.file,
+            secondary_figure=record.secondary_figure or "",
+            check_text="\n".join(check_lines),
         )
         if record.warnings:
             warning_slide = _duplicate_slide(prs, content)

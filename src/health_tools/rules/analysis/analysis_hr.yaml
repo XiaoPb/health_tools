@@ -26,6 +26,7 @@ thresholds:
   ref_stale_seconds: 120
   ref_jump_per_second: 20
   jump_per_second: 20
+  near_limit_ratio: 0.05
   psd_clarity: 3
   psd_lock_hz: 0.20
   psd_pull_hz: 0.50
@@ -83,6 +84,34 @@ causes:
         - {feature: scene, op: eq, value: static}
         - {feature: pi_low, op: eq, value: true}
     actions: [保持末梢温暖并稳定佩戴，待灌注恢复后重新测量]
+  - id: loose_wear
+    title: 疑似佩戴松动或传感器相对滑动
+    origin: raw
+    priority: 87
+    when:
+      all:
+        - {feature: scene, op: eq, value: dynamic}
+        - at_least: 2
+          conditions:
+            - {feature: agc_unstable, op: eq, value: true}
+            - {feature: baseline_drift, op: eq, value: true}
+            - {feature: channel_dropout, op: eq, value: true}
+            - {feature: psd_noisy, op: eq, value: true}
+    actions: [固定佩戴位置并减少传感器相对皮肤滑动后重新采集]
+  - id: tight_wear
+    title: 疑似佩戴过紧或局部压迫血管
+    origin: raw
+    priority: 86
+    when:
+      all:
+        - {feature: pi_low, op: eq, value: true}
+        - at_least: 2
+          conditions:
+            - {feature: pulse_compressed, op: eq, value: true}
+            - {feature: near_zero, op: eq, value: true}
+            - {feature: channel_dropout, op: eq, value: true}
+            - {feature: activity, op: in, value: [cycle, strength]}
+    actions: [放松至贴合但舒适的松紧度并复测，避免局部持续压迫]
   - id: motion_artifact
     title: 运动或佩戴松动导致原始 PPG 受扰
     origin: raw
@@ -118,6 +147,21 @@ causes:
     origin: algorithm
     priority: 65
     when: {feature: output_jump, op: eq, value: true}
+  - id: rise_lag
+    title: 疑似算法上升响应滞后
+    origin: algorithm
+    priority: 64
+    when: {feature: rise_lag, op: eq, value: true}
+  - id: recovery_lag
+    title: 疑似算法恢复阶段下降滞后
+    origin: algorithm
+    priority: 63
+    when: {feature: recovery_lag, op: eq, value: true}
+  - id: output_plateau
+    title: 疑似算法输出平台化
+    origin: algorithm
+    priority: 62
+    when: {feature: output_plateau, op: eq, value: true}
   - id: unexplained_algorithm_error
     title: 原始数据与参考有效但算法结果持续异常
     origin: algorithm

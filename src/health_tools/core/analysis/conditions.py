@@ -39,6 +39,13 @@ def matches(condition: Mapping[str, Any], features: Mapping[str, Any]) -> bool:
         return any(matches(item, features) for item in condition["any"])
     if "not" in condition:
         return not matches(condition["not"], features)
+    if "at_least" in condition:
+        conditions = condition.get("conditions", ())
+        try:
+            required = int(condition["at_least"])
+        except (TypeError, ValueError):
+            return False
+        return sum(matches(item, features) for item in conditions) >= required
     feature = condition.get("feature")
     if not isinstance(feature, str):
         return False

@@ -15,6 +15,33 @@ from health_tools.models.rules import AnalysisRule, ChipRule
 from health_tools.rules.loader import RuleLoader
 from health_tools.utils.csv_handler import CSVHandler
 
+ACTIVITIES = ("auto", "rest", "walk", "run", "cycle", "strength", "interval", "recovery", "other")
+
+
+def infer_activity(
+    path: Path, explicit: str = "auto", features: Optional[Dict[str, Any]] = None
+) -> str:
+    """根据显式标签、路径关键词和可观测特征推断活动类型。"""
+    if explicit and explicit != "auto":
+        return explicit if explicit in ACTIVITIES else "other"
+    text = "/".join(path.parts).lower()
+    aliases = {
+        "run": ("run", "跑", "jog"),
+        "walk": ("walk", "步行", "walking"),
+        "cycle": ("cycle", "cycling", "bike", "骑行", "骑车"),
+        "strength": ("strength", "力量", "weight", "gym"),
+        "interval": ("interval", "间歇", "hiit"),
+        "recovery": ("recovery", "恢复"),
+        "rest": ("rest", "静息", "静止"),
+    }
+    for activity, words in aliases.items():
+        if any(word in text for word in words):
+            return activity
+    observed = features or {}
+    if observed.get("motion_rms", 0) >= 0.3:
+        return "other"
+    return "rest"
+
 
 def detect_chip(path: Path) -> Optional[str]:
     try:
@@ -175,6 +202,7 @@ def analyze_raw_file(
     pred_column: Optional[str] = None,
     timestamp_column: Optional[str] = None,
     scene_override: str = "auto",
+    activity_override: str = "auto",
     accuracy_thresholds: Optional[Sequence[float]] = None,
     accuracy_inclusive: bool = False,
 ) -> Tuple[Dict[str, Any], pd.DataFrame, Optional[ChipRule]]:
@@ -271,6 +299,10 @@ def analyze_raw_file(
     signal_saturated = False
     signal_flat = False
     baseline_drift = False
+    near_zero_ratio = 0.0
+    near_full_ratio = 0.0
+    pulse_amplitude = 0.0
+    dc_level_ratio = 0.0
     pi_by_channel: Dict[str, float] = {}
     pi_units: Dict[str, str] = {}
     full_scale = float((chip_rule.chip_info if chip_rule else {}).get("adc_full_scale", 0) or 0)
@@ -288,6 +320,24 @@ def analyze_raw_file(
             ) >= float(rule.thresholds.get("saturation_ratio", 0.01))
         numeric = values.dropna().to_numpy(dtype=float)
         if len(numeric) > 20:
+            if full_scale > 0:
+                centered = numeric - adc_offset
+                near_zero_ratio = max(
+                    near_zero_ratio,
+                    float(np.mean(np.abs(centered) <= full_scale * 0.05)),
+                )
+                near_full_ratio = max(
+                    near_full_ratio,
+                    float(np.mean(np.abs(centered) >= full_scale * 0.95)),
+                )
+                dc_level_ratio = max(
+                    dc_level_ratio,
+                    float(np.clip(abs(np.median(centered)) / full_scale, 0.0, 1.0)),
+                )
+            pulse_amplitude = max(
+                pulse_amplitude,
+                float(np.percentile(numeric, 95) - np.percentile(numeric, 5)),
+            )
             span = max(float(np.percentile(numeric, 95) - np.percentile(numeric, 5)), 1e-9)
             baseline_drift = baseline_drift or abs(
                 float(np.mean(numeric[: max(1, len(numeric) // 10)]))
@@ -328,14 +378,48 @@ def analyze_raw_file(
         else (float(np.median(pi_values)) if pi_values else None)
     )
     output_jump = False
+    rise_lag = False
+    recovery_lag = False
+    output_plateau = False
+    hr_rise_lag_s: Optional[float] = None
+    hr_fall_lag_s: Optional[float] = None
     if pred is not None and rate:
         output_jump = bool(
             pred.diff().abs().mul(rate).gt(float(rule.thresholds.get("jump_per_second", 20))).any()
         )
+        if ref is not None:
+            aligned = pd.concat([ref.rename("ref"), pred.rename("pred")], axis=1).dropna()
+            if len(aligned) > max(int(rate * 4), 10):
+                window = max(int(rate * 2), 2)
+                ref_delta = aligned["ref"].diff(window)
+                pred_delta = aligned["pred"].diff(window)
+                change = float(rule.thresholds.get("response_change", 8))
+                rise_mask = ref_delta >= change
+                fall_mask = ref_delta <= -change
+                rise_lag = bool((rise_mask & (pred_delta < change * 0.5)).any())
+                recovery_lag = bool((fall_mask & (pred_delta > -change * 0.5)).any())
+                hr_rise_lag_s = float(window / rate) if rise_lag else None
+                hr_fall_lag_s = float(window / rate) if recovery_lag else None
+                ref_span = float(aligned["ref"].max() - aligned["ref"].min())
+                pred_span = float(aligned["pred"].max() - aligned["pred"].min())
+                output_plateau = bool(ref_span >= change * 2 and pred_span <= ref_span * 0.25)
     min_samples = int(float(rule.thresholds.get("error_min_seconds", 0)) * (rate or 1.0))
     if min_samples > 1:
         segments = [segment for segment in segments if int(segment["samples"]) >= min_samples]
     algorithm_abnormal = bool(segments)
+    agc_columns = [
+        str(column)
+        for column in frame.columns
+        if re.search(r"agc[_ ]?info", str(column), re.IGNORECASE)
+    ]
+    agc_change_count = 0
+    for column in agc_columns:
+        values = _numeric(frame, column).dropna()
+        if len(values) > 1:
+            agc_change_count = max(agc_change_count, int(values.diff().dropna().ne(0).sum()))
+    agc_change_ratio = (
+        float(agc_change_count / max(len(frame) - 1, 1)) if frame is not None else 0.0
+    )
     channel_inconsistent = False
     if len(ppg_columns) >= 2:
         left = _numeric(frame, ppg_columns[0])
@@ -344,12 +428,36 @@ def analyze_raw_file(
             channel_inconsistent = bool(
                 left.corr(right) < float(rule.thresholds.get("channel_correlation", 0.3))
             )
+    channel_dropout = channel_inconsistent or near_zero_ratio >= float(
+        rule.thresholds.get("near_limit_ratio", 0.05)
+    )
+    pulse_compressed = bool(
+        pulse_amplitude <= float(rule.thresholds.get("pulse_amplitude_low", 1.0))
+        or (dc_level_ratio > 0 and pulse_amplitude / max(full_scale, 1.0) < 0.01)
+    )
+    activity = infer_activity(path, activity_override, {"motion_rms": motion})
     features: Dict[str, Any] = {
         "data_complete": data_complete,
         "missing_ratio": missing_ratio,
         "signal_saturated": signal_saturated,
         "signal_flat": signal_flat,
         "baseline_drift": baseline_drift,
+        "dc_level_ratio": dc_level_ratio,
+        "pulse_amplitude": pulse_amplitude,
+        "near_zero_ratio": near_zero_ratio,
+        "near_full_ratio": near_full_ratio,
+        "near_zero": near_zero_ratio >= float(rule.thresholds.get("near_limit_ratio", 0.05)),
+        "near_full": near_full_ratio >= float(rule.thresholds.get("near_limit_ratio", 0.05)),
+        "agc_change_count": agc_change_count,
+        "agc_change_ratio": agc_change_ratio,
+        "agc_unstable": agc_change_ratio >= float(rule.thresholds.get("agc_unstable_ratio", 0.05)),
+        "channel_dropout": channel_dropout,
+        "pulse_compressed": pulse_compressed,
+        "hr_rise_lag_s": hr_rise_lag_s,
+        "hr_fall_lag_s": hr_fall_lag_s,
+        "rise_lag": rise_lag,
+        "recovery_lag": recovery_lag,
+        "output_plateau": output_plateau,
         "pi": pi_value,
         "pi_min": min(pi_values) if pi_values else None,
         "pi_by_channel": pi_by_channel,
@@ -360,6 +468,7 @@ def analyze_raw_file(
         "motion_rms": motion,
         "motion_excessive": motion_excessive,
         "scene": scene,
+        "activity": activity,
         **reference_features,
         "output_jump": output_jump,
         "algorithm_abnormal": algorithm_abnormal,

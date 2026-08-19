@@ -53,6 +53,18 @@ def _validate(request: AnalyzeRequest) -> None:
         raise RequestValidationError("other 分析必须提供 --rule")
     if request.scene not in {"auto", "static", "dynamic"}:
         raise RequestValidationError("scene 仅支持 auto、static 或 dynamic")
+    if request.activity not in {
+        "auto",
+        "rest",
+        "walk",
+        "run",
+        "cycle",
+        "strength",
+        "interval",
+        "recovery",
+        "other",
+    }:
+        raise RequestValidationError("activity 场景不受支持")
     if request.report not in {"markdown", "pptx", "all"}:
         raise RequestValidationError("report 仅支持 markdown、pptx 或 all")
     if request.sample_rate is not None and request.sample_rate <= 0:
@@ -329,6 +341,61 @@ def _apply_check_results(records: List[AnalysisRecord], report_path: Optional[Pa
         _refresh_diagnosis(record, rule)
 
 
+def _apply_compact_check_results(
+    records: List[AnalysisRecord], report_path: Optional[Path], rule
+) -> None:
+    """将精简 check 长表按文件聚合为诊断事实，不解析说明文本。"""
+    import pandas as pd
+
+    if report_path is None or not report_path.exists():
+        return
+    report = pd.read_csv(report_path, encoding="utf-8-sig")
+    if "检查项" not in report.columns:
+        return
+    for record in records:
+        rows = report[
+            (report.get("文件相对路径", pd.Series(dtype=str)).astype(str) == record.file)
+            | (report.get("文件名", pd.Series(dtype=str)).astype(str) == Path(record.file).name)
+        ]
+        if rows.empty:
+            continue
+        channel_metrics: Dict[str, Dict[str, float]] = {}
+        mapping = {
+            "异常占比": "abnormal_ratio",
+            "总数": "total_count",
+            "近0占比": "near_zero_ratio",
+            "近满量程占比": "near_full_ratio",
+            "AGC变化次数": "agc_change_count",
+        }
+        for _, row in rows.iterrows():
+            channel = str(row.get("通道", "-") or "-")
+            metrics = channel_metrics.setdefault(channel, {})
+            for column, key in mapping.items():
+                try:
+                    value = float(row.get(column))
+                except (TypeError, ValueError):
+                    continue
+                if pd.notna(value):
+                    metrics[key] = max(value, metrics.get(key, 0.0))
+        record.features["check_channel_metrics"] = channel_metrics
+        for key in ("near_zero_ratio", "near_full_ratio", "agc_change_count"):
+            values = [metric[key] for metric in channel_metrics.values() if key in metric]
+            if values:
+                record.features[key] = max(values)
+        record.features["near_zero"] = record.features.get("near_zero_ratio", 0.0) >= 5.0
+        record.features["near_full"] = record.features.get("near_full_ratio", 0.0) >= 5.0
+        ratios = [
+            metric.get("agc_change_count", 0.0) / max(metric.get("total_count", 0.0), 1.0)
+            for metric in channel_metrics.values()
+        ]
+        record.features["agc_change_ratio"] = max(ratios, default=0.0)
+        record.features["agc_unstable"] = record.features["agc_change_ratio"] >= 0.05
+        record.features["channel_dropout"] = any(
+            metric.get("near_zero_ratio", 0.0) >= 5.0 for metric in channel_metrics.values()
+        )
+        _refresh_diagnosis(record, rule)
+
+
 def _apply_evaluate_results(
     records: List[AnalysisRecord], detail_path: Optional[Path], rule
 ) -> None:
@@ -381,6 +448,7 @@ def _raw_records(
                     pred_column=request.pred_column,
                     timestamp_column=request.timestamp_column,
                     scene_override=request.scene,
+                    activity_override=request.activity,
                     accuracy_thresholds=request.accuracy_thresholds,
                     accuracy_inclusive=request.accuracy_inclusive,
                 )
@@ -395,6 +463,7 @@ def _raw_records(
                     pred_column=request.pred_column,
                     timestamp_column=request.timestamp_column,
                     scene_override=request.scene,
+                    activity_override=request.activity,
                 )
             features = result["features"]
             features.update(result["metrics"])
@@ -404,6 +473,7 @@ def _raw_records(
                 source=str(path),
                 analysis_type=request.analysis_type,
                 scene=str(features.get("scene", "unknown")),
+                activity=str(features.get("activity", "other")),
                 focused=name in focused,
                 features=features,
                 metrics=result["metrics"],
@@ -812,7 +882,14 @@ def run_analyze(
         if stage_notes:
             for record in records:
                 record.notes.extend(stage_notes)
-        _apply_check_results(records, check_path, rule)
+        if check_path and Path(check_path).name == "check_report_compact.csv":
+            _apply_compact_check_results(records, check_path, rule)
+        else:
+            _apply_check_results(records, check_path, rule)
+            compact_path = (
+                Path(check_path).with_name("check_report_compact.csv") if check_path else None
+            )
+            _apply_compact_check_results(records, compact_path, rule)
         _apply_evaluate_results(records, evaluate_path, rule)
         existing_offline = request.offline_result_path
         if existing_offline is not None:
@@ -856,6 +933,7 @@ def run_analyze(
                 if item and item.primary_figure:
                     record.figure = str(item.primary_figure)
                     if item.secondary_figures:
+                        record.secondary_figure = str(item.secondary_figures[0])
                         record.notes.append(
                             "已复用现有副图: "
                             + ", ".join(path.name for path in item.secondary_figures)

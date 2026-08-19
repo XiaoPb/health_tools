@@ -137,6 +137,8 @@ result = run_analyze(
 )
 ```
 
+`AnalyzeRequest(activity="run")` 可显式指定心率活动；默认 `auto` 会先使用路径关键词，再结合运动事实回退到静息或其他场景。`check_report_path` 指向 `check_report_compact.csv` 时，分析会直接合并各通道的异常占比、近轨占比和 AGC 变化次数。
+
 ## 配置操作
 
 ```python

@@ -855,6 +855,8 @@ when:
 
 心率 Polar 参考检查使用 `ref_min/ref_max`、`ref_valid_ratio`、`ref_stale_seconds` 和 `ref_jump_per_second`。局部越界或跳变样本从准确度中隔离，仅产生人工复审警告；它不会覆盖原始/PSD 原因、结论或证据图。只有有效比例低于 `ref_valid_ratio` 或全局无有效值时，才停止参考归因。
 
+心率规则支持 `at_least` 组合条件，用于要求多个独立证据，例如佩戴松动和佩戴过紧至少命中两个候选事实。活动事实为 `activity`；近轨、调光与接触相关事实包括 `near_zero_ratio`、`near_full_ratio`、`agc_change_count`、`agc_change_ratio`、`pulse_amplitude`、`pulse_compressed` 和 `channel_dropout`。算法分支还可使用 `rise_lag`、`recovery_lag`、`output_plateau`，但算法来源规则的 `actions` 会被代码强制清空。
+
 `thresholds` 控制诊断敏感度。完整默认值、调高/调低的影响和判断流程见 [analyze 命令](cmd_analyze.md#配置判断阈值)。修改后应使用正常与异常小样本验证，不能把阈值变化解释为算法优化。
 
 ## 验证能力与限制

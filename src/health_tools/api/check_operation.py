@@ -133,9 +133,20 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
 
 
 COMPACT_HEADER = [
-    "文件名", "文件相对路径", "芯片", "检查项", "状态", "通道",
-    "异常数", "总数", "异常占比", "偏低占比", "偏高占比", "近0占比",
-    "近满量程占比", "AGC变化次数",
+    "文件名",
+    "文件相对路径",
+    "芯片",
+    "检查项",
+    "状态",
+    "通道",
+    "异常数",
+    "总数",
+    "异常占比",
+    "偏低占比",
+    "偏高占比",
+    "近0占比",
+    "近满量程占比",
+    "AGC变化次数",
 ]
 
 
@@ -164,22 +175,24 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                             if agc_suffix == suffix:
                                 agc_count = agc_metric.get("change_count", "")
                                 break
-                    writer.writerow({
-                        "文件名": report.file_path.name,
-                        "文件相对路径": _relative_path(report.file_path, base),
-                        "芯片": report.chip,
-                        "检查项": result.name,
-                        "状态": result.status,
-                        "通道": channel,
-                        "异常数": metric.get("abnormal_count", ""),
-                        "总数": metric.get("total_count", ""),
-                        "异常占比": metric.get("abnormal_ratio", result.abnormal_ratio),
-                        "偏低占比": metric.get("low_ratio", ""),
-                        "偏高占比": metric.get("high_ratio", ""),
-                        "近0占比": metric.get("near_zero_ratio", ""),
-                        "近满量程占比": metric.get("near_full_ratio", ""),
-                        "AGC变化次数": agc_count,
-                    })
+                    writer.writerow(
+                        {
+                            "文件名": report.file_path.name,
+                            "文件相对路径": _relative_path(report.file_path, base),
+                            "芯片": report.chip,
+                            "检查项": result.name,
+                            "状态": result.status,
+                            "通道": channel,
+                            "异常数": metric.get("abnormal_count", ""),
+                            "总数": metric.get("total_count", ""),
+                            "异常占比": metric.get("abnormal_ratio", result.abnormal_ratio),
+                            "偏低占比": metric.get("low_ratio", ""),
+                            "偏高占比": metric.get("high_ratio", ""),
+                            "近0占比": metric.get("near_zero_ratio", ""),
+                            "近满量程占比": metric.get("near_full_ratio", ""),
+                            "AGC变化次数": agc_count,
+                        }
+                    )
 
 
 def _write_sort_list(path: Path, rows: List[List[str]]) -> None:
