@@ -312,7 +312,14 @@ def write_markdown(
 
 
 def _duplicate_slide(prs, source):
-    return _add_slide_before_ending(prs, source.slide_layout)
+    from copy import deepcopy
+
+    slide = _add_slide_before_ending(prs, source.slide_layout)
+    for shape in list(slide.shapes):
+        shape._element.getparent().remove(shape._element)
+    for shape in source.shapes:
+        slide.shapes._spTree.insert_element_before(deepcopy(shape._element), "p:extLst")
+    return slide
 
 
 def _add_slide_before_ending(prs, layout):
@@ -357,6 +364,43 @@ def _placeholder(slide, placeholder_type):
     )
 
 
+def _filename_shape(slide):
+    from pptx.enum.shapes import PP_PLACEHOLDER
+
+    subtitle = _placeholder(slide, PP_PLACEHOLDER.SUBTITLE)
+    if subtitle:
+        return subtitle
+    return next(
+        (shape for shape in slide.shapes if shape.name in {"文件名副标题", "文本框 8"}),
+        None,
+    )
+
+
+def _remove_secondary_picture(slide) -> None:
+    from pptx.enum.shapes import PP_PLACEHOLDER
+
+    secondary = next(
+        (shape for shape in slide.shapes if shape.name == "副图占位符"),
+        None,
+    )
+    if secondary is None:
+        secondary = _placeholder(slide, PP_PLACEHOLDER.PICTURE)
+    if secondary:
+        secondary._element.getparent().remove(secondary._element)
+
+
+def _set_compact_body_text(shape, text: str) -> None:
+    from pptx.util import Pt
+
+    _set_text(shape, text)
+    for paragraph in shape.text_frame.paragraphs:
+        paragraph.line_spacing = 1
+        paragraph.space_before = Pt(0)
+        paragraph.space_after = Pt(0)
+        for run in paragraph.runs:
+            run.font.size = Pt(12)
+
+
 def _add_picture(slide, placeholder, image_path: str) -> None:
     from PIL import Image
 
@@ -378,21 +422,31 @@ def _add_picture(slide, placeholder, image_path: str) -> None:
         picture.left = left + (width - picture.width) // 2
 
 
-def _populate_content(slide, title_text: str, body_text: str, figure: str = "") -> None:
+def _populate_content(
+    slide,
+    title_text: str,
+    body_text: str,
+    figure: str = "",
+    subtitle_text: str = "",
+) -> None:
     from pptx.enum.shapes import PP_PLACEHOLDER
 
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
     body = _placeholder(slide, PP_PLACEHOLDER.BODY)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
+    subtitle = _filename_shape(slide)
     if title:
         _set_text(title, title_text)
+    if subtitle:
+        _set_text(subtitle, subtitle_text)
     if body:
-        _set_text(body, body_text)
+        _set_compact_body_text(body, body_text)
     if content:
         if figure:
             _add_picture(slide, content, figure)
         else:
             content._element.getparent().remove(content._element)
+    _remove_secondary_picture(slide)
 
 
 def _populate_warning(slide, record: AnalysisRecord) -> None:
@@ -401,18 +455,22 @@ def _populate_warning(slide, record: AnalysisRecord) -> None:
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
     body = _placeholder(slide, PP_PLACEHOLDER.BODY)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
+    subtitle = _filename_shape(slide)
     if title:
         _set_text(title, "Polar 人工复审警告")
     if body:
-        _set_text(
+        _set_compact_body_text(
             body,
             f"文件：{record.file}\n\n"
             "Polar 可能仅在局部异常。\n\n"
             "原分析结论与关键图表保留。\n\n"
             "警告不作为算法或原始数据错误归因。",
         )
+    if subtitle:
+        _set_text(subtitle, record.file)
     if content:
         _set_text(content, "\n\n".join(record.warnings))
+    _remove_secondary_picture(slide)
 
 
 def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
@@ -428,10 +486,13 @@ def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
     body = _placeholder(slide, PP_PLACEHOLDER.BODY)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
+    subtitle = _filename_shape(slide)
     if title:
         _set_text(title, "批次分析结论")
     if body:
         _set_text(body, "异常数据归类\n" + "\n".join(body_lines))
+    if subtitle:
+        _set_text(subtitle, "")
     if content:
         left, top, width = content.left, content.top, content.width
         content._element.getparent().remove(content._element)
@@ -479,6 +540,7 @@ def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
                     for run in paragraph.runs:
                         run.font.name = "微软雅黑"
                         run.font.size = Pt(11)
+    _remove_secondary_picture(slide)
     return "\n".join(body_lines)
 
 
@@ -500,6 +562,7 @@ def _populate_accuracy(
     title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
     body = _placeholder(slide, PP_PLACEHOLDER.BODY)
+    subtitle = _filename_shape(slide)
     if title:
         title_text = "整体准确度对比"
         if page_count > 1:
@@ -511,7 +574,10 @@ def _populate_accuracy(
     if body:
         relation = "不超过" if accuracy_inclusive else "小于"
         _set_text(body, f"{threshold_labels} bpm 为绝对误差{relation}对应阈值的有效样本占比。")
+    if subtitle:
+        _set_text(subtitle, "")
     if not content:
+        _remove_secondary_picture(slide)
         return
     left, top, width = content.left, content.top, content.width
     content._element.getparent().remove(content._element)
@@ -594,6 +660,7 @@ def _populate_accuracy(
                 for run in paragraph.runs:
                     run.font.name = "微软雅黑"
                     run.font.size = Pt(10.5)
+    _remove_secondary_picture(slide)
 
 
 def write_ppt(
@@ -625,7 +692,6 @@ def write_ppt(
     for record in records:
         counts[record.conclusion] = counts.get(record.conclusion, 0) + 1
     summary_text = "\n".join(f"{name}：{count} 个文件" for name, count in counts.items())
-    cause_summary = _populate_summary(content, records)
     from pptx.util import Inches
 
     thresholds = _accuracy_thresholds(accuracy_thresholds)
@@ -676,11 +742,18 @@ def write_ppt(
             f"置信度：{record.confidence:.0%}\n原因：{cause}\n"
             f"证据：{ppt_evidence}\n原始数据措施：{action}"
         )
-        _populate_content(slide, record.file, body_text, record.figure or "")
+        _populate_content(
+            slide,
+            record.scene,
+            body_text,
+            record.figure or "",
+            subtitle_text=record.file,
+        )
         if record.warnings:
             warning_slide = _duplicate_slide(prs, content)
             _populate_warning(warning_slide, record)
     conclusion_slide = _duplicate_slide(prs, content)
+    cause_summary = _populate_summary(content, records)
     _populate_content(
         conclusion_slide,
         "综合结论",

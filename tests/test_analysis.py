@@ -1437,6 +1437,48 @@ def test_ppt_summary_table_is_compact_and_centered(tmp_path: Path):
                 assert cell.text_frame.paragraphs[0].alignment == PP_ALIGN.CENTER
 
 
+def test_ppt_body_uses_scene_filename_slots_and_compact_body_font(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+    from pptx.enum.shapes import PP_PLACEHOLDER
+    from pptx.util import Pt
+
+    output = write_ppt(
+        [
+            AnalysisRecord(
+                file="测试文件.csv",
+                source="测试文件.csv",
+                analysis_type="hr",
+                scene="dynamic",
+                focused=True,
+                conclusion="未发现异常",
+            )
+        ],
+        tmp_path / "report.pptx",
+    )
+
+    deck = Presentation(str(output))
+    detail_slide = next(
+        slide
+        for slide in deck.slides
+        if any("测试文件.csv" in getattr(shape, "text", "") for shape in slide.shapes)
+    )
+    placeholders = {
+        shape.placeholder_format.type: shape
+        for shape in detail_slide.shapes
+        if shape.is_placeholder
+    }
+    filename = next(shape for shape in detail_slide.shapes if shape.name == "文件名副标题")
+    title = placeholders[PP_PLACEHOLDER.TITLE]
+    assert title.text == "dynamic"
+    assert filename.text == "测试文件.csv"
+    assert title._element.xpath(".//a:defRPr")[0].get("sz") == "3000"
+    assert filename._element.xpath(".//a:defRPr")[0].get("sz") == "2000"
+    body = placeholders[PP_PLACEHOLDER.BODY]
+    assert body.text_frame.paragraphs[0].runs[0].font.size == Pt(12)
+    assert body.text_frame.paragraphs[0].line_spacing == 1
+
+
 def test_ppt_includes_psd_page_for_evidence_insufficient(tmp_path: Path):
     pytest.importorskip("pptx")
     from PIL import Image
