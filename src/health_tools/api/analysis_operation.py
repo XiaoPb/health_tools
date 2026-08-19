@@ -14,6 +14,7 @@ import re
 import shutil
 from collections import Counter
 from dataclasses import replace
+from inspect import signature
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, cast
 
@@ -657,27 +658,34 @@ def _raw_records(
     source: Path,
     rule,
     context: ExecutionContext,
+    root: Optional[Path] = None,
+    files: Optional[Sequence[Path]] = None,
 ) -> Tuple[List[AnalysisRecord], Path, List[Path], Set[str], Optional[str]]:
-    root, files = _raw_files(source)
-    if not files:
+    if root is None or files is None:
+        root, discovered_files = _raw_files(source)
+    else:
+        discovered_files = list(files)
+    if not discovered_files:
         raise RequestValidationError(f"输入目录没有 CSV: {source}")
     report_items = []
     if request.check_report_path is not None and Path(request.check_report_path).is_file():
-        report_index = ArtifactIndex.build(files, check_report=request.check_report_path)
+        report_index = ArtifactIndex.build(discovered_files, check_report=request.check_report_path)
         report_items = list(report_index.items.values())
     names = [item.relative_path for item in report_items] or [
-        _logical(path, root) for path in files
+        _logical(path, root) for path in discovered_files
     ]
     focused = _focus(names, request.focus)
-    existing_files = [item.csv_path for item in report_items if item.csv_path.exists()] or files
+    existing_files = [
+        item.csv_path for item in report_items if item.csv_path.exists()
+    ] or discovered_files
     chip = request.chip_name or detect_chip(existing_files[0])
     records: List[AnalysisRecord] = []
-    total = len(report_items) if report_items else len(files)
+    total = len(report_items) if report_items else len(discovered_files)
     context.emit(ProgressEvent("analyze", "raw", 0, total, "分析原始数据"))
     raw_items = (
         [(item.relative_path, item.csv_path, item.status, item.reason) for item in report_items]
         if report_items
-        else [(_logical(path, root), path, "OK", "") for path in files]
+        else [(_logical(path, root), path, "OK", "") for path in discovered_files]
     )
     analyzed_files: List[Path] = []
     for index, (name, path, status, reason) in enumerate(raw_items, 1):
@@ -758,9 +766,38 @@ def _raw_records(
     return records, root, analyzed_files or existing_files, focused, chip
 
 
-def run_raw_stage(request: AnalyzeRequest, source: Path, rule, context: ExecutionContext):
+def run_raw_stage(
+    request: AnalyzeRequest,
+    source: Path,
+    rule,
+    context: ExecutionContext,
+    root: Optional[Path] = None,
+    files: Optional[Sequence[Path]] = None,
+):
     """可替换的原始数据阶段入口，便于断点编排和测试。"""
-    return _raw_records(request, source, rule, context)
+    return _raw_records(request, source, rule, context, root, files)
+
+
+def _invoke_raw_stage(
+    request: AnalyzeRequest,
+    source: Path,
+    rule,
+    context: ExecutionContext,
+    root: Path,
+    files: Sequence[Path],
+):
+    """兼容旧四参数替换函数，并向新版入口传递预发现输入。"""
+    base_args = (request, source, rule, context)
+    discovered_args = (root, files)
+    try:
+        stage_signature = signature(run_raw_stage)
+    except (TypeError, ValueError):
+        return run_raw_stage(*base_args)
+    try:
+        stage_signature.bind(*base_args, *discovered_args)
+    except TypeError:
+        return run_raw_stage(*base_args)
+    return run_raw_stage(*base_args, *discovered_args)
 
 
 def run_check_stage(
@@ -1203,7 +1240,9 @@ def run_analyze(
         raw_fingerprint = _stage_fingerprint("raw", request_key)
         state.start("raw", raw_fingerprint)
         try:
-            records, root, raw_files, _, chip = run_raw_stage(request, source, rule, ctx)
+            records, root, raw_files, _, chip = _invoke_raw_stage(
+                request, source, rule, ctx, root, raw_files
+            )
         except Exception as exc:
             state.fail("raw", exc)
             raise
