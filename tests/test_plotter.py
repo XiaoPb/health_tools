@@ -104,7 +104,7 @@ def test_plot_ac_reads_explicit_r_column(tmp_path: Path, monkeypatch):
     assert np.array_equal(saved[0].axes[5].lines[0].get_ydata(), df["R_VALUE"].to_numpy())
 
 
-def test_plot_ac_calculates_r_from_ch0_and_ch1_pi(tmp_path: Path, monkeypatch):
+def test_plot_ac_calculates_r_from_selected_channel_order(tmp_path: Path, monkeypatch):
     saved = []
     monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
     monkeypatch.setattr(
@@ -112,14 +112,50 @@ def test_plot_ac_calculates_r_from_ch0_and_ch1_pi(tmp_path: Path, monkeypatch):
         lambda raw, ac, sample_rate: pd.Series(np.full(len(ac), 2.0 if raw[0] < 150 else 4.0)),
     )
 
+    df = _analysis_df().rename(columns={"CH0": "RED", "CH1": "IR"})
+
     DataPlotter(sample_rate=10).plot_ac(
-        _analysis_df(),
+        df,
         tmp_path / "ac.png",
-        ["CH0", "CH1"],
+        ["IR", "RED"],
         ["ACCX", "ACCY", "ACCZ"],
     )
 
-    assert np.all(saved[0].axes[5].lines[0].get_ydata() == 5000.0)
+    assert np.all(saved[0].axes[5].lines[0].get_ydata() == 20000.0)
+
+
+@pytest.mark.parametrize("channels", [["CH0"], ["CH0", "CH1", "CH2"], ["CH0", "CH1", "CH2", "CH3"]])
+def test_plot_ac_without_r_column_skips_r_axis_unless_exactly_two_channels(
+    channels: list[str], tmp_path: Path, monkeypatch
+):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = _analysis_df()
+    df["CH2"] = df["CH0"]
+    df["CH3"] = df["CH1"]
+
+    DataPlotter(sample_rate=10).plot_ac(df, tmp_path / "ac.png", channels, ["ACCX", "ACCY", "ACCZ"])
+
+    assert len(saved[0].axes) == 5
+    assert all(axis.get_ylabel() != "R" for axis in saved[0].axes)
+
+
+def test_plot_ac_explicit_r_column_draws_with_one_selected_channel(tmp_path: Path, monkeypatch):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = _analysis_df()
+    df["R_VALUE"] = np.linspace(1.0, 2.0, len(df))
+
+    DataPlotter(sample_rate=10).plot_ac(
+        df,
+        tmp_path / "ac.png",
+        ["CH0"],
+        ["ACCX", "ACCY", "ACCZ"],
+        r_column="R_VALUE",
+    )
+
+    assert len(saved[0].axes) == 6
+    assert np.array_equal(saved[0].axes[5].lines[0].get_ydata(), df["R_VALUE"].to_numpy())
 
 
 def test_plot_ac_rejects_more_than_four_channels(tmp_path: Path):
