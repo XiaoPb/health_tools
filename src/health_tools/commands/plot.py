@@ -32,7 +32,10 @@ console = Console()
 @click.option("--freq-bpm", is_flag=True, default=True, help="Y轴显示BPM（默认: 是）")
 @click.option("--freq-range", default="30-240", help="频率范围（BPM，默认: 30-240）")
 @click.option("--ref-column", help="参考曲线列名")
-@click.option("--r-column", help="AC 模式 R 曲线列名；未指定时按 CH0_PI/CH1_PI*10000 计算")
+@click.option(
+    "--r-column",
+    help="AC 模式 R 曲线列名；未指定时仅在选中通道恰好为 2 个时按选择顺序 PI 比值计算",
+)
 @click.option(
     "--psd-acc",
     type=click.Choice(["axis", "rms"]),

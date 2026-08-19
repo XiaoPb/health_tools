@@ -178,7 +178,7 @@ class DataPlotter:
         acc_columns: List[str],
         r_column: Optional[str] = None,
     ) -> None:
-        """绘制三轴 ACC、滤波后 PPG、PI 和 R。"""
+        """绘制三轴 ACC、滤波后 PPG、PI；必要时叠加 R。"""
         if not channels:
             raise SignalAnalysisError("AC 绘图至少需要 1 个 PPG 通道")
         if len(channels) > 4:
@@ -196,7 +196,7 @@ class DataPlotter:
         base_axes = np.atleast_1d(fig.subplots(3, 1, sharex=True))
         acc_axes = [base_axes[0], base_axes[0].twinx(), base_axes[0].twinx()]
         acc_axes[2].spines["right"].set_position(("axes", 1.12))
-        r_axis = base_axes[2].twinx()
+        r_axis = base_axes[2].twinx() if r_column or len(channels) == 2 else None
         colors = rcParams["axes.prop_cycle"].by_key()["color"]
 
         for axis, column in zip(acc_axes, acc_columns):
@@ -229,11 +229,9 @@ class DataPlotter:
         base_axes[1].set_ylim(-limit, limit)
         if r_column:
             r_values = pd.to_numeric(df[r_column], errors="coerce").to_numpy(dtype=float)
-        else:
-            if "CH0" not in pi_values or "CH1" not in pi_values:
-                raise SignalAnalysisError("AC 绘图未同时包含 CH0 和 CH1，无法计算 R 曲线")
-            denominator = pi_values["CH1"].to_numpy(dtype=float)
-            numerator = pi_values["CH0"].to_numpy(dtype=float)
+        elif len(channels) == 2:
+            numerator = pi_values[channels[0]].to_numpy(dtype=float)
+            denominator = pi_values[channels[1]].to_numpy(dtype=float)
             r_values = (
                 np.divide(
                     numerator,
@@ -243,10 +241,11 @@ class DataPlotter:
                 )
                 * 10000.0
             )
-        r_axis.plot(time, r_values, linewidth=0.8, color="#111827", label="R")
-        r_axis.set_ylabel("R")
-        r_axis.legend(loc="lower right")
-        r_axis.grid(False)
+        if r_axis is not None:
+            r_axis.plot(time, r_values, linewidth=0.8, color="#111827", label="R")
+            r_axis.set_ylabel("R")
+            r_axis.legend(loc="lower right")
+            r_axis.grid(False)
 
         base_axes[1].set_ylabel("Filtered PPG")
         base_axes[2].set_ylabel("PI (%)")
