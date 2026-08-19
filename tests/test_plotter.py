@@ -112,10 +112,12 @@ def test_plot_ac_calculates_r_from_selected_channel_order(tmp_path: Path, monkey
         lambda raw, ac, sample_rate: pd.Series(np.full(len(ac), 2.0 if raw[0] < 150 else 4.0)),
     )
 
+    df = _analysis_df().rename(columns={"CH0": "RED", "CH1": "IR"})
+
     DataPlotter(sample_rate=10).plot_ac(
-        _analysis_df(),
+        df,
         tmp_path / "ac.png",
-        ["CH1", "CH0"],
+        ["IR", "RED"],
         ["ACCX", "ACCY", "ACCZ"],
     )
 
