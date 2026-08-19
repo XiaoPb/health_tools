@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import (
@@ -104,6 +105,17 @@ def _filter_input_files(input_dir: Path, chip_name: str):
     return filter_offline_inputs(input_dir, RuleLoader.load_chip_rule(chip_name))
 
 
+def _clean_version_outputs(version_output: Path) -> None:
+    """清理一次新跑库会重新生成的版本输出。"""
+    for directory_name in (".offline_tasks", "数据整理", "psd_bmpfile"):
+        path = version_output / directory_name
+        if path.exists():
+            shutil.rmtree(path)
+    if version_output.exists():
+        for report in version_output.glob("accuracy_report*.csv"):
+            report.unlink()
+
+
 def run_offline(
     request: OfflineRequest, *, context: Optional[ExecutionContext] = None
 ) -> OfflineResult:
@@ -120,9 +132,21 @@ def run_offline(
         load_local_cmd_config,
         reorganize_output,
     )
+    from health_tools.core.offline_parallel import (
+        assign_task_outputs,
+        discover_offline_tasks,
+        merge_task_outputs,
+        run_offline_tasks,
+    )
     from health_tools.utils.accuracy import normalize_accuracy_thresholds
 
     ctx = _context(context)
+    if (
+        not isinstance(request.workers, int)
+        or isinstance(request.workers, bool)
+        or not 1 <= request.workers <= 8
+    ):
+        raise RequestValidationError("workers 必须是 1-8 的整数")
     try:
         accuracy_thresholds = normalize_accuracy_thresholds(request.accuracy_thresholds)
     except ValueError as exc:
@@ -234,52 +258,106 @@ def run_offline(
         if not request.no_run:
             stage("run", "运行离线算法", label)
             try:
-                run_kwargs: Dict[str, Any] = {
-                    "timeout": effective_timeout,
-                    "settle_timeout": request.settle_timeout,
-                }
-                if ctx.is_cancelled:
-                    run_kwargs["is_cancelled"] = _cancel_callback(ctx)
-                run_result = runners[version].run(input_dir, version_output, **run_kwargs)
+                discovered_tasks = discover_offline_tasks(input_dir)
+                if not discovered_tasks:
+                    raise OperationError("一级子目录中没有可处理 CSV")
+                _clean_version_outputs(version_output)
+                tasks = assign_task_outputs(discovered_tasks, version_output)
+
+                def runner_factory(_task):
+                    return OfflineRunner(
+                        chip=request.chip_name,
+                        version=version,
+                        hba_fs=request.hba_fs,
+                        scene_en=request.scene_en,
+                        ch_num=request.ch_num,
+                        column_indices=(
+                            {"polar": request.ref_col} if request.ref_col is not None else None
+                        ),
+                        ppg_offset=request.ppg_offset,
+                        ppg_maps=request.ppg_maps,
+                    )
+
+                task_batch = run_offline_tasks(
+                    tasks,
+                    runner_factory,
+                    input_dir,
+                    workers=(
+                        1
+                        if len(tasks) == 1 and tasks[0].relative_dir == Path()
+                        else request.workers
+                    ),
+                    timeout=effective_timeout,
+                    settle_timeout=request.settle_timeout,
+                    is_cancelled=_cancel_callback(ctx) if ctx.is_cancelled else None,
+                )
+                merge_result = merge_task_outputs(
+                    version_output,
+                    task_batch.succeeded,
+                    cleanup=not task_batch.failed,
+                )
             except InterruptedError:
                 partial = _batch("offline", items, artifacts)
                 if ctx.is_cancelled:
                     ctx.check_cancelled("run", partial)
                 raise OperationCancelled("run", partial)
-            if not getattr(run_result, "success", False):
+
+            final_results = {
+                task_result.task.task_id: task_result
+                for task_result in (*task_batch.succeeded, *task_batch.failed)
+            }
+            for task_result in merge_result.failed:
+                final_results[task_result.task.task_id] = task_result
+            for task_result in sorted(final_results.values(), key=lambda item: item.task.task_id):
+                task = task_result.task
+                run_result = task_result.run_result
+                detail = [
+                    "诊断:",
+                    f"命令: {getattr(run_result, 'command', '')}",
+                    f"返回码: {getattr(run_result, 'returncode', '')}",
+                    f"超时: {'是' if getattr(run_result, 'timed_out', False) else '否'}",
+                    f"耗时: {getattr(run_result, 'duration', 0.0):.1f}s",
+                    f"输入CSV: {getattr(run_result, 'input_count', '')}",
+                    f"结果VSHB: {getattr(run_result, 'result_count', '')}",
+                    f"输出文件: {getattr(run_result, 'output_file_count', '')}",
+                    f"尝试次数: {task.attempts}",
+                ]
+                if task.moved_files:
+                    detail.append("移动失败文件:")
+                    detail.extend(str(moved.target) for moved in task.moved_files)
+                warning = getattr(task_result.run_result, "warning", None)
+                if warning:
+                    detail.append(warning)
+                if runner_messages.get(version):
+                    detail.append(runner_messages[version])
+                if task_result.status != "succeeded":
+                    status = ItemStatus.FAIL
+                elif task.attempts > 1 or task.moved_files or warning:
+                    status = ItemStatus.WARN
+                else:
+                    status = ItemStatus.OK
                 items.append(
                     ItemResult(
-                        ItemStatus.FAIL,
-                        label,
-                        str(version_output),
-                        "外部工具失败",
-                        getattr(run_result, "error", None) or "离线工具执行失败",
+                        status,
+                        str(task.input_dir),
+                        str(
+                            version_output / "数据整理" / task.relative_dir
+                            if status in {ItemStatus.OK, ItemStatus.WARN}
+                            else task.raw_output or version_output
+                        ),
+                        reason=task_result.reason,
+                        detail="\n".join(detail),
                     )
                 )
-                raise OperationError(getattr(run_result, "error", None) or "离线工具执行失败")
             completed += 1
-            items.append(
-                ItemResult(
-                    ItemStatus.WARN if getattr(run_result, "warning", None) else ItemStatus.OK,
-                    label,
-                    str(version_output),
-                    detail=(
-                        "诊断:\n"
-                        f"命令: {getattr(run_result, 'command', '')}\n"
-                        f"返回码: {getattr(run_result, 'returncode', '')}\n"
-                        f"输入CSV: {getattr(run_result, 'input_count', '')}\n"
-                        f"结果VSHB: {getattr(run_result, 'result_count', '')}\n"
-                        f"{runner_messages.get(version, '')}\n"
-                        f"{getattr(run_result, 'warning', None) or ''}"
-                    ),
-                )
-            )
         elif request.chip_name:
             executable = find_exe(request.chip_name, version)
 
         stage("reorganize", "整理离线结果", label)
         reorganized = version_output / "数据整理"
-        if not (request.no_run and reorganized.exists()):
+        if not request.no_run:
+            reorganized.mkdir(parents=True, exist_ok=True)
+        elif not reorganized.exists():
             reorganized = reorganize_output(input_dir, version_output, show_progress=False)
         artifacts.append(reorganized)
         completed += 1
@@ -289,7 +367,7 @@ def run_offline(
             from health_tools.core.psd_plotter import PsdPlotter
 
             if use_custom_accuracy:
-                saved = PsdPlotter().plot(
+                plot_result = PsdPlotter().plot(
                     reorganized,
                     save_dir=version_output / "psd_bmpfile",
                     show_progress=False,
@@ -297,16 +375,31 @@ def run_offline(
                     save_to_source=True,
                     accuracy_thresholds=accuracy_thresholds,
                     accuracy_inclusive=request.accuracy_inclusive,
+                    workers=request.workers,
                 )
             else:
-                saved = PsdPlotter().plot(
+                plot_result = PsdPlotter().plot(
                     reorganized,
                     save_dir=version_output / "psd_bmpfile",
                     show_progress=False,
                     acc_mode=_acc_mode(executable),
                     save_to_source=True,
+                    workers=request.workers,
                 )
-            artifacts.extend(saved)
+            artifacts.extend(plot_result.saved)
+            items.extend(
+                ItemResult(ItemStatus.OK, str(reorganized), str(path)) for path in plot_result.saved
+            )
+            items.extend(
+                ItemResult(
+                    ItemStatus.FAIL,
+                    str(path),
+                    str(version_output / "psd_bmpfile"),
+                    reason="PSD 绘图失败",
+                    detail=message,
+                )
+                for path, message in plot_result.failures
+            )
             completed += 1
 
         if not request.no_accuracy:

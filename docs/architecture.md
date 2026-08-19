@@ -78,6 +78,7 @@ src/health_tools/rules/
 | `factory.py` | SNR、CTR、Noise 产测指标 |
 | `evaluator.py` | 心率/血氧批量评估 |
 | `offline.py` | 算法版本扫描、命令构建、跑库、整理和准确度 |
+| `offline_parallel.py` | 一级子目录任务发现、隔离输出、并发队列、失败重试和单线程合并 |
 | `offline_input_filter.py` | 跑库前严格检查表头并隔离不合规 CSV |
 | `analysis/` | 原始/PSD 特征、原因匹配、结论和报告数据 |
 | `splitter.py`, `processor.py` | 文件分割和批处理 |
@@ -120,8 +121,8 @@ parse:    log -> ParseRule -> LogParser -> DataFrame -> ChipRule -> CSV
 convert:  CSV -> ConvertRule -> DataConverter -> ChipRule -> CSV
 check:    CSV -> ChipRule -> DataChecker -> check_report.csv -> optional sort
 evaluate: CSV directory -> EvaluateRule -> BatchEvaluator -> reports
-offline:  chip CSV -> strict input filter -> TEE_Algorithm.exe
-          -> reorganized results -> PSD + accuracy reports
+offline:  input -> preflight -> child task queue -> isolated raw outputs
+          -> single-thread merge -> parallel PSD -> accuracy
 analyze:  raw CSV -> check/evaluate -> feature diagnosis
           -> optional copied offline run -> PSD evidence -> Markdown/PPT
 ```

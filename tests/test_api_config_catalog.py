@@ -9,10 +9,10 @@ from health_tools.api import (
     OfflineCatalogRequest,
     OperationError,
     RequestValidationError,
+    offline_catalog,
     run_config,
     run_offline_catalog,
 )
-from health_tools.api import offline_catalog
 from health_tools.core.offline import EXE_NAME, OfflineConfig
 
 

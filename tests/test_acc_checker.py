@@ -8,8 +8,7 @@ import pandas as pd
 import pytest
 
 from health_tools.commands.check import _save_report_csv
-from health_tools.core.checker import DataChecker
-from health_tools.core.checker import FileCheckReport
+from health_tools.core.checker import DataChecker, FileCheckReport
 from health_tools.models.rules import ChipRule
 
 

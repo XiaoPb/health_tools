@@ -1,7 +1,11 @@
 """offline 命令构建测试。"""
 
+import os
 import subprocess
+import threading
+from io import StringIO
 from pathlib import Path
+from time import monotonic, sleep
 from unittest.mock import Mock
 
 import numpy as np
@@ -15,6 +19,7 @@ import health_tools.api.offline_operation as offline_api
 from health_tools.cli import main
 from health_tools.commands import offline as offline_command
 from health_tools.core import offline, psd_plotter
+from health_tools.core.psd_plotter import PsdPlotResult
 from health_tools.core.vshb import read_vshb_result
 from health_tools.rules.loader import RuleLoader
 
@@ -77,6 +82,44 @@ def _make_runner(
         ppg_offset=ppg_offset,
         ppg_maps=ppg_maps,
     )
+
+
+class _FakeProcess:
+    def __init__(self, returncode=0, stdout="", stderr="", on_poll=None):
+        self.returncode = returncode
+        self.stdout = StringIO(stdout)
+        self.stderr = StringIO(stderr)
+        self.on_poll = on_poll
+        self.terminated = False
+
+    def poll(self):
+        if self.on_poll:
+            self.on_poll()
+            self.on_poll = None
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+
+    def kill(self):
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+class _BlockingStream:
+    def __init__(self):
+        self.closed = False
+        self._released = threading.Event()
+
+    def __iter__(self):
+        self._released.wait(5)
+        return iter(())
+
+    def close(self):
+        self.closed = True
+        self._released.set()
 
 
 def _write_valid_chip_csv(path: Path, chip: str = "gh3036") -> None:
@@ -477,6 +520,185 @@ def test_build_command_falls_back_to_builtin_format(monkeypatch, tmp_path):
     ]
 
 
+def test_extract_last_csv_accepts_only_existing_file_in_input_dir(tmp_path):
+    input_dir = tmp_path / "input"
+    nested_csv = input_dir / "nested" / "sample.csv"
+    outside_csv = tmp_path / "outside.csv"
+    nested_csv.parent.mkdir(parents=True)
+    nested_csv.write_text("x\n", encoding="utf-8")
+    outside_csv.write_text("x\n", encoding="utf-8")
+
+    assert offline.extract_logged_csv_path(f"[1][2][3]:{nested_csv}", input_dir) == (
+        nested_csv.resolve()
+    )
+    assert offline.extract_logged_csv_path(f"[1][2][3]:{outside_csv}", input_dir) is None
+    assert offline.extract_logged_csv_path(f"prefix:{nested_csv}", input_dir) is None
+    assert (
+        offline.extract_logged_csv_path(f"[1][2][3]:{input_dir / 'missing.csv'}", input_dir) is None
+    )
+
+
+def test_offline_run_result_has_empty_log_diagnostics_by_default():
+    result = offline.OfflineRunResult(success=True)
+
+    assert result.last_csv_path is None
+    assert result.log_tail == ()
+
+
+def test_offline_runner_uses_process_cwd_without_chdir(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    popen_calls = []
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return _FakeProcess()
+
+    monkeypatch.setattr(offline.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        os, "chdir", lambda path: (_ for _ in ()).throw(AssertionError("不应调用 chdir"))
+    )
+
+    runner.run(input_dir, output_dir, settle_timeout=0)
+
+    assert len(popen_calls) == 1
+    _, kwargs = popen_calls[0]
+    assert kwargs["cwd"] == str(runner.tool_dir)
+    assert kwargs["shell"] is True
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.PIPE
+    assert kwargs["text"] is True
+    assert kwargs["errors"] == "replace"
+    assert kwargs["bufsize"] == 1
+
+
+def test_offline_runner_captures_log_tail_last_csv_and_limit(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    csv_path = input_dir / "sample.csv"
+    csv_path.write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    stdout = "".join(f"stdout-{index}\n" for index in range(205))
+    stdout += f"[1][2][3]:{csv_path}\n"
+    stderr = "stderr-line\n"
+    observed = []
+    monkeypatch.setattr(
+        offline.subprocess,
+        "Popen",
+        lambda *args, **kwargs: _FakeProcess(stdout=stdout, stderr=stderr),
+    )
+
+    result = runner.run(input_dir, output_dir, settle_timeout=0, on_output=observed.append)
+
+    assert len(result.log_tail) == offline.MAX_LOG_TAIL_LINES == 200
+    assert result.last_csv_path == csv_path.resolve()
+    assert "stderr-line" in result.log_tail
+    assert f"[1][2][3]:{csv_path}" in result.log_tail
+    assert "stderr-line" in observed
+    assert f"[1][2][3]:{csv_path}" in observed
+    assert all(not line.endswith("\n") for line in observed)
+
+
+def test_offline_runner_reader_cleanup_closes_streams_and_joins_with_bound(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    stdout = _BlockingStream()
+    stderr = _BlockingStream()
+    process = _FakeProcess(returncode=None)
+    process.stdout = stdout
+    process.stderr = stderr
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    clock = iter([0.0, 2.0])
+    monkeypatch.setattr(offline.time, "monotonic", lambda: next(clock))
+
+    result = runner.run(input_dir, output_dir, timeout=1, settle_timeout=0)
+
+    assert result.timed_out is True
+    assert stdout.closed is True
+    assert stderr.closed is True
+
+
+def test_offline_runner_finished_process_does_not_wait_forever_for_readers(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    stdout = _BlockingStream()
+    stderr = _BlockingStream()
+    process = _FakeProcess(returncode=0)
+    process.stdout = stdout
+    process.stderr = stderr
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+
+    started = monotonic()
+    result = runner.run(input_dir, output_dir, timeout=10, settle_timeout=0)
+
+    assert result.success is True
+    assert monotonic() - started < 3
+    assert stdout.closed is True
+    assert stderr.closed is True
+
+
+def test_offline_runner_dispatches_callback_serially_on_run_thread(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(stdout="a\nb\n", stderr="c\n")
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    callback_threads = []
+
+    result = runner.run(
+        input_dir,
+        output_dir,
+        settle_timeout=0,
+        on_output=lambda line: callback_threads.append(threading.get_ident()),
+    )
+
+    assert result.success is True
+    assert callback_threads
+    assert len(set(callback_threads)) == 1
+    assert callback_threads[0] == threading.get_ident()
+
+
+def test_offline_runner_callback_error_terminates_and_propagates(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None, stdout="boom\n")
+    process.pid = 4321
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    taskkill_calls = []
+    monkeypatch.setattr(
+        offline.subprocess,
+        "run",
+        lambda args, **kwargs: taskkill_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        runner.run(
+            input_dir,
+            output_dir,
+            settle_timeout=0,
+            on_output=lambda line: (_ for _ in ()).throw(RuntimeError("callback failed")),
+        )
+
+    assert taskkill_calls and taskkill_calls[0][0] == ["taskkill", "/PID", "4321", "/T", "/F"]
+    assert process.stdout.closed is True
+    assert process.stderr.closed is True
+
+
 def test_offline_run_result_success_on_zero_return(monkeypatch, tmp_path):
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
@@ -484,11 +706,12 @@ def test_offline_run_result_success_on_zero_return(monkeypatch, tmp_path):
     (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
     runner = _make_runner(monkeypatch, tmp_path, {})
 
-    def fake_run(cmd, shell, timeout):
+    def create_output():
         (output_dir / "000000_sample_result.vshb").write_text("1,2,3\n", encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 0)
 
-    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        offline.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess(on_poll=create_output)
+    )
 
     result = runner.run(input_dir, output_dir, settle_timeout=0)
 
@@ -506,11 +729,7 @@ def test_offline_run_result_fails_on_nonzero_without_results(monkeypatch, tmp_pa
     (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
     runner = _make_runner(monkeypatch, tmp_path, {})
 
-    monkeypatch.setattr(
-        offline.subprocess,
-        "run",
-        lambda cmd, shell, timeout: subprocess.CompletedProcess(cmd, 7),
-    )
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess(7))
 
     result = runner.run(input_dir, output_dir, settle_timeout=0)
 
@@ -530,12 +749,15 @@ def test_offline_run_result_warns_on_nonzero_with_complete_results(monkeypatch, 
         (input_dir / name).write_text("x\n1\n", encoding="utf-8")
     runner = _make_runner(monkeypatch, tmp_path, {})
 
-    def fake_run(cmd, shell, timeout):
+    def create_output():
         (output_dir / "000000_a_result.vshb").write_text("1,2,3\n", encoding="utf-8")
         (output_dir / "000001_b_result.vshb").write_text("1,2,3\n", encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 9)
 
-    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        offline.subprocess,
+        "Popen",
+        lambda *args, **kwargs: _FakeProcess(9, on_poll=create_output),
+    )
 
     result = runner.run(input_dir, output_dir, settle_timeout=0)
 
@@ -552,10 +774,10 @@ def test_offline_run_result_reports_timeout(monkeypatch, tmp_path):
     (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
     runner = _make_runner(monkeypatch, tmp_path, {})
 
-    def fake_run(cmd, shell, timeout):
-        raise subprocess.TimeoutExpired(cmd, timeout)
-
-    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+    process = _FakeProcess(returncode=None)
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    times = iter([0.0, 2.0, 2.0])
+    monkeypatch.setattr(offline.time, "time", lambda: next(times))
 
     result = runner.run(input_dir, output_dir, timeout=1, settle_timeout=0)
 
@@ -585,11 +807,14 @@ def test_offline_verbose_prints_run_diagnostics(monkeypatch, tmp_path):
         ),
     )
 
-    def fake_run(cmd, shell, timeout):
-        (output_dir / "v1" / "000000_sample_result.vshb").write_text("1,2,3\n", encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 0)
+    def create_output():
+        raw_output = output_dir / "v1" / ".offline_tasks" / "0000_root" / "raw"
+        raw_output.mkdir(parents=True, exist_ok=True)
+        (raw_output / "000000_sample_result.vshb").write_text("1,2,3\n", encoding="utf-8")
 
-    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        offline.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess(on_poll=create_output)
+    )
 
     result = CliRunner().invoke(
         main,
@@ -676,7 +901,10 @@ def test_offline_filters_once_before_multi_version_run(monkeypatch, tmp_path):
         "reorganize_output",
         lambda input_path, output_path, show_progress=False: output_path,
     )
-    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda *args, **kwargs: PsdPlotResult((), ()),
+    )
     monkeypatch.setattr(offline, "calculate_offline_accuracy", lambda *args, **kwargs: None)
 
     result = CliRunner().invoke(
@@ -777,7 +1005,10 @@ def test_offline_default_timeout_uses_filtered_file_count(monkeypatch, tmp_path)
         "reorganize_output",
         lambda input_path, output_path, show_progress=False: output_path,
     )
-    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "health_tools.core.psd_plotter.PsdPlotter.plot",
+        lambda *args, **kwargs: PsdPlotResult((), ()),
+    )
     monkeypatch.setattr(offline, "calculate_offline_accuracy", lambda *args, **kwargs: None)
 
     result = CliRunner().invoke(main, ["offline", "-i", str(input_dir), "-c", "gh3036"])
@@ -871,7 +1102,7 @@ def test_offline_ppg_options_are_passed_to_runner(monkeypatch, tmp_path):
         def resolve_ppg_mapping(self):
             return self.ppg_mapping
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
             output_path.mkdir(parents=True, exist_ok=True)
             return offline.OfflineRunResult(success=True)
 
@@ -1557,11 +1788,12 @@ def test_psd_plotter_skips_overlay_when_vshb_read_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(psd_plotter, "read_vshb_result", fake_read_vshb_result)
     monkeypatch.setattr(Axes, "plot", record_plot)
 
-    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir)
+    result = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir)
 
-    assert len(saved) == 1
-    assert saved[0].exists()
-    assert saved[0].name == "sample.png"
+    assert len(result.saved) == 1
+    assert result.saved[0].exists()
+    assert result.saved[0].name == "sample.png"
+    assert result.failures == ()
     assert plot_calls == []
 
 
@@ -1583,9 +1815,9 @@ def test_psd_plotter_axis_mode_reads_acc_xyz(monkeypatch, tmp_path):
         psd_plotter, "_load_vshb_overlay", lambda path: psd_plotter._empty_overlay()
     )
 
-    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir)
+    result = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir)
 
-    assert len(saved) == 1
+    assert len(result.saved) == 1
     assert loaded == ["sample0.prepsd", "sample.accxpsd", "sample.accypsd", "sample.acczpsd"]
 
 
@@ -1598,10 +1830,10 @@ def test_psd_source_copy_is_optional_and_pixel_identical(tmp_path):
     (nested_dir / "sample_result.vshb").write_text("bad vshb\n", encoding="utf-8")
     np.savetxt(nested_dir / "sample0.prepsd", np.arange(16).reshape(4, 4), delimiter=",")
 
-    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=primary_dir)
+    result = psd_plotter.PsdPlotter().plot(result_dir, save_dir=primary_dir)
 
     source_copy = nested_dir / "sample.png"
-    assert saved == [primary_dir / "sample.png"]
+    assert result.saved == (primary_dir / "sample.png",)
     assert not source_copy.exists()
 
     mirrored = psd_plotter.PsdPlotter().plot(
@@ -1610,9 +1842,9 @@ def test_psd_source_copy_is_optional_and_pixel_identical(tmp_path):
         save_to_source=True,
     )
 
-    assert mirrored == [mirrored_primary_dir / "sample.png"]
+    assert mirrored.saved == (mirrored_primary_dir / "sample.png",)
     assert source_copy.exists()
-    primary_pixels = np.asarray(Image.open(mirrored[0]).convert("RGB"))
+    primary_pixels = np.asarray(Image.open(mirrored.saved[0]).convert("RGB"))
     source_pixels = np.asarray(Image.open(source_copy).convert("RGB"))
     assert np.array_equal(primary_pixels, source_pixels)
 
@@ -1635,7 +1867,73 @@ def test_psd_plotter_rms_mode_reads_accrms(monkeypatch, tmp_path):
         psd_plotter, "_load_vshb_overlay", lambda path: psd_plotter._empty_overlay()
     )
 
-    saved = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir, acc_mode="rms")
+    result = psd_plotter.PsdPlotter().plot(result_dir, save_dir=output_dir, acc_mode="rms")
 
-    assert len(saved) == 1
+    assert len(result.saved) == 1
     assert loaded == ["sample0.prepsd", "sample.accrmspsd"]
+
+
+def _write_psd_vshb_group(directory: Path, base_name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{base_name}_result.vshb"
+    path.write_text("bad vshb\n", encoding="utf-8")
+    return path
+
+
+def test_psd_groups_reject_duplicate_output_names(tmp_path: Path):
+    _write_psd_vshb_group(tmp_path / "A", "sample")
+    _write_psd_vshb_group(tmp_path / "B", "sample")
+
+    with pytest.raises(ValueError, match="PSD 输出文件冲突"):
+        psd_plotter.PsdPlotter().plot(tmp_path, save_dir=tmp_path / "out", workers=8)
+
+
+def test_psd_workers_peak_at_eight_and_return_in_group_order(monkeypatch, tmp_path: Path):
+    for index in range(10):
+        _write_psd_vshb_group(tmp_path / f"group{index}", f"sample{index}")
+
+    lock = threading.Lock()
+    eight_started = threading.Event()
+    active = 0
+    peak_active = 0
+
+    def fake_render(self, group, *args, **kwargs):
+        nonlocal active, peak_active
+        with lock:
+            active += 1
+            peak_active = max(peak_active, active)
+            if active == 8:
+                eight_started.set()
+        try:
+            assert eight_started.wait(2)
+            sleep((10 - group.index) * 0.002)
+            return group.save_path
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(psd_plotter.PsdPlotter, "_render_group", fake_render)
+
+    result = psd_plotter.PsdPlotter().plot(tmp_path, save_dir=tmp_path / "out", workers=20)
+
+    assert peak_active == 8
+    assert [path.name for path in result.saved] == [f"sample{i}.png" for i in range(10)]
+    assert result.failures == ()
+
+
+def test_psd_group_failure_does_not_stop_other_groups(monkeypatch, tmp_path: Path):
+    vshb_paths = [
+        _write_psd_vshb_group(tmp_path / f"group{index}", f"sample{index}") for index in range(3)
+    ]
+
+    def fake_render(self, group, *args, **kwargs):
+        if group.index == 1:
+            raise RuntimeError("绘图失败")
+        return group.save_path
+
+    monkeypatch.setattr(psd_plotter.PsdPlotter, "_render_group", fake_render)
+
+    result = psd_plotter.PsdPlotter().plot(tmp_path, save_dir=tmp_path / "out", workers=3)
+
+    assert [path.name for path in result.saved] == ["sample0.png", "sample2.png"]
+    assert result.failures == ((vshb_paths[1], "绘图失败"),)

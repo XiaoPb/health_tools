@@ -88,6 +88,21 @@ def _unique_target(target: Path) -> Path:
         index += 1
 
 
+def move_offline_input(source: Path, input_dir: Path, reason: str) -> MovedOfflineInput:
+    """将不合规输入移动到同级 ``<input>_mv`` 目录并返回移动记录。"""
+    input_dir = Path(input_dir).resolve()
+    source = Path(source).resolve()
+    relative_source = source.relative_to(input_dir)
+    backup_dir = input_dir.parent / f"{input_dir.name}_mv"
+    target = _unique_target(backup_dir / relative_source)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+    except OSError as exc:
+        raise OfflineInputFilterError(f"移动不合规文件失败: {source} -> {target}: {exc}") from exc
+    return MovedOfflineInput(source, target, reason)
+
+
 def filter_offline_inputs(input_dir: Path, chip_rule: ChipRule) -> OfflineInputFilterResult:
     """严格校验CSV表头，并将不合规文件移到同级备份目录。"""
     input_dir = input_dir.resolve()
@@ -104,14 +119,6 @@ def filter_offline_inputs(input_dir: Path, chip_rule: ChipRule) -> OfflineInputF
         if not reason:
             reason = "表头与芯片规则不一致"
 
-        target = _unique_target(backup_dir / source.relative_to(input_dir))
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(target))
-        except OSError as exc:
-            raise OfflineInputFilterError(
-                f"移动不合规文件失败: {source} -> {target}: {exc}"
-            ) from exc
-        result.moved_files.append(MovedOfflineInput(source, target, reason))
+        result.moved_files.append(move_offline_input(source, input_dir, reason))
 
     return result

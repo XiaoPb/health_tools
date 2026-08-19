@@ -1,12 +1,17 @@
 """PSD时频图绘制（离线跑库结果可视化）"""
 
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 from rich.console import Console
 
 from health_tools.core.vshb import read_vshb_result
@@ -24,6 +29,25 @@ plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "WenQuanYi Micro
 plt.rcParams["axes.unicode_minus"] = False
 
 console = Console()
+
+
+@dataclass(frozen=True)
+class PsdGroup:
+    """一组 VSHB 及其配套 PSD 文件与输出位置。"""
+
+    index: int
+    vshb_path: Path
+    base_name: str
+    save_path: Path
+    source_save_path: Optional[Path]
+
+
+@dataclass(frozen=True)
+class PsdPlotResult:
+    """PSD 批量绘图结果。"""
+
+    saved: Tuple[Path, ...]
+    failures: Tuple[Tuple[Path, str], ...]
 
 
 def _empty_overlay() -> Dict[str, np.ndarray]:
@@ -214,7 +238,8 @@ class PsdPlotter:
         save_to_source: bool = False,
         accuracy_thresholds: Optional[Sequence[float]] = None,
         accuracy_inclusive: bool = False,
-    ) -> List[Path]:
+        workers: int = 8,
+    ) -> PsdPlotResult:
         """生成PSD时频图
 
         Args:
@@ -224,115 +249,168 @@ class PsdPlotter:
             save_to_source: 是否同步保存到对应VSHB所在目录
 
         Returns:
-            保存的图片路径列表
+            成功保存路径与失败文件信息
         """
         if acc_mode not in self.PSD_GROUPS:
             raise ValueError(f"不支持的PSD ACC模式: {acc_mode}")
 
         psd_extensions, subplot_titles = self.PSD_GROUPS[acc_mode]
-        if save_dir is None:
-            save_dir = result_dir / "bmpfile"
-        save_dir.mkdir(parents=True, exist_ok=True)
-
+        save_dir = save_dir or result_dir / "bmpfile"
         vshb_files = sorted(result_dir.rglob("*_result.vshb"))
         if not vshb_files:
-            return []
+            return PsdPlotResult((), ())
 
-        saved: List[Path] = []
-        for idx, vshb_path in enumerate(
-            progress_track(vshb_files, "生成PSD时频图...", console=console, enabled=show_progress),
-            start=1,
-        ):
-            try:
-                fname = vshb_path.stem
-                base_name = fname.replace("_result", "")
-                console.print(f"  [dim]PSD ({idx}/{len(vshb_files)}) {base_name}[/dim]")
+        groups = self._build_groups(vshb_files, save_dir, save_to_source)
+        self._validate_output_paths(groups)
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-                overlay = _load_vshb_overlay(vshb_path)
-                second = overlay["time"]
-                hba_out = overlay["offline"]
-                polar_hr = overlay["ref"]
-                mcu_hr = overlay["online"]
-                comp_hr = overlay["comp"]
-                has_overlay = len(second) > 0
-                metric_rows = (
-                    _metric_text_rows(
-                        polar_hr,
-                        hba_out,
-                        mcu_hr,
-                        comp_hr,
-                        accuracy_thresholds,
-                        accuracy_inclusive,
+        max_workers = min(max(int(workers), 1), 8, len(groups))
+        saved: List[Optional[Path]] = [None] * len(groups)
+        failures: List[Optional[Tuple[Path, str]]] = [None] * len(groups)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures: Dict[Future[Path], PsdGroup] = {
+                executor.submit(
+                    self._render_group,
+                    group,
+                    psd_extensions,
+                    subplot_titles,
+                    accuracy_thresholds,
+                    accuracy_inclusive,
+                ): group
+                for group in groups
+            }
+            completed = as_completed(futures)
+            for future in progress_track(
+                completed,
+                "生成PSD时频图...",
+                total=len(groups),
+                console=console,
+                enabled=show_progress,
+            ):
+                group = futures[future]
+                try:
+                    saved[group.index] = future.result()
+                except Exception as exc:
+                    console.print(f"  [red]PSD错误[/red] {group.vshb_path.name}: {exc}")
+                    failures[group.index] = (group.vshb_path, str(exc))
+
+        return PsdPlotResult(
+            tuple(path for path in saved if path is not None),
+            tuple(failure for failure in failures if failure is not None),
+        )
+
+    @staticmethod
+    def _build_groups(
+        vshb_files: Sequence[Path], save_dir: Path, save_to_source: bool
+    ) -> Tuple[PsdGroup, ...]:
+        groups = []
+        for index, vshb_path in enumerate(vshb_files):
+            base_name = vshb_path.stem.replace("_result", "")
+            save_path = save_dir / f"{base_name}.png"
+            source_save_path = vshb_path.parent / f"{base_name}.png" if save_to_source else None
+            if source_save_path is not None and source_save_path.resolve() == save_path.resolve():
+                source_save_path = None
+            groups.append(PsdGroup(index, vshb_path, base_name, save_path, source_save_path))
+        return tuple(groups)
+
+    @staticmethod
+    def _validate_output_paths(groups: Sequence[PsdGroup]) -> None:
+        owners: Dict[Path, Path] = {}
+        for group in groups:
+            for output_path in (group.save_path, group.source_save_path):
+                if output_path is None:
+                    continue
+                resolved = output_path.resolve()
+                if resolved in owners:
+                    raise ValueError(
+                        f"PSD 输出文件冲突: {output_path} "
+                        f"({owners[resolved]} 与 {group.vshb_path})"
                     )
-                    if has_overlay
-                    else []
-                )
+                owners[resolved] = group.vshb_path
 
-                psd_all = []
-                psd_dir = vshb_path.parent
-                for ext in psd_extensions:
-                    psd_path = psd_dir / (base_name + ext)
-                    if psd_path.exists():
-                        psd_all.append(_load_csv_like_matlab(psd_path))
-                    else:
-                        psd_all.append(np.zeros((128, max(len(second), 1))))
+    def _render_group(
+        self,
+        group: PsdGroup,
+        psd_extensions: Sequence[str],
+        subplot_titles: Sequence[str],
+        accuracy_thresholds: Optional[Sequence[float]],
+        accuracy_inclusive: bool,
+    ) -> Path:
+        console.print(f"  [dim]PSD {group.base_name}[/dim]")
+        overlay = _load_vshb_overlay(group.vshb_path)
+        second = overlay["time"]
+        hba_out = overlay["offline"]
+        polar_hr = overlay["ref"]
+        mcu_hr = overlay["online"]
+        comp_hr = overlay["comp"]
+        has_overlay = len(second) > 0
+        metric_rows = (
+            _metric_text_rows(
+                polar_hr,
+                hba_out,
+                mcu_hr,
+                comp_hr,
+                accuracy_thresholds,
+                accuracy_inclusive,
+            )
+            if has_overlay
+            else []
+        )
 
-                fig = plt.figure(figsize=(19.2, 2.7 * len(subplot_titles)), dpi=100)
-                axes = np.atleast_1d(fig.subplots(len(subplot_titles), 1))
+        psd_all = []
+        for extension in psd_extensions:
+            psd_path = group.vshb_path.parent / (group.base_name + extension)
+            if psd_path.exists():
+                psd_all.append(_load_csv_like_matlab(psd_path))
+            else:
+                psd_all.append(np.zeros((128, max(len(second), 1))))
 
-                for i, ax in enumerate(axes.flat):
-                    psd = psd_all[i]
-                    if psd.shape[1] >= 128:
-                        psd = psd[:, :128].T
-                    else:
-                        psd = psd.T
-                    _imagesc_exact(ax, psd, subplot_titles[i])
+        fig: Optional[Figure] = None
+        try:
+            fig = Figure(figsize=(19.2, 2.7 * len(subplot_titles)), dpi=100)
+            FigureCanvasAgg(fig)
+            axes = np.atleast_1d(fig.subplots(len(subplot_titles), 1))
+            for index, ax in enumerate(axes.flat):
+                psd = psd_all[index]
+                psd = psd[:, :128].T if psd.shape[1] >= 128 else psd.T
+                _imagesc_exact(ax, psd, subplot_titles[index])
+                if index == 0 and has_overlay:
+                    _plot_hr_overlays(ax, second, hba_out, mcu_hr, polar_hr, comp_hr)
 
-                    if i == 0 and has_overlay:
-                        _plot_hr_overlays(ax, second, hba_out, mcu_hr, polar_hr, comp_hr)
+            fig.subplots_adjust(
+                left=0.03,
+                right=0.995,
+                bottom=0.05,
+                top=_subplot_top(len(subplot_titles), has_overlay, len(metric_rows)),
+                wspace=0.08,
+                hspace=0.25,
+            )
+            fig.text(
+                0.5,
+                0.98,
+                group.base_name,
+                ha="center",
+                va="top",
+                fontsize=12,
+                fontweight="bold",
+            )
+            if has_overlay:
+                for row_index, metric_text in enumerate(metric_rows):
+                    fig.text(
+                        0.5,
+                        0.95 - row_index * 0.03,
+                        metric_text,
+                        ha="center",
+                        va="top",
+                        fontsize=10,
+                    )
 
-                fig.subplots_adjust(
-                    left=0.03,
-                    right=0.995,
-                    bottom=0.05,
-                    top=_subplot_top(len(subplot_titles), has_overlay, len(metric_rows)),
-                    wspace=0.08,
-                    hspace=0.25,
-                )
-
-                fig.text(
-                    0.5,
-                    0.98,
-                    base_name,
-                    ha="center",
-                    va="top",
-                    fontsize=12,
-                    fontweight="bold",
-                )
-                if has_overlay:
-                    for row_idx, metric_text in enumerate(metric_rows):
-                        fig.text(
-                            0.5,
-                            0.95 - row_idx * 0.03,
-                            metric_text,
-                            ha="center",
-                            va="top",
-                            fontsize=10,
-                        )
-
-                save_path = save_dir / f"{base_name}.png"
-                fig.canvas.draw()
-                img = np.array(fig.canvas.buffer_rgba())[..., :3]
-                plt.imsave(str(save_path), img)
-                if save_to_source:
-                    source_save_path = vshb_path.parent / f"{base_name}.png"
-                    if source_save_path != save_path:
-                        plt.imsave(str(source_save_path), img)
+            fig.canvas.draw()
+            image = np.array(fig.canvas.buffer_rgba())[..., :3]
+            mpimg.imsave(str(group.save_path), image)
+            if group.source_save_path is not None:
+                mpimg.imsave(str(group.source_save_path), image)
+            return group.save_path
+        finally:
+            if fig is not None:
                 plt.close(fig)
-                saved.append(save_path)
-
-            except Exception as e:
-                console.print(f"  [red]PSD错误[/red] {vshb_path.name}: {e}")
-                plt.close("all")
-
-        return saved

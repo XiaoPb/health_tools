@@ -2,9 +2,17 @@
 
 from typing import Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 from scipy import signal
+
+
+def _new_figure(figsize: Tuple[float, float]) -> Figure:
+    """创建可安全用于工作线程的无界面 Agg 画布。"""
+    figure = Figure(figsize=figsize)
+    FigureCanvasAgg(figure)
+    return figure
 
 
 def remove_baseline(
@@ -324,9 +332,8 @@ class STFTPlotter:
         titles = [channel] + acc_cols + [f"{channel} - ACC"]
         n_plots = len([t for t in titles if t in results])
 
-        fig, axes = plt.subplots(n_plots, 1, figsize=(18, 4.4 * n_plots))
-        if n_plots == 1:
-            axes = [axes]
+        fig = _new_figure((18, 4.4 * n_plots))
+        axes = np.atleast_1d(fig.subplots(n_plots, 1))
 
         idx = 0
         for title in titles:
@@ -344,9 +351,8 @@ class STFTPlotter:
             idx += 1
 
         axes[-1].set_xlabel("Time (s)")
-        plt.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
-        plt.savefig(output_file, dpi=dpi)
-        plt.close()
+        fig.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
+        fig.savefig(output_file, dpi=dpi)
 
     def plot_stft(
         self,
@@ -358,7 +364,7 @@ class STFTPlotter:
         dpi: int = 300,
         ref_data: Optional[np.ndarray] = None,
         ref_label: str = "Reference",
-    ) -> Optional[plt.Figure]:
+    ) -> Optional[Figure]:
         """单通道 STFT（模式B单通道）"""
         freqs, times, zxx_norm = self._compute_normalized_stft(data)
         if freqs is None:
@@ -366,16 +372,16 @@ class STFTPlotter:
 
         freqs_bpm = freqs * 60 if self.freq_bpm else freqs
 
-        fig, ax = plt.subplots(figsize=figsize)
+        fig = _new_figure(figsize)
+        ax = fig.subplots()
         self._plot_subplot(
             ax, times, freqs_bpm, zxx_norm, title, ref_data=ref_data, ref_label=ref_label, cmap=cmap
         )
         ax.set_xlabel("Time (s)")
-        plt.tight_layout()
+        fig.tight_layout()
 
         if output_file:
-            plt.savefig(output_file, dpi=dpi)
-            plt.close()
+            fig.savefig(output_file, dpi=dpi)
             return None
         return fig
 
@@ -389,15 +395,14 @@ class STFTPlotter:
         dpi: int = 300,
         ref_data: Optional[np.ndarray] = None,
         ref_label: str = "Reference",
-    ) -> Optional[plt.Figure]:
+    ) -> Optional[Figure]:
         """多通道 STFT（模式B多通道）"""
         n_channels = len(data_dict)
         if n_channels == 0:
             return None
 
-        fig, axes = plt.subplots(n_channels, 1, figsize=(figsize[0], 4.4 * n_channels), sharex=True)
-        if n_channels == 1:
-            axes = [axes]
+        fig = _new_figure((figsize[0], 4.4 * n_channels))
+        axes = np.atleast_1d(fig.subplots(n_channels, 1, sharex=True))
 
         for ax, (channel_name, data) in zip(axes, data_dict.items()):
             freqs, times, zxx_norm = self._compute_normalized_stft(data)
@@ -416,11 +421,10 @@ class STFTPlotter:
             )
 
         axes[-1].set_xlabel("Time (s)")
-        plt.suptitle(title)
-        plt.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
+        fig.suptitle(title)
+        fig.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
 
         if output_file:
-            plt.savefig(output_file, dpi=dpi)
-            plt.close()
+            fig.savefig(output_file, dpi=dpi)
             return None
         return fig

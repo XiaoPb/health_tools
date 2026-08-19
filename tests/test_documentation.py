@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 import click
+import pytest
 
 from health_tools.cli import PRIMARY_COMMANDS, main
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS_DIR = ROOT / "docs"
@@ -109,3 +109,47 @@ def test_api_usage_contract_example_executes():
     assert namespace["rule_list_request"].rule_type is None
     assert namespace["config_request"].action.value == "replace"
     assert namespace["offline_request"].chip_name == "gh3036"
+    assert namespace["plot_request"].workers == 8
+    assert namespace["offline_run_request"].workers == 8
+
+
+@pytest.mark.parametrize("path", ["docs/cmd_offline.md", "docs/cmd_plot.md"])
+def test_parallel_command_docs_include_workers(path: str):
+    text = (ROOT / path).read_text(encoding="utf-8")
+
+    assert "--workers" in text
+    assert "最多 8" in text
+
+
+def test_offline_doc_describes_parallel_scheduling_and_recovery():
+    text = (DOCS_DIR / "cmd_offline.md").read_text(encoding="utf-8")
+
+    for keyword in (
+        "根目录 CSV",
+        "一级子目录",
+        "进入队列",
+        "<输入目录名>_mv",
+        "不同失败文件",
+        "同一个失败文件",
+        ".offline_tasks/<task-id>/raw",
+        "--workers 1",
+    ):
+        assert keyword in text
+
+
+def test_plot_doc_describes_parallel_units_and_output_conflicts():
+    text = (DOCS_DIR / "cmd_plot.md").read_text(encoding="utf-8")
+
+    for keyword in ("按 CSV", "PSD 文件组", "输出文件冲突", "--workers 1"):
+        assert keyword in text
+
+
+def test_architecture_and_api_docs_describe_parallel_workflows():
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+    api_usage = (DOCS_DIR / "api_usage.md").read_text(encoding="utf-8")
+
+    for keyword in ("offline_parallel.py", "isolated raw outputs", "single-thread merge"):
+        assert keyword in architecture
+    assert 'PlotRequest(Path("data"), Path("plots"), workers=8)' in api_usage
+    assert "OfflineRequest(" in api_usage
+    assert "workers=8" in api_usage

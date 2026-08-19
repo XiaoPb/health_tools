@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import RequestValidationError
@@ -428,8 +429,8 @@ def run_convert(
                 elif request.split:
                     converted = converter.convert(merged)
                     for index, start in enumerate(range(0, len(converted), request.split), 1):
-                        chunk = converted.iloc[start : start + request.split]
-                        _write_merge_output(destination, index, chunk)
+                        split_chunk = converted.iloc[start : start + request.split]
+                        _write_merge_output(destination, index, split_chunk)
                 else:
                     converted = converter.convert(merged)
                     _write_merge_output(destination, None, converted)
@@ -807,10 +808,79 @@ def _safe_suffix(channels: List[str]) -> str:
     return "-".join(re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._") for value in channels)
 
 
-def _plot_one(path, output, plotter, request, chip_rule, channels, groups) -> ItemResult:
+def _parse_freq_range(value: str) -> Tuple[float, float]:
+    try:
+        limits = tuple(map(float, value.split("-")))
+        if len(limits) != 2:
+            raise ValueError
+        return limits
+    except Exception:
+        return (30.0, 240.0)
+
+
+def _build_plotter(request: PlotRequest):
+    from health_tools.core.plotter import DataPlotter
+
+    return DataPlotter(
+        sample_rate=request.sample_rate,
+        window=request.window,
+        overlap=request.overlap,
+        fmt=request.fmt,
+        dpi=request.dpi,
+        bandpass=request.bandpass,
+        remove_baseline=request.remove_baseline,
+        baseline_method=request.baseline_method,
+        freq_bpm=request.freq_bpm,
+        freq_range=_parse_freq_range(request.freq_range),
+    )
+
+
+def _planned_plot_outputs(path, request, chip_rule, channels, groups) -> Tuple[Path, ...]:
+    """返回无需读取 CSV 即可确定的输出路径，用于并发写入冲突预检。"""
+    output = Path(request.output_path)
+    suffix = request.fmt
+    targets: List[Path] = []
+    if request.plot_type in {"time", "both"}:
+        targets.append(output / f"{path.stem}_time.{suffix}")
+    if request.plot_type in {"freq", "both"}:
+        targets.append(output / f"{path.stem}_freq.{suffix}")
+    if request.plot_type == "stft":
+        # 芯片自动通道会追加通道名；这里保留同 stem 冲突探针。
+        targets.append(output / f"{path.stem}_stft.{suffix}")
+    if request.plot_type == "ac":
+        if groups is None:
+            targets.append(output / f"{path.stem}_ac.{suffix}")
+        else:
+            targets.extend(
+                output / f"{path.stem}_ac_{_safe_suffix(group)}.{suffix}" for group in groups
+            )
+    if request.plot_type == "fft":
+        if channels is None:
+            targets.append(output / f"{path.stem}_fft.{suffix}")
+        else:
+            targets.extend(
+                output / f"{path.stem}_fft_{_safe_suffix([channel])}.{suffix}"
+                for channel in channels
+            )
+    return tuple(targets)
+
+
+def _validate_plot_output_conflicts(files, request, chip_rule, channels, groups) -> None:
+    owners: Dict[str, Path] = {}
+    for path in files:
+        for target in _planned_plot_outputs(path, request, chip_rule, channels, groups):
+            key = str(target.resolve()).casefold()
+            previous = owners.get(key)
+            if previous is not None:
+                raise RequestValidationError(f"绘图输出文件冲突: {previous} 与 {path} -> {target}")
+            owners[key] = path
+
+
+def _plot_one(path, output, request, chip_rule, channels, groups) -> ItemResult:
     try:
         from health_tools.utils.csv_handler import read_csv_df
 
+        plotter = _build_plotter(request)
         frame = read_csv_df(path, chip_rule)
         outputs: List[Path] = []
         warning = ""
@@ -875,11 +945,16 @@ def _plot_one(path, output, plotter, request, chip_rule, channels, groups) -> It
 
 def run_plot(request: PlotRequest, *, context: Optional[ExecutionContext] = None) -> BatchResult:
     """绘制时域、频域、STFT、PSD、AC 或 FFT 图。"""
-    from health_tools.core.plotter import DataPlotter
     from health_tools.models.rules import ChipRule
     from health_tools.rules.loader import RuleLoader
     from health_tools.utils.accuracy import normalize_accuracy_thresholds
 
+    if (
+        not isinstance(request.workers, int)
+        or isinstance(request.workers, bool)
+        or not 1 <= request.workers <= 8
+    ):
+        raise RequestValidationError("workers 必须是 1-8 的整数")
     valid = {"time", "freq", "stft", "psd", "ac", "fft", "both"}
     if request.plot_type not in valid:
         raise RequestValidationError(f"不支持的图表类型: {request.plot_type}")
@@ -902,25 +977,38 @@ def run_plot(request: PlotRequest, *, context: Optional[ExecutionContext] = None
         ctx.check_cancelled("psd")
         ctx.emit(ProgressEvent("plot", "psd", 0, 1, "生成 PSD", str(source)))
         if use_custom_accuracy:
-            saved = PsdPlotter().plot(
+            plot_result = PsdPlotter().plot(
                 source,
                 save_dir=output,
                 show_progress=False,
                 acc_mode=request.psd_acc,
                 accuracy_thresholds=accuracy_thresholds,
                 accuracy_inclusive=request.accuracy_inclusive,
+                workers=request.workers,
             )
         else:
-            saved = PsdPlotter().plot(
+            plot_result = PsdPlotter().plot(
                 source,
                 save_dir=output,
                 show_progress=False,
                 acc_mode=request.psd_acc,
+                workers=request.workers,
             )
-        ctx.check_cancelled("psd", BatchResult("plot", artifacts=tuple(saved)))
+        ctx.check_cancelled("psd", BatchResult("plot", artifacts=plot_result.saved))
         ctx.emit(ProgressEvent("plot", "psd", 1, 1, "完成", str(source)))
-        psd_items = tuple(ItemResult(ItemStatus.OK, str(source), str(path)) for path in saved)
-        return BatchResult("plot", psd_items, tuple(saved))
+        psd_items = tuple(
+            ItemResult(ItemStatus.OK, str(source), str(path)) for path in plot_result.saved
+        ) + tuple(
+            ItemResult(
+                ItemStatus.FAIL,
+                str(path),
+                str(output),
+                reason="PSD 绘图失败",
+                detail=message,
+            )
+            for path, message in plot_result.failures
+        )
+        return BatchResult("plot", psd_items, plot_result.saved)
     chip_rule = None
     if request.chip_name:
         chip_rule = _load_rule(RuleLoader.load_chip_rule, request.chip_name, "芯片")
@@ -941,32 +1029,45 @@ def run_plot(request: PlotRequest, *, context: Optional[ExecutionContext] = None
             validate_bandpass(request.sample_rate, low, high)
         except Exception as exc:
             raise RequestValidationError(f"非法带通范围 {request.bandpass}: {exc}") from exc
-    try:
-        freq_range = tuple(map(float, request.freq_range.split("-")))
-        if len(freq_range) != 2:
-            raise ValueError
-    except Exception:
-        freq_range = (30.0, 240.0)
-    plotter = DataPlotter(
-        sample_rate=request.sample_rate,
-        window=request.window,
-        overlap=request.overlap,
-        fmt=request.fmt,
-        dpi=request.dpi,
-        bandpass=request.bandpass,
-        remove_baseline=request.remove_baseline,
-        baseline_method=request.baseline_method,
-        freq_bpm=request.freq_bpm,
-        freq_range=freq_range,
-    )
     files = [source] if source.is_file() else sorted(source.rglob("*.csv"))
     if request.filter_name:
         files = [path for path in files if request.filter_name in path.name]
-    items: List[ItemResult] = []
+    _validate_plot_output_conflicts(files, request, chip_rule, channels, groups)
+    if not files:
+        return _batch("plot", [])
+
+    ctx.check_cancelled("files", BatchResult("plot"))
+    ctx.emit(ProgressEvent("plot", "files", 0, len(files), "开始"))
+    ordered_items: List[Optional[ItemResult]] = [None] * len(files)
+    completed = 0
+    max_workers = min(max(request.workers, 1), 8, len(files))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_plot_one, path, output, request, chip_rule, channels, groups): index
+            for index, path in enumerate(files)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                ordered_items[index] = future.result()
+            except Exception as exc:
+                ordered_items[index] = ItemResult(
+                    ItemStatus.FAIL,
+                    str(files[index]),
+                    str(output),
+                    classify_exception(exc),
+                    str(exc),
+                )
+            completed += 1
+            partial = [item for item in ordered_items if item is not None]
+            ctx.check_cancelled("files", _batch("plot", partial))
+            ctx.emit(
+                ProgressEvent("plot", "files", completed, len(files), "完成", str(files[index]))
+            )
+
+    items = [item for item in ordered_items if item is not None]
     artifacts: List[Path] = []
-    for _, path in _events("plot", "files", files, ctx, items):
-        item = _plot_one(path, output, plotter, request, chip_rule, channels, groups)
-        items.append(item)
+    for item in items:
         if item.status in {ItemStatus.OK, ItemStatus.WARN}:
             artifacts.extend(Path(value) for value in item.output.split(";") if value)
     return _batch("plot", items, artifacts)

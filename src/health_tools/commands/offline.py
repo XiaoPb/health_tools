@@ -121,8 +121,8 @@ def offline_cmd(
     if do_list:
         from health_tools.core.offline import get_category_label, get_offline_config, list_versions
 
-        versions = list_versions(chip_name)
-        if not versions:
+        available_versions = list_versions(chip_name)
+        if not available_versions:
             cfg = get_offline_config()
             console.print("[yellow]未发现已配置的版本[/yellow]")
             console.print(f"工具路径: {cfg.tools_path}")
@@ -133,7 +133,7 @@ def offline_cmd(
             table.add_column("类别")
             table.add_column("版本")
             table.add_column("默认", style="green")
-            for chip_name_ver, info in versions.items():
+            for chip_name_ver, info in available_versions.items():
                 default_ver = info.get("default", "")
                 categories = info.get("versions", {})
                 if isinstance(categories, dict):
@@ -153,6 +153,8 @@ def offline_cmd(
             for line in item.detail.splitlines():
                 if line.startswith("PPG列映射"):
                     console.print(line)
+        if result.batch.fail_count:
+            raise click.ClickException(f"{result.batch.fail_count} 个 offline 子目录执行失败")
     return
 
 
@@ -516,16 +518,17 @@ def _run_psd_plot(result_dir: Path, save_dir: Path, acc_mode: str = "axis") -> N
     from health_tools.core.psd_plotter import PsdPlotter
 
     plotter = PsdPlotter()
-    saved = plotter.plot(
+    result = plotter.plot(
         result_dir,
         save_dir=save_dir,
         show_progress=True,
         acc_mode=acc_mode,
         save_to_source=True,
     )
-    if saved:
+    if result.saved:
         console.print(
-            f"[green]OK[/green] 生成 {len(saved)} 张时频图: {save_dir}，并同步保存到VSHB目录"
+            f"[green]OK[/green] 生成 {len(result.saved)} 张时频图: "
+            f"{save_dir}，并同步保存到VSHB目录"
         )
     else:
         console.print("[yellow]WARN[/yellow] 未找到PSD数据文件")

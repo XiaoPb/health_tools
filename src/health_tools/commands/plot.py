@@ -115,7 +115,9 @@ def plot_cmd(
     return
 
 
-def _plot_psd_dir(input_dir: Path, output_dir: Path, acc_mode: str = "axis") -> None:
+def _plot_psd_dir(
+    input_dir: Path, output_dir: Path, acc_mode: str = "axis", workers: int = 8
+) -> None:
     """绘制离线结果目录中的PSD时频图"""
     if not input_dir.exists():
         console.print(f"[red]错误: 输入路径不存在: {input_dir}[/red]")
@@ -127,11 +129,19 @@ def _plot_psd_dir(input_dir: Path, output_dir: Path, acc_mode: str = "axis") -> 
     from health_tools.core.psd_plotter import PsdPlotter
 
     plotter = PsdPlotter()
-    saved = plotter.plot(input_dir, save_dir=output_dir, show_progress=True, acc_mode=acc_mode)
-    if saved:
-        console.print(f"[green]OK[/green] 生成 {len(saved)} 张PSD时频图: {output_dir}")
+    result = plotter.plot(
+        input_dir,
+        save_dir=output_dir,
+        show_progress=True,
+        acc_mode=acc_mode,
+        workers=workers,
+    )
+    if result.saved:
+        console.print(f"[green]OK[/green] 生成 {len(result.saved)} 张PSD时频图: {output_dir}")
     else:
         console.print("[yellow]WARN[/yellow] 未找到PSD数据文件")
+    for path, message in result.failures:
+        console.print(f"[red]FAIL[/red] {path}: {message}")
 
 
 def _parse_ac_channel_groups(channels: Optional[str]) -> Optional[List[List[str]]]:

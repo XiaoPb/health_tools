@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib import rcParams
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 from scipy import signal
 
 from health_tools.core.ppg_analysis import (
@@ -17,6 +19,13 @@ from health_tools.core.ppg_analysis import (
 from health_tools.core.stft import STFTPlotter
 
 MAX_PLOT_POINTS = 50000
+
+
+def _new_figure(figsize: Tuple[float, float]) -> Figure:
+    """创建不依赖 pyplot 全局 GUI 后端的绘图画布。"""
+    figure = Figure(figsize=figsize)
+    FigureCanvasAgg(figure)
+    return figure
 
 
 @dataclass
@@ -84,23 +93,19 @@ class DataPlotter:
         if not channels:
             return
 
-        fig, axes = plt.subplots(len(channels), 1, figsize=(12, 3 * len(channels)), sharex=True)
-        if len(channels) == 1:
-            axes = [axes]
+        fig = _new_figure((12, 3 * len(channels)))
+        axes = np.atleast_1d(fig.subplots(len(channels), 1, sharex=True))
 
-        try:
-            for ax, channel in zip(axes, channels):
-                if channel in df.columns:
-                    data = pd.to_numeric(df[channel], errors="coerce").values
-                    ax.plot(_downsample(data), linewidth=0.5)
-                    ax.set_ylabel(channel)
-                    ax.grid(True, alpha=0.3)
+        for ax, channel in zip(axes, channels):
+            if channel in df.columns:
+                data = pd.to_numeric(df[channel], errors="coerce").values
+                ax.plot(_downsample(data), linewidth=0.5)
+                ax.set_ylabel(channel)
+                ax.grid(True, alpha=0.3)
 
-            axes[-1].set_xlabel("Sample")
-            plt.tight_layout()
-            plt.savefig(output_file, dpi=self.dpi)
-        finally:
-            plt.close(fig)
+        axes[-1].set_xlabel("Sample")
+        fig.tight_layout()
+        fig.savefig(output_file, dpi=self.dpi)
 
     def plot_freq(
         self,
@@ -115,26 +120,22 @@ class DataPlotter:
 
         sample_rate = self.sample_rate
 
-        fig, axes = plt.subplots(len(channels), 1, figsize=(12, 3 * len(channels)), sharex=True)
-        if len(channels) == 1:
-            axes = [axes]
+        fig = _new_figure((12, 3 * len(channels)))
+        axes = np.atleast_1d(fig.subplots(len(channels), 1, sharex=True))
 
-        try:
-            for ax, channel in zip(axes, channels):
-                if channel in df.columns:
-                    data = pd.to_numeric(df[channel], errors="coerce").dropna().values
-                    if len(data) > 0:
-                        nperseg = min(256, len(data))
-                        freqs, psd = signal.welch(data, fs=sample_rate, nperseg=nperseg)
-                        ax.semilogy(freqs, psd, linewidth=0.5)
-                        ax.set_ylabel(f"{channel}\nPSD")
-                        ax.grid(True, alpha=0.3)
+        for ax, channel in zip(axes, channels):
+            if channel in df.columns:
+                data = pd.to_numeric(df[channel], errors="coerce").dropna().values
+                if len(data) > 0:
+                    nperseg = min(256, len(data))
+                    freqs, psd = signal.welch(data, fs=sample_rate, nperseg=nperseg)
+                    ax.semilogy(freqs, psd, linewidth=0.5)
+                    ax.set_ylabel(f"{channel}\nPSD")
+                    ax.grid(True, alpha=0.3)
 
-            axes[-1].set_xlabel("Frequency (Hz)")
-            plt.tight_layout()
-            plt.savefig(output_file, dpi=self.dpi)
-        finally:
-            plt.close(fig)
+        axes[-1].set_xlabel("Frequency (Hz)")
+        fig.tight_layout()
+        fig.savefig(output_file, dpi=self.dpi)
 
     def plot_ac(
         self,
@@ -155,42 +156,40 @@ class DataPlotter:
             raise SignalAnalysisError("AC 绘图需要完整的 ACC X/Y/Z 三轴")
 
         time = np.arange(len(df), dtype=float) / self.sample_rate
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
-        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        fig = _new_figure((14, 10))
+        axes = np.atleast_1d(fig.subplots(3, 1, sharex=True))
+        colors = rcParams["axes.prop_cycle"].by_key()["color"]
 
-        try:
-            for column in acc_columns:
-                acc = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
-                axes[0].plot(time, acc, linewidth=0.6, label=column)
-            axes[0].set_ylabel("ACC")
-            axes[0].legend(loc="upper right")
-            axes[0].grid(True, alpha=0.3)
+        for column in acc_columns:
+            acc = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+            axes[0].plot(time, acc, linewidth=0.6, label=column)
+        axes[0].set_ylabel("ACC")
+        axes[0].legend(loc="upper right")
+        axes[0].grid(True, alpha=0.3)
 
-            for index, channel in enumerate(channels):
-                raw = prepare_signal(df[channel])
-                filtered = bandpass_signal(
-                    raw,
-                    self.sample_rate,
-                    self.lowcut,
-                    self.highcut,
-                    remove_baseline=self.remove_baseline_flag,
-                    baseline_method=self.baseline_method,
-                )
-                pi = compute_pi(raw, filtered, self.sample_rate)
-                color = colors[index % len(colors)]
-                axes[1].plot(time, filtered, linewidth=0.7, color=color, label=channel)
-                axes[2].plot(time, pi, linewidth=0.8, color=color, label=channel)
+        for index, channel in enumerate(channels):
+            raw = prepare_signal(df[channel])
+            filtered = bandpass_signal(
+                raw,
+                self.sample_rate,
+                self.lowcut,
+                self.highcut,
+                remove_baseline=self.remove_baseline_flag,
+                baseline_method=self.baseline_method,
+            )
+            pi = compute_pi(raw, filtered, self.sample_rate)
+            color = colors[index % len(colors)]
+            axes[1].plot(time, filtered, linewidth=0.7, color=color, label=channel)
+            axes[2].plot(time, pi, linewidth=0.8, color=color, label=channel)
 
-            axes[1].set_ylabel("Filtered PPG")
-            axes[2].set_ylabel("PI (%)")
-            axes[2].set_xlabel("Time (s)")
-            for ax in axes[1:]:
-                ax.legend(loc="upper right")
-                ax.grid(True, alpha=0.3)
-            fig.tight_layout()
-            fig.savefig(output_file, dpi=self.dpi)
-        finally:
-            plt.close(fig)
+        axes[1].set_ylabel("Filtered PPG")
+        axes[2].set_ylabel("PI (%)")
+        axes[2].set_xlabel("Time (s)")
+        for ax in axes[1:]:
+            ax.legend(loc="upper right")
+            ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(output_file, dpi=self.dpi)
 
     def plot_fft(self, df: pd.DataFrame, output_file: Path, channel: str) -> None:
         """使用独立 Y 轴叠加原始与带通后 PPG 的单边 FFT。"""
@@ -208,32 +207,28 @@ class DataPlotter:
         raw_freqs, raw_amplitude = compute_single_sided_fft(raw, self.sample_rate)
         filtered_freqs, filtered_amplitude = compute_single_sided_fft(filtered, self.sample_rate)
 
-        fig, raw_axis = plt.subplots(figsize=(12, 5))
+        fig = _new_figure((12, 5))
+        raw_axis = fig.subplots()
         filtered_axis = raw_axis.twinx()
-        try:
-            raw_line = raw_axis.plot(
-                raw_freqs, raw_amplitude, color="#2563EB", linewidth=0.8, label="Raw FFT"
-            )[0]
-            filtered_line = filtered_axis.plot(
-                filtered_freqs,
-                filtered_amplitude,
-                color="#DC2626",
-                linewidth=0.8,
-                label="Filtered FFT",
-            )[0]
-            raw_axis.set_xlabel("Frequency (Hz)")
-            raw_axis.set_ylabel("Raw amplitude", color=raw_line.get_color())
-            filtered_axis.set_ylabel("Filtered amplitude", color=filtered_line.get_color())
-            raw_axis.set_xlim(0, self.sample_rate / 2)
-            raw_axis.grid(True, alpha=0.3)
-            raw_axis.set_title(f"FFT - {channel}")
-            raw_axis.legend(
-                [raw_line, filtered_line], ["Raw FFT", "Filtered FFT"], loc="upper right"
-            )
-            fig.tight_layout()
-            fig.savefig(output_file, dpi=self.dpi)
-        finally:
-            plt.close(fig)
+        raw_line = raw_axis.plot(
+            raw_freqs, raw_amplitude, color="#2563EB", linewidth=0.8, label="Raw FFT"
+        )[0]
+        filtered_line = filtered_axis.plot(
+            filtered_freqs,
+            filtered_amplitude,
+            color="#DC2626",
+            linewidth=0.8,
+            label="Filtered FFT",
+        )[0]
+        raw_axis.set_xlabel("Frequency (Hz)")
+        raw_axis.set_ylabel("Raw amplitude", color=raw_line.get_color())
+        filtered_axis.set_ylabel("Filtered amplitude", color=filtered_line.get_color())
+        raw_axis.set_xlim(0, self.sample_rate / 2)
+        raw_axis.grid(True, alpha=0.3)
+        raw_axis.set_title(f"FFT - {channel}")
+        raw_axis.legend([raw_line, filtered_line], ["Raw FFT", "Filtered FFT"], loc="upper right")
+        fig.tight_layout()
+        fig.savefig(output_file, dpi=self.dpi)
 
     def plot_spectrogram(
         self,
@@ -248,20 +243,18 @@ class DataPlotter:
         if len(data) < 16:
             return
 
-        fig, ax = plt.subplots(figsize=(12, 6))
-        try:
-            nperseg = min(256, len(data) // 4)
-            nperseg = max(nperseg, 16)
+        fig = _new_figure((12, 6))
+        ax = fig.subplots()
+        nperseg = min(256, len(data) // 4)
+        nperseg = max(nperseg, 16)
 
-            freqs, times, Sxx = signal.spectrogram(data, fs=self.sample_rate, nperseg=nperseg)
-            im = ax.pcolormesh(times, freqs, 10 * np.log10(Sxx + 1e-10), shading="gouraud")
-            ax.set_ylabel("Frequency (Hz)")
-            ax.set_xlabel("Time (s)")
-            plt.colorbar(im, ax=ax, label="Power (dB)")
-            plt.tight_layout()
-            plt.savefig(output_file, dpi=self.dpi)
-        finally:
-            plt.close(fig)
+        freqs, times, Sxx = signal.spectrogram(data, fs=self.sample_rate, nperseg=nperseg)
+        im = ax.pcolormesh(times, freqs, 10 * np.log10(Sxx + 1e-10), shading="gouraud")
+        ax.set_ylabel("Frequency (Hz)")
+        ax.set_xlabel("Time (s)")
+        fig.colorbar(im, ax=ax, label="Power (dB)")
+        fig.tight_layout()
+        fig.savefig(output_file, dpi=self.dpi)
 
     def plot_stft(
         self,

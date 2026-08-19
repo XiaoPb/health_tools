@@ -1,9 +1,11 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+from matplotlib.figure import Figure
 
 from health_tools.core.plotter import DataPlotter
 from health_tools.core.ppg_analysis import SignalAnalysisError
@@ -23,14 +25,21 @@ def _analysis_df(sample_rate: int = 10, seconds: int = 10) -> pd.DataFrame:
 
 
 def test_plot_ac_draws_three_subplots_and_keeps_channel_colors(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(plt, "close", lambda *_args, **_kwargs: None)
+    saved = []
+    original_savefig = Figure.savefig
+
+    def capture_savefig(figure, *args, **kwargs):
+        saved.append(figure)
+        return original_savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
     output = tmp_path / "ac.png"
 
     DataPlotter(sample_rate=10).plot_ac(
         _analysis_df(), output, ["CH0", "CH2"], ["ACCX", "ACCY", "ACCZ"]
     )
 
-    fig = plt.gcf()
+    fig = saved[0]
     assert output.stat().st_size > 0
     assert len(fig.axes) == 3
     assert [line.get_label() for line in fig.axes[0].lines] == ["ACCX", "ACCY", "ACCZ"]
@@ -38,7 +47,6 @@ def test_plot_ac_draws_three_subplots_and_keeps_channel_colors(monkeypatch, tmp_
     assert [line.get_label() for line in fig.axes[2].lines] == ["CH0", "CH2"]
     assert fig.axes[1].lines[0].get_color() == fig.axes[2].lines[0].get_color()
     assert fig.axes[1].lines[1].get_color() == fig.axes[2].lines[1].get_color()
-    plt.close("all")
 
 
 def test_plot_ac_rejects_more_than_four_channels(tmp_path: Path):
@@ -56,7 +64,14 @@ def test_plot_ac_rejects_more_than_four_channels(tmp_path: Path):
 
 
 def test_plot_fft_uses_independent_y_axes_and_excludes_dc(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(plt, "close", lambda *_args, **_kwargs: None)
+    saved = []
+    original_savefig = Figure.savefig
+
+    def capture_savefig(figure, *args, **kwargs):
+        saved.append(figure)
+        return original_savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
     sample_rate = 50
     time = np.arange(sample_rate * 4) / sample_rate
     df = pd.DataFrame({"CH0": 100 + 3 * np.sin(2 * np.pi * 2 * time)})
@@ -64,10 +79,35 @@ def test_plot_fft_uses_independent_y_axes_and_excludes_dc(monkeypatch, tmp_path:
 
     DataPlotter(sample_rate=sample_rate).plot_fft(df, output, "CH0")
 
-    fig = plt.gcf()
+    fig = saved[0]
     assert output.stat().st_size > 0
     assert len(fig.axes) == 2
     assert fig.axes[0].get_ylabel() == "Raw amplitude"
     assert fig.axes[1].get_ylabel() == "Filtered amplitude"
     assert min(fig.axes[0].lines[0].get_xdata()) > 0
-    plt.close("all")
+
+
+def test_plot_time_generates_png_in_worker_threads_without_pyplot_backend(
+    monkeypatch, tmp_path: Path
+):
+    """工作线程绘图不应经过 pyplot 的全局 GUI 后端。"""
+    monkeypatch.delenv("MPLBACKEND", raising=False)
+
+    def fail_pyplot_subplots(*_args, **_kwargs):
+        raise RuntimeError("pyplot GUI backend was used")
+
+    monkeypatch.setattr(plt, "subplots", fail_pyplot_subplots)
+    frame = _analysis_df()
+    outputs = [tmp_path / f"worker-{index}.png" for index in range(2)]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(DataPlotter(sample_rate=10).plot_time, frame, output, ["CH0"])
+            for output in outputs
+        ]
+        for future in futures:
+            future.result()
+
+    for output in outputs:
+        assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        assert output.stat().st_size > 0

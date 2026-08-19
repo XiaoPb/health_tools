@@ -97,7 +97,13 @@ split = run_split(SplitRequest(Path("data.csv"), Path("split"), by_size=10000))
 processed = run_process(ProcessRequest(Path("data"), Path("processed"), max_workers=4))
 
 plots = run_plot(
-    PlotRequest(Path("data.csv"), Path("plots"), plot_type="both", channels="red,ir")
+    PlotRequest(
+        Path("data.csv"),
+        Path("plots"),
+        plot_type="both",
+        channels="red,ir",
+        workers=8,
+    )
 )
 factory = run_factory(FactoryRequest(Path("data"), chip_name="gh3036"))
 evaluation = run_evaluate(
@@ -105,7 +111,9 @@ evaluation = run_evaluate(
 )
 
 checked = run_check(CheckRequest(input_path=Path("data"), chip_name="gh3036"))
-offline = run_offline(OfflineRequest(input_path=Path("data"), chip_name="gh3036"))
+offline = run_offline(
+    OfflineRequest(input_path=Path("data"), chip_name="gh3036", workers=8)
+)
 
 config = run_config(ConfigRequest(ConfigAction.SHOW))
 ```
@@ -232,10 +240,14 @@ for version in gh3036_versions.versions:
 
 <!-- api-contract-example -->
 ```python
+from pathlib import Path
+
 from health_tools.api import (
     ConfigAction,
     ConfigRequest,
+    OfflineRequest,
     OfflineCatalogRequest,
+    PlotRequest,
     RuleListRequest,
     RuleReadRequest,
     RuleSaveRequest,
@@ -248,6 +260,10 @@ rule_read_request = RuleReadRequest(RuleType.CHIP, "gh3036.yaml", RuleSource.BUI
 rule_save_request = RuleSaveRequest(RuleType.CHIP, "custom.yaml", "chip: custom\n")
 config_request = ConfigRequest(ConfigAction.REPLACE, source="rules_dir: rules\n")
 offline_request = OfflineCatalogRequest("gh3036")
+plot_request = PlotRequest(Path("data"), Path("plots"), workers=8)
+offline_run_request = OfflineRequest(
+    input_path=Path("data"), chip_name="gh3036", workers=8
+)
 ```
 
 ## 安全提示

@@ -1,10 +1,119 @@
+import threading
+import time
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 from rich.console import Console
 
 from health_tools.cli import main
 from health_tools.commands.offline import _build_accuracy_tables
+from health_tools.core.psd_plotter import PsdPlotResult
+
+
+def test_planned_plot_outputs_cover_normal_plot_types(tmp_path: Path):
+    from dataclasses import replace
+
+    from health_tools.api import PlotRequest
+    from health_tools.api.file_operations import _planned_plot_outputs
+
+    output = tmp_path / "out"
+    base = PlotRequest(Path("a.csv"), output, plot_type="time")
+
+    assert _planned_plot_outputs(Path("a.csv"), base, None, ["CH0"], None) == (
+        output / "a_time.png",
+    )
+    assert _planned_plot_outputs(
+        Path("a.csv"), replace(base, plot_type="both"), None, ["CH0"], None
+    ) == (output / "a_time.png", output / "a_freq.png")
+    assert _planned_plot_outputs(
+        Path("a.csv"), replace(base, plot_type="stft"), None, ["CH0"], None
+    ) == (output / "a_stft.png",)
+    assert _planned_plot_outputs(
+        Path("a.csv"), replace(base, plot_type="ac"), None, None, [["CH0"], ["CH1"]]
+    ) == (output / "a_ac_CH0.png", output / "a_ac_CH1.png")
+    assert _planned_plot_outputs(
+        Path("a.csv"), replace(base, plot_type="fft"), None, ["CH0", "CH1"], None
+    ) == (output / "a_fft_CH0.png", output / "a_fft_CH1.png")
+
+
+def test_plot_rejects_output_conflict_before_rendering(monkeypatch, tmp_path: Path):
+    from health_tools.api import PlotRequest, run_plot
+    from health_tools.api.errors import RequestValidationError
+
+    input_dir = tmp_path / "input"
+    (input_dir / "A").mkdir(parents=True)
+    (input_dir / "B").mkdir(parents=True)
+    (input_dir / "A" / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    (input_dir / "B" / "sample.csv").write_text("x\n2\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "health_tools.api.file_operations._plot_one",
+        lambda *args: pytest.fail("输出冲突时不得开始绘图"),
+    )
+
+    with pytest.raises(RequestValidationError, match="绘图输出文件冲突"):
+        run_plot(PlotRequest(input_dir, tmp_path / "out", plot_type="time"))
+
+
+@pytest.mark.parametrize("workers", [0, 9, True, "2"])
+def test_plot_rejects_invalid_public_workers(workers, tmp_path: Path):
+    from health_tools.api import PlotRequest, RequestValidationError, run_plot
+
+    with pytest.raises(RequestValidationError, match="workers 必须是 1-8 的整数"):
+        run_plot(PlotRequest(tmp_path, tmp_path / "out", workers=workers))
+
+
+def test_plot_concurrent_tasks_use_independent_plotters_and_stable_order(
+    monkeypatch, tmp_path: Path
+):
+    from health_tools.api import PlotRequest, run_plot
+    from health_tools.api.models import ItemStatus
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    names = [f"{index:02d}.csv" for index in range(10)]
+    for name in names:
+        (input_dir / name).write_text("x\n1\n", encoding="utf-8")
+
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+    plotter_ids = []
+    plotters = []
+
+    class FakePlotter:
+        def __init__(self, **kwargs):
+            self.fmt = kwargs["fmt"]
+            plotters.append(self)
+
+        def plot_time(self, frame, target, channels):
+            nonlocal active, peak
+            with lock:
+                plotter_ids.append(id(self))
+                active += 1
+                peak = max(peak, active)
+            time.sleep((10 - int(target.stem.removesuffix("_time"))) * 0.003)
+            with lock:
+                active -= 1
+            if target.name == "04_time.png":
+                raise ValueError("坏数据")
+
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+
+    class FakeFrame:
+        def __len__(self):
+            return 1
+
+    monkeypatch.setattr("health_tools.utils.csv_handler.read_csv_df", lambda *args: FakeFrame())
+
+    result = run_plot(PlotRequest(input_dir, tmp_path / "out", plot_type="time", workers=8))
+
+    assert len(plotters) == 10
+    assert len(set(plotter_ids)) == 10
+    assert peak == 8
+    assert [Path(item.input).name for item in result.items] == names
+    assert result.items[4].status is ItemStatus.FAIL
+    assert sum(item.status is ItemStatus.OK for item in result.items) == 9
 
 
 class _FakeOfflineRunnerPreview:
@@ -177,6 +286,340 @@ def test_parallel_commands_describe_workers_limit():
         assert "并行线程数，最多 8" in result.output
 
 
+def _prepare_parallel_offline_api(monkeypatch, tmp_path: Path):
+    import health_tools.api.offline_operation as offline_operation
+    from health_tools.core.offline import OfflineRunResult
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    executable = tmp_path / "tools" / "gh3036" / "exclusive" / "v1" / "TEE_Algorithm.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="utf-8")
+
+    class FakeRunner(_FakeOfflineRunnerPreview):
+        def __init__(self, chip, version=None, **kwargs):
+            self.version = version
+
+        def run(self, input_path, output_path, **kwargs):
+            return OfflineRunResult(success=True)
+
+    monkeypatch.setattr(offline_operation, "_filter_input_files", lambda *args: None)
+    monkeypatch.setattr("health_tools.core.offline.find_exe", lambda *args: executable)
+    monkeypatch.setattr("health_tools.core.offline.load_local_cmd_config", lambda *args: None)
+    monkeypatch.setattr("health_tools.core.offline.OfflineRunner", FakeRunner)
+    return input_dir, output_dir
+
+
+def test_offline_parallel_child_directories_run_before_merge_plot_and_accuracy(
+    monkeypatch, tmp_path: Path
+):
+    import pandas as pd
+
+    from health_tools.api import OfflineRequest, run_offline
+    from health_tools.core.offline import OfflineRunResult
+    from health_tools.core.offline_parallel import (
+        OfflineMergeResult,
+        OfflineTaskBatch,
+        OfflineTaskResult,
+    )
+
+    input_dir, output_dir = _prepare_parallel_offline_api(monkeypatch, tmp_path)
+    for name in ("B", "A"):
+        child = input_dir / name
+        child.mkdir()
+        (child / f"{name}.csv").write_text("x\n1\n", encoding="utf-8")
+    root_csv = input_dir / "root.csv"
+    root_csv.write_text("x\n1\n", encoding="utf-8")
+    events = []
+    captured = {}
+    runner_ids = []
+
+    def fake_run_tasks(tasks, runner_factory, input_root, **kwargs):
+        captured["tasks"] = tasks
+        captured["workers"] = kwargs["workers"]
+        results = []
+        for task in tasks:
+            runner = runner_factory(task)
+            runner_ids.append(id(runner))
+            events.append(f"run:{task.relative_dir}")
+            results.append(OfflineTaskResult(task, OfflineRunResult(success=True), "succeeded"))
+        return OfflineTaskBatch(tuple(results), ())
+
+    def fake_merge(version_output, task_results, **kwargs):
+        events.append("merge")
+        captured["merge_cleanup"] = kwargs["cleanup"]
+        reorganized = version_output / "数据整理"
+        reorganized.mkdir(parents=True)
+        return OfflineMergeResult(tuple(task_results), ())
+
+    def fake_plot(self, result_dir, **kwargs):
+        events.append("plot")
+        captured["plot_input"] = result_dir
+        captured["plot_workers"] = kwargs["workers"]
+        return PsdPlotResult((), ())
+
+    def fake_accuracy(result_dir, **kwargs):
+        events.append("accuracy")
+        captured["accuracy_input"] = result_dir
+        return pd.DataFrame({"file": ["TOTAL"]})
+
+    monkeypatch.setattr("health_tools.core.offline_parallel.run_offline_tasks", fake_run_tasks)
+    monkeypatch.setattr("health_tools.core.offline_parallel.merge_task_outputs", fake_merge)
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
+    monkeypatch.setattr("health_tools.core.offline.calculate_offline_accuracy", fake_accuracy)
+
+    result = run_offline(
+        OfflineRequest(
+            input_path=input_dir,
+            output_path=output_dir,
+            chip_name="gh3036",
+            ver="v1",
+            workers=4,
+        )
+    )
+
+    assert [task.relative_dir for task in captured["tasks"]] == [Path("A"), Path("B")]
+    assert all(task.input_dir != root_csv for task in captured["tasks"])
+    assert captured["workers"] == 4
+    assert captured["plot_workers"] == 4
+    assert len(set(runner_ids)) == 2
+    assert events == ["run:A", "run:B", "merge", "plot", "accuracy"]
+    assert captured["merge_cleanup"] is True
+    final_reorganized = output_dir / "v1" / "数据整理"
+    assert captured["plot_input"] == final_reorganized
+    assert captured["accuracy_input"] == final_reorganized
+    assert final_reorganized in result.batch.artifacts
+
+
+def test_offline_parallel_root_task_uses_one_worker(monkeypatch, tmp_path: Path):
+    from health_tools.api import OfflineRequest, run_offline
+    from health_tools.core.offline import OfflineRunResult
+    from health_tools.core.offline_parallel import (
+        OfflineMergeResult,
+        OfflineTaskBatch,
+        OfflineTaskResult,
+    )
+
+    input_dir, output_dir = _prepare_parallel_offline_api(monkeypatch, tmp_path)
+    (input_dir / "root.csv").write_text("x\n1\n", encoding="utf-8")
+    captured = {}
+
+    def fake_run_tasks(tasks, runner_factory, input_root, **kwargs):
+        captured["tasks"] = tasks
+        captured["workers"] = kwargs["workers"]
+        result = OfflineTaskResult(tasks[0], OfflineRunResult(success=True), "succeeded")
+        return OfflineTaskBatch((result,), ())
+
+    def fake_merge(version_output, task_results, **kwargs):
+        (version_output / "数据整理").mkdir(parents=True)
+        return OfflineMergeResult(tuple(task_results), ())
+
+    monkeypatch.setattr("health_tools.core.offline_parallel.run_offline_tasks", fake_run_tasks)
+    monkeypatch.setattr("health_tools.core.offline_parallel.merge_task_outputs", fake_merge)
+
+    run_offline(
+        OfflineRequest(
+            input_path=input_dir,
+            output_path=output_dir,
+            chip_name="gh3036",
+            ver="v1",
+            workers=8,
+            no_plot=True,
+            no_accuracy=True,
+        )
+    )
+
+    assert len(captured["tasks"]) == 1
+    assert captured["tasks"][0].input_dir == input_dir
+    assert captured["tasks"][0].relative_dir == Path()
+    assert captured["workers"] == 1
+
+
+@pytest.mark.parametrize("workers", [0, 9, True, "2"])
+def test_offline_parallel_rejects_invalid_public_workers(workers):
+    from health_tools.api import OfflineRequest, RequestValidationError, run_offline
+
+    with pytest.raises(RequestValidationError, match="workers 必须是 1-8 的整数"):
+        run_offline(OfflineRequest(workers=workers, do_list=True))
+
+
+def test_offline_rejects_root_csv_when_child_directories_have_no_csv(monkeypatch, tmp_path: Path):
+    from health_tools.api import OfflineRequest, OperationError, run_offline
+
+    input_dir, output_dir = _prepare_parallel_offline_api(monkeypatch, tmp_path)
+    (input_dir / "root.csv").write_text("x\n1\n", encoding="utf-8")
+    (input_dir / "empty").mkdir()
+
+    with pytest.raises(OperationError, match="一级子目录中没有可处理 CSV"):
+        run_offline(
+            OfflineRequest(
+                input_path=input_dir,
+                output_path=output_dir,
+                chip_name="gh3036",
+                ver="v1",
+                no_plot=True,
+                no_accuracy=True,
+            )
+        )
+
+
+def test_offline_repeated_run_cleans_stale_version_outputs_and_reports_final_paths(
+    monkeypatch, tmp_path: Path
+):
+    from health_tools.api import ItemStatus, OfflineRequest, run_offline
+    from health_tools.core.offline import OfflineRunResult
+
+    input_dir, output_dir = _prepare_parallel_offline_api(monkeypatch, tmp_path)
+    for name in ("A", "B"):
+        child = input_dir / name
+        child.mkdir()
+        (child / f"{name}.csv").write_text("x\n1\n", encoding="utf-8")
+
+    class WritingRunner(_FakeOfflineRunnerPreview):
+        def __init__(self, chip, version=None, **kwargs):
+            pass
+
+        def run(self, input_path, output_path, **kwargs):
+            csv_files = sorted(Path(input_path).rglob("*.csv"))
+            output_path.mkdir(parents=True, exist_ok=True)
+            for index, csv_file in enumerate(csv_files):
+                (output_path / f"{index:06d}_{csv_file.stem}_result.vshb").write_text(
+                    "1,2,3\n", encoding="utf-8"
+                )
+            return OfflineRunResult(success=True)
+
+    monkeypatch.setattr("health_tools.core.offline.OfflineRunner", WritingRunner)
+    request = OfflineRequest(
+        input_path=input_dir,
+        output_path=output_dir,
+        chip_name="gh3036",
+        ver="v1",
+        no_plot=True,
+        no_accuracy=True,
+    )
+
+    first = run_offline(request)
+    version_output = output_dir / "v1"
+    assert (version_output / "数据整理" / "A" / "000000_A_result.vshb").exists()
+    assert (version_output / "数据整理" / "B" / "000000_B_result.vshb").exists()
+    assert [Path(item.output) for item in first.batch.items if item.status is ItemStatus.OK] == [
+        version_output / "数据整理" / "A",
+        version_output / "数据整理" / "B",
+    ]
+
+    (version_output / "psd_bmpfile").mkdir()
+    (version_output / "psd_bmpfile" / "stale.png").write_text("old", encoding="utf-8")
+    (version_output / "accuracy_report.csv").write_text("old", encoding="utf-8")
+    (version_output / ".offline_tasks" / "stale").mkdir(parents=True)
+    for path in (input_dir / "B").iterdir():
+        path.unlink()
+    (input_dir / "B").rmdir()
+
+    second = run_offline(request)
+
+    assert (version_output / "数据整理" / "A" / "000000_A_result.vshb").exists()
+    assert not (version_output / "数据整理" / "B").exists()
+    assert not (version_output / "psd_bmpfile").exists()
+    assert not (version_output / "accuracy_report.csv").exists()
+    assert not (version_output / ".offline_tasks").exists()
+    assert [Path(item.output) for item in second.batch.items if item.status is ItemStatus.OK] == [
+        version_output / "数据整理" / "A"
+    ]
+
+
+def test_offline_retry_summary_warns_and_final_failure_keeps_artifacts(monkeypatch, tmp_path: Path):
+    from dataclasses import replace
+
+    from health_tools.api import ItemStatus, OfflineRequest, run_offline
+    from health_tools.core.offline import OfflineRunResult
+    from health_tools.core.offline_input_filter import MovedOfflineInput
+    from health_tools.core.offline_parallel import (
+        OfflineMergeResult,
+        OfflineTaskBatch,
+        OfflineTaskResult,
+    )
+
+    input_dir, output_dir = _prepare_parallel_offline_api(monkeypatch, tmp_path)
+    for name in ("A", "B"):
+        child = input_dir / name
+        child.mkdir()
+        (child / f"{name}.csv").write_text("x\n1\n", encoding="utf-8")
+
+    def fake_run_tasks(tasks, runner_factory, input_root, **kwargs):
+        moved_target = tmp_path / "input_mv" / "A" / "bad.csv"
+        recovered_task = replace(
+            tasks[0],
+            attempts=2,
+            moved_files=(
+                MovedOfflineInput(input_dir / "A" / "bad.csv", moved_target, "算法执行失败"),
+            ),
+        )
+        failed_task = replace(tasks[1], attempts=1)
+        return OfflineTaskBatch(
+            (OfflineTaskResult(recovered_task, OfflineRunResult(success=True), "succeeded"),),
+            (
+                OfflineTaskResult(
+                    failed_task,
+                    OfflineRunResult(success=False, error="boom"),
+                    "failed",
+                    "日志未定位失败 CSV",
+                ),
+            ),
+        )
+
+    def fake_merge(version_output, task_results, **kwargs):
+        assert kwargs["cleanup"] is False
+        reorganized = version_output / "数据整理"
+        reorganized.mkdir(parents=True)
+        artifact = reorganized / "A" / "result.vshb"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("ok", encoding="utf-8")
+        return OfflineMergeResult(tuple(task_results), ())
+
+    monkeypatch.setattr("health_tools.core.offline_parallel.run_offline_tasks", fake_run_tasks)
+    monkeypatch.setattr("health_tools.core.offline_parallel.merge_task_outputs", fake_merge)
+
+    result = run_offline(
+        OfflineRequest(
+            input_path=input_dir,
+            output_path=output_dir,
+            chip_name="gh3036",
+            ver="v1",
+            no_plot=True,
+            no_accuracy=True,
+        )
+    )
+
+    assert [item.status for item in result.batch.items] == [ItemStatus.WARN, ItemStatus.FAIL]
+    assert Path(result.batch.items[0].output) == output_dir / "v1" / "数据整理" / "A"
+    assert "尝试次数: 2" in result.batch.items[0].detail
+    assert "input_mv" in result.batch.items[0].detail
+    assert result.batch.items[1].reason == "日志未定位失败 CSV"
+    assert output_dir / "v1" / "数据整理" in result.batch.artifacts
+
+
+def test_offline_cli_prints_summary_then_returns_nonzero_for_final_fail(monkeypatch):
+    import health_tools.api as api
+
+    monkeypatch.setattr(
+        api,
+        "run_offline",
+        lambda request, *, context=None: api.OfflineResult(
+            api.BatchResult(
+                "offline",
+                (api.ItemResult(api.ItemStatus.FAIL, "A", reason="boom"),),
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(main, ["offline"])
+
+    assert result.exit_code != 0
+    assert "boom" in result.output
+    assert "offline" in result.output
+
+
 def test_plot_directory_uses_api_file_orchestration(monkeypatch, tmp_path: Path):
     from health_tools.api import ItemResult, ItemStatus
 
@@ -217,6 +660,8 @@ def test_plot_directory_uses_api_file_orchestration(monkeypatch, tmp_path: Path)
 
 
 def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path: Path):
+    from health_tools.core.psd_plotter import PsdPlotResult
+
     calls = []
     input_dir = tmp_path / "result"
     output_dir = tmp_path / "new_output"
@@ -229,9 +674,10 @@ def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path:
         show_progress=False,
         acc_mode="axis",
         save_to_source=False,
+        workers=8,
     ):
-        calls.append((result_dir, save_dir, show_progress, acc_mode, save_to_source))
-        return [save_dir / "sample.png"]
+        calls.append((result_dir, save_dir, show_progress, acc_mode, save_to_source, workers))
+        return PsdPlotResult((save_dir / "sample.png",), ())
 
     monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
 
@@ -250,10 +696,12 @@ def test_plot_psd_creates_output_dir_and_uses_psd_plotter(monkeypatch, tmp_path:
 
     assert result.exit_code == 0
     assert output_dir.exists()
-    assert calls == [(input_dir, output_dir, False, "axis", False)]
+    assert calls == [(input_dir, output_dir, False, "axis", False, 8)]
 
 
 def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
+    from health_tools.core.psd_plotter import PsdPlotResult
+
     calls = []
     input_dir = tmp_path / "result"
     output_dir = tmp_path / "new_output"
@@ -266,9 +714,10 @@ def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
         show_progress=False,
         acc_mode="axis",
         save_to_source=False,
+        workers=8,
     ):
-        calls.append((result_dir, save_dir, show_progress, acc_mode, save_to_source))
-        return [save_dir / "sample.png"]
+        calls.append((result_dir, save_dir, show_progress, acc_mode, save_to_source, workers))
+        return PsdPlotResult((save_dir / "sample.png",), ())
 
     monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
 
@@ -288,10 +737,12 @@ def test_plot_psd_can_select_accrms_mode(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [(input_dir, output_dir, False, "rms", False)]
+    assert calls == [(input_dir, output_dir, False, "rms", False, 8)]
 
 
 def test_plot_psd_forwards_custom_accuracy_options(monkeypatch, tmp_path: Path):
+    from health_tools.core.psd_plotter import PsdPlotResult
+
     calls = []
     input_dir = tmp_path / "result"
     output_dir = tmp_path / "new_output"
@@ -306,9 +757,10 @@ def test_plot_psd_forwards_custom_accuracy_options(monkeypatch, tmp_path: Path):
         save_to_source=False,
         accuracy_thresholds=None,
         accuracy_inclusive=False,
+        workers=8,
     ):
-        calls.append((accuracy_thresholds, accuracy_inclusive))
-        return [save_dir / "sample.png"]
+        calls.append((accuracy_thresholds, accuracy_inclusive, workers))
+        return PsdPlotResult((save_dir / "sample.png",), ())
 
     monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
 
@@ -329,7 +781,34 @@ def test_plot_psd_forwards_custom_accuracy_options(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert calls == [((3.5, 7.0), True)]
+    assert calls == [((3.5, 7.0), True, 8)]
+
+
+def test_plot_psd_maps_successes_and_failures_to_batch(monkeypatch, tmp_path: Path):
+    from health_tools.api import PlotRequest, run_plot
+    from health_tools.api.models import ItemStatus
+    from health_tools.core.psd_plotter import PsdPlotResult
+
+    input_dir = tmp_path / "result"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    saved_path = output_dir / "ok.png"
+    failed_path = input_dir / "bad_result.vshb"
+    seen = {}
+
+    def fake_plot(self, result_dir, **kwargs):
+        seen["workers"] = kwargs["workers"]
+        return PsdPlotResult((saved_path,), ((failed_path, "坏数据"),))
+
+    monkeypatch.setattr("health_tools.core.psd_plotter.PsdPlotter.plot", fake_plot)
+
+    result = run_plot(PlotRequest(input_dir, output_dir, plot_type="psd", workers=3))
+
+    assert seen == {"workers": 3}
+    assert [item.status for item in result.items] == [ItemStatus.OK, ItemStatus.FAIL]
+    assert result.items[1].input == str(failed_path)
+    assert result.items[1].detail == "坏数据"
+    assert result.artifacts == (saved_path,)
 
 
 def test_plot_psd_requires_directory(tmp_path: Path):
@@ -751,10 +1230,10 @@ def test_offline_command_enables_stage_progress(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: calls.append(
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: calls.append(
             ("plot", show_progress, acc_mode, save_to_source)
         )
-        or [],
+        or PsdPlotResult((), ()),
     )
     monkeypatch.setattr(
         "health_tools.core.offline.calculate_offline_accuracy",
@@ -801,9 +1280,10 @@ def test_offline_forwards_custom_accuracy_options(monkeypatch, tmp_path: Path):
         save_to_source=False,
         accuracy_thresholds=None,
         accuracy_inclusive=False,
+        workers=8,
     ):
-        calls.append(("plot", accuracy_thresholds, accuracy_inclusive))
-        return []
+        calls.append(("plot", accuracy_thresholds, accuracy_inclusive, workers))
+        return PsdPlotResult((), ())
 
     def fake_accuracy(
         output_path,
@@ -834,7 +1314,7 @@ def test_offline_forwards_custom_accuracy_options(monkeypatch, tmp_path: Path):
 
     assert result.exit_code == 0
     assert calls == [
-        ("plot", (3.5, 7.0), True),
+        ("plot", (3.5, 7.0), True, 8),
         ("accuracy", (3.5, 7.0), True),
     ]
 
@@ -858,10 +1338,10 @@ def test_offline_medium_version_defaults_psd_to_accrms(monkeypatch, tmp_path: Pa
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: calls.append(
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: calls.append(
             acc_mode
         )
-        or [],
+        or PsdPlotResult((), ()),
     )
     monkeypatch.setattr(
         "health_tools.core.offline.calculate_offline_accuracy",
@@ -904,7 +1384,7 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -921,7 +1401,9 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -940,7 +1422,11 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
     )
 
     assert result.exit_code == 0
-    assert ("run", "v1", output_dir / "v1") in calls
+    assert (
+        "run",
+        "v1",
+        output_dir / "v1" / ".offline_tasks" / "0000_root" / "raw",
+    ) in calls
 
 
 def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path: Path):
@@ -963,7 +1449,7 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
         def __init__(self, chip, version=None, **kwargs):
             pass
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
             calls.append(timeout)
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -980,7 +1466,9 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -1022,7 +1510,7 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
         def __init__(self, chip, version=None, **kwargs):
             pass
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
             calls.append(timeout)
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1039,7 +1527,9 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -1081,7 +1571,7 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1098,7 +1588,9 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -1115,7 +1607,11 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
     )
 
     assert result.exit_code == 0
-    assert ("run", None, output_dir / "default_v1") in calls
+    assert (
+        "run",
+        None,
+        output_dir / "default_v1" / ".offline_tasks" / "0000_root" / "raw",
+    ) in calls
 
 
 def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
@@ -1143,7 +1639,7 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1164,7 +1660,9 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
     monkeypatch.setattr("health_tools.core.offline.calculate_offline_accuracy", fake_accuracy)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -1184,8 +1682,16 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
     )
 
     assert result.exit_code == 0
-    assert ("run", "v1", output_dir / "v1") in calls
-    assert ("run", "v2", output_dir / "v2") in calls
+    assert (
+        "run",
+        "v1",
+        output_dir / "v1" / ".offline_tasks" / "0000_root" / "raw",
+    ) in calls
+    assert (
+        "run",
+        "v2",
+        output_dir / "v2" / ".offline_tasks" / "0000_root" / "raw",
+    ) in calls
     combined = pd.read_csv(output_dir / "accuracy_report_all_versions.csv")
     assert list(combined["version"]) == ["v1", "v2"]
     assert list(combined["file"]) == ["TOTAL", "TOTAL"]
@@ -1214,7 +1720,7 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10):
+        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
             calls.append(self.version)
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1246,7 +1752,9 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
     )
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -1292,7 +1800,9 @@ def test_offline_no_run_versions_collects_existing_reorganized_vshb(monkeypatch,
     monkeypatch.setattr("health_tools.core.offline.find_exe", fake_find_exe)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -1332,6 +1842,9 @@ def test_offline_no_run_versions_reuses_existing_reorganized_dirs(monkeypatch, t
             "1,80,79,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0," "80,1,99,0,0,0,81\n",
             encoding="utf-8",
         )
+        private_marker = output_dir / version / ".offline_tasks" / "keep.txt"
+        private_marker.parent.mkdir()
+        private_marker.write_text("keep", encoding="utf-8")
 
     exe_root = tmp_path / "tools" / "gh3036" / "exclusive"
 
@@ -1348,7 +1861,9 @@ def test_offline_no_run_versions_reuses_existing_reorganized_dirs(monkeypatch, t
     monkeypatch.setattr("health_tools.core.offline.reorganize_output", fail_reorganize)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(
@@ -1371,6 +1886,9 @@ def test_offline_no_run_versions_reuses_existing_reorganized_dirs(monkeypatch, t
     assert result.exit_code == 0
     combined = pd.read_csv(output_dir / "accuracy_report_all_versions.csv")
     assert combined["file"].tolist().count("TOTAL") == 2
+    assert all(
+        (output_dir / version / ".offline_tasks" / "keep.txt").exists() for version in ("v1", "v2")
+    )
 
 
 def test_offline_no_run_discovers_version_dirs_under_output_parent(monkeypatch, tmp_path: Path):
@@ -1394,7 +1912,9 @@ def test_offline_no_run_discovers_version_dirs_under_output_parent(monkeypatch, 
     monkeypatch.setattr("health_tools.core.offline.reorganize_output", fail_reorganize)
     monkeypatch.setattr(
         "health_tools.core.psd_plotter.PsdPlotter.plot",
-        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False: [],
+        lambda self, result_dir, save_dir=None, show_progress=False, acc_mode="axis", save_to_source=False, workers=8: PsdPlotResult(
+            (), ()
+        ),
     )
 
     result = CliRunner().invoke(

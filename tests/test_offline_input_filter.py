@@ -8,6 +8,7 @@ import pytest
 from health_tools.core.offline_input_filter import (
     OfflineInputFilterError,
     filter_offline_inputs,
+    move_offline_input,
 )
 from health_tools.models.rules import ChipRule
 
@@ -90,6 +91,50 @@ def test_filter_uses_unique_backup_name_without_overwriting(chip_rule, tmp_path)
     assert backup.read_text(encoding="utf-8") == "old"
     assert (backup.parent / "sample_1.csv").exists()
     assert result.moved_files[0].target == backup.parent / "sample_1.csv"
+
+
+def test_move_offline_input_preserves_relative_path_and_reason(tmp_path):
+    input_dir = tmp_path / "test1"
+    source = input_dir / "nested" / "sample.csv"
+    _write_csv(source, "bad")
+
+    moved = move_offline_input(source, input_dir, "表头错误")
+
+    assert moved.source == source
+    assert moved.target == tmp_path / "test1_mv" / "nested" / "sample.csv"
+    assert moved.reason == "表头错误"
+    assert not source.exists()
+    assert moved.target.exists()
+
+
+def test_move_offline_input_uses_unique_target(tmp_path):
+    input_dir = tmp_path / "test1"
+    source = input_dir / "sample.csv"
+    _write_csv(source, "bad")
+    backup = tmp_path / "test1_mv" / "sample.csv"
+    backup.parent.mkdir()
+    backup.write_text("old", encoding="utf-8")
+
+    moved = move_offline_input(source, input_dir, "表头错误")
+
+    assert moved.target == backup.parent / "sample_1.csv"
+    assert backup.read_text(encoding="utf-8") == "old"
+
+
+def test_move_offline_input_wraps_os_error(monkeypatch, tmp_path):
+    input_dir = tmp_path / "test1"
+    source = input_dir / "bad.csv"
+    _write_csv(source, "bad")
+
+    def fail_move(src, dst):
+        raise OSError("拒绝访问")
+
+    monkeypatch.setattr(shutil, "move", fail_move)
+
+    with pytest.raises(OfflineInputFilterError, match="移动不合规文件失败"):
+        move_offline_input(source, input_dir, "表头错误")
+
+    assert source.exists()
 
 
 def test_filter_stops_when_move_fails(monkeypatch, chip_rule, tmp_path):

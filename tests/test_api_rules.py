@@ -10,11 +10,11 @@ from health_tools.api import (
     RuleSaveRequest,
     RuleSource,
     RuleType,
+    rule_operations,
     run_list_rules,
     run_read_rule,
     run_save_rule,
 )
-from health_tools.api import rule_operations
 from health_tools.rules.loader import RuleLoader
 from health_tools.rules.validator import RuleValidator
 
