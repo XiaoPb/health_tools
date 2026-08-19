@@ -128,7 +128,7 @@ def test_run_analyze_ignores_nested_output_directory_and_resumes(tmp_path: Path,
         report.write_text("file,result\nsample.csv,PASS\n", encoding="utf-8")
         return report
 
-    def fake_run_raw_stage(request, source_path, rule_object, context):
+    def fake_run_raw_stage(request, source_path, rule_object, context, root=None, files=None):
         calls["raw"] += 1
         return (
             [
@@ -191,6 +191,50 @@ def test_run_analyze_ignores_nested_output_directory_and_resumes(tmp_path: Path,
     assert calls["raw"] == 1
     assert first.summary_path == second.summary_path
     assert (output / "stages" / "check" / "check_report.csv").exists()
+
+
+def test_run_analyze_raw_stage_reuses_discovered_files_when_output_is_nested(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "data"
+    source.mkdir()
+    sample = source / "sample.csv"
+    _write_csv(sample)
+    output = source / "analysis_out"
+    stale_stage_csv = output / "stages" / "evaluate" / "file_details.csv"
+    stale_stage_csv.parent.mkdir(parents=True)
+    stale_stage_csv.write_text("file,mae\nold.csv,99\n", encoding="utf-8")
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.detect_chip", lambda _path: None)
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._run_supporting_stages",
+        lambda *_, **__: ([], None, None),
+    )
+    monkeypatch.setattr("health_tools.api.analysis_operation._escalate", lambda *_, **__: [])
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_psd_plots", lambda *_, **__: None
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_raw_plots", lambda *_, **__: None
+    )
+
+    result = run_analyze(
+        AnalyzeRequest(
+            source,
+            output,
+            analysis_type="other",
+            rule_file=str(rule),
+            allow_offline=False,
+            report="markdown",
+        )
+    )
+
+    records = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert [record["file"] for record in records] == ["sample.csv"]
+    assert records[0]["source"] == str(sample)
 
 
 def test_run_analyze_rejects_directory_with_only_auxiliary_csvs(tmp_path: Path):
@@ -329,7 +373,7 @@ def test_run_analyze_resume_after_report_failure_reuses_diagnosis_snapshot(
     output = tmp_path / "out"
     calls = Counter()
 
-    def fake_run_raw_stage(request, source_path, rule_object, context):
+    def fake_run_raw_stage(request, source_path, rule_object, context, root=None, files=None):
         calls["raw"] += 1
         return (
             [
@@ -447,7 +491,7 @@ def test_run_analyze_invalidates_resume_when_input_file_changes(tmp_path: Path, 
     output = tmp_path / "out"
     calls = Counter()
 
-    def fake_run_raw_stage(request, source_path, rule_object, context):
+    def fake_run_raw_stage(request, source_path, rule_object, context, root=None, files=None):
         calls["raw"] += 1
         return (
             [
