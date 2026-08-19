@@ -40,7 +40,13 @@ console = Console()
 )
 @click.option("--no-show", is_flag=True, help="不显示图片，仅保存")
 @click.option("--filter", "filter_name", help="仅处理文件名包含指定字符的CSV文件（目录模式）")
-@click.option("--workers", type=click.IntRange(min=1, max=8), default=8, show_default=True)
+@click.option(
+    "--workers",
+    type=click.IntRange(min=1, max=8),
+    default=8,
+    show_default=True,
+    help="并行线程数，最多 8",
+)
 @click.option("-v", "--verbose", is_flag=True, help="详细输出模式")
 @click.pass_context
 def plot_cmd(

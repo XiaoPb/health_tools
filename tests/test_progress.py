@@ -167,6 +167,16 @@ def test_offline_command_forwards_workers(monkeypatch):
     assert requests[0].workers == 5
 
 
+def test_parallel_commands_describe_workers_limit():
+    runner = CliRunner()
+
+    for command in ("plot", "offline"):
+        result = runner.invoke(main, [command, "--help"])
+
+        assert result.exit_code == 0
+        assert "并行线程数，最多 8" in result.output
+
+
 def test_plot_directory_uses_api_file_orchestration(monkeypatch, tmp_path: Path):
     from health_tools.api import ItemResult, ItemStatus
 

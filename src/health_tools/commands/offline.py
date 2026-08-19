@@ -53,7 +53,13 @@ TIMEOUT_SECONDS_PER_EXTRA_FILE = 20
 @click.option(
     "--settle-timeout", type=int, default=10, help="异常返回后等待输出稳定的时间（秒，默认10）"
 )
-@click.option("--workers", type=click.IntRange(min=1, max=8), default=8, show_default=True)
+@click.option(
+    "--workers",
+    type=click.IntRange(min=1, max=8),
+    default=8,
+    show_default=True,
+    help="并行线程数，最多 8",
+)
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
 def offline_cmd(
     input_path: Optional[str],
