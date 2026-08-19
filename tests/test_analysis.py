@@ -111,6 +111,88 @@ def test_raw_files_excludes_analysis_auxiliary_csvs(tmp_path: Path):
     assert files == [sample]
 
 
+def test_run_analyze_ignores_nested_output_directory_and_resumes(tmp_path: Path, monkeypatch):
+    source = tmp_path / "data"
+    source.mkdir()
+    sample = source / "sample.csv"
+    _write_csv(sample)
+    output = source / "analysis_out"
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    calls = Counter()
+
+    def fake_run_check_stage(request, source_path, chip, stages, context):
+        report = stages / "check" / "check_report.csv"
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text("file,result\nsample.csv,PASS\n", encoding="utf-8")
+        return report
+
+    def fake_run_raw_stage(request, source_path, rule_object, context):
+        calls["raw"] += 1
+        return (
+            [
+                AnalysisRecord(
+                    file="sample.csv",
+                    source=str(sample),
+                    analysis_type=request.analysis_type,
+                    scene="static",
+                    conclusion="未发现异常",
+                    confidence=1.0,
+                    notes=[f"raw-{calls['raw']}"],
+                )
+            ],
+            source,
+            [sample],
+            set(),
+            request.chip_name,
+        )
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.run_check_stage", fake_run_check_stage)
+    monkeypatch.setattr("health_tools.api.analysis_operation.run_raw_stage", fake_run_raw_stage)
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._apply_check_results", lambda *_, **__: None
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._apply_compact_check_results",
+        lambda *_, **__: None,
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._apply_evaluate_results",
+        lambda *_, **__: None,
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._run_supporting_stages",
+        lambda *_, **__: ([], None, None),
+    )
+    monkeypatch.setattr("health_tools.api.analysis_operation._escalate", lambda *_, **__: [])
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_psd_plots", lambda *_, **__: None
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_raw_plots", lambda *_, **__: None
+    )
+
+    request = AnalyzeRequest(
+        source,
+        output,
+        analysis_type="other",
+        rule_file=str(rule),
+        chip_name="gh3036",
+        report="markdown",
+        allow_offline=False,
+    )
+
+    first = run_analyze(request)
+    assert _raw_files(source, output)[1] == [sample]
+
+    second = run_analyze(request)
+
+    assert calls["raw"] == 1
+    assert first.summary_path == second.summary_path
+    assert (output / "stages" / "check" / "check_report.csv").exists()
+
+
 def test_run_analyze_rejects_directory_with_only_auxiliary_csvs(tmp_path: Path):
     source = tmp_path / "data"
     source.mkdir()
