@@ -1,4 +1,6 @@
 import json
+from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +35,7 @@ from health_tools.core.analysis.reporting import (
     write_ppt,
     write_structured,
 )
+from health_tools.core.analysis.workspace import AnalysisWorkspace
 from health_tools.models.rules import AnalysisRule, ChipRule
 from health_tools.rules.loader import RuleLoader
 
@@ -148,6 +151,266 @@ def test_run_analyze_keeps_missing_rows_from_check_report(tmp_path: Path):
     assert missing["features"]["input_status"] == "SKIP"
     assert missing["features"]["skip_reason"] == "文件不存在"
     assert missing["notes"] == ["文件不存在"]
+
+
+def test_run_analyze_rejects_state_request_mismatch_without_restart(tmp_path: Path):
+    source = tmp_path / "input.csv"
+    _write_csv(source)
+    output = tmp_path / "out"
+    AnalysisWorkspace.create(output, {"input": "old.csv", "analysis_type": "hr"})
+
+    with pytest.raises(RequestValidationError, match="--restart"):
+        run_analyze(
+            AnalyzeRequest(
+                source,
+                output,
+                analysis_type="other",
+                rule_file=str(tmp_path / "missing.yaml"),
+                allow_offline=False,
+            )
+        )
+
+
+def test_run_analyze_rejects_no_resume_over_existing_state_without_restart(tmp_path: Path):
+    source = tmp_path / "input.csv"
+    _write_csv(source)
+    output = tmp_path / "out"
+    request = AnalyzeRequest(source, output, analysis_type="other", rule_file="same.yaml")
+    AnalysisWorkspace.create(
+        output,
+        {
+            "input": str(source),
+            "analysis_type": "other",
+            "rule": "same.yaml",
+        },
+    )
+
+    with pytest.raises(RequestValidationError, match="--restart"):
+        run_analyze(replace(request, resume=False))
+
+
+def test_run_analyze_restart_removes_only_owned_output_artifacts(tmp_path: Path, monkeypatch):
+    source = tmp_path / "input.csv"
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    _write_csv(source)
+    external_figure = tmp_path / "external" / "sample.png"
+    external_figure.parent.mkdir()
+    external_figure.write_bytes(b"png")
+    output = tmp_path / "out"
+    output.mkdir()
+    owned_report = output / "analysis_report.md"
+    owned_report.write_text("old", encoding="utf-8")
+    owned_stage = output / "stages" / "raw" / "records.json"
+    owned_stage.parent.mkdir(parents=True)
+    owned_stage.write_text("old", encoding="utf-8")
+    workspace = AnalysisWorkspace.create(output, {"input": "old"})
+    workspace.start("plot", "old")
+    workspace.complete("plot", [external_figure])
+
+    def fail_if_external_removed(*_args, **_kwargs):
+        assert external_figure.exists()
+
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_raw_plots",
+        fail_if_external_removed,
+    )
+
+    run_analyze(
+        AnalyzeRequest(
+            source,
+            output,
+            analysis_type="other",
+            rule_file=str(rule),
+            allow_offline=False,
+            report="markdown",
+            restart=True,
+            figure_paths=(external_figure.parent,),
+        )
+    )
+
+    assert external_figure.exists()
+    assert owned_report.read_text(encoding="utf-8").startswith("# PPG 数据分析报告")
+    if owned_stage.exists():
+        assert owned_stage.read_text(encoding="utf-8") != "old"
+
+
+def test_run_analyze_resume_after_report_failure_reuses_diagnosis_snapshot(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "input.csv"
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    _write_csv(source)
+    output = tmp_path / "out"
+    calls = Counter()
+
+    def fake_run_raw_stage(request, source_path, rule_object, context):
+        calls["raw"] += 1
+        return (
+            [
+                AnalysisRecord(
+                    "input.csv",
+                    str(source),
+                    "other",
+                    scene="static",
+                    conclusion="未发现异常",
+                    confidence=1.0,
+                    notes=["数据正常"],
+                )
+            ],
+            tmp_path,
+            [source],
+            set(),
+            None,
+        )
+
+    def fake_supporting(*_args, **_kwargs):
+        calls["evaluate"] += 1
+        return [], None, None
+
+    def fake_escalate(*_args, **_kwargs):
+        calls["offline"] += 1
+        return []
+
+    def fake_plot(*_args, **_kwargs):
+        calls["plot"] += 1
+
+    first_report = True
+
+    def flaky_markdown(records, target, accuracy_thresholds=None, accuracy_inclusive=False):
+        nonlocal first_report
+        calls["report"] += 1
+        if first_report:
+            first_report = False
+            raise RuntimeError("模拟报告生成中断")
+        return analysis_reporting.write_markdown(
+            records, target, accuracy_thresholds, accuracy_inclusive
+        )
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.detect_chip", lambda _path: None)
+    monkeypatch.setattr("health_tools.api.analysis_operation.run_raw_stage", fake_run_raw_stage)
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._run_supporting_stages", fake_supporting
+    )
+    monkeypatch.setattr("health_tools.api.analysis_operation._escalate", fake_escalate)
+    monkeypatch.setattr("health_tools.api.analysis_operation._generate_psd_plots", fake_plot)
+    monkeypatch.setattr("health_tools.api.analysis_operation._generate_raw_plots", fake_plot)
+    monkeypatch.setattr("health_tools.api.analysis_operation.write_markdown", flaky_markdown)
+
+    request = AnalyzeRequest(
+        source,
+        output,
+        analysis_type="other",
+        rule_file=str(rule),
+        allow_offline=False,
+        report="markdown",
+    )
+    with pytest.raises(RuntimeError, match="模拟报告生成中断"):
+        run_analyze(request)
+
+    first_counts = calls.copy()
+    result = run_analyze(request)
+
+    assert result.reports[0].exists()
+    assert calls["report"] == first_counts["report"] + 1
+    for stage in ("raw", "evaluate", "offline", "plot"):
+        assert calls[stage] == first_counts[stage]
+
+
+def test_run_analyze_records_all_pipeline_stages(tmp_path: Path, monkeypatch):
+    source = tmp_path / "input.csv"
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    _write_csv(source)
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.detect_chip", lambda _path: None)
+    monkeypatch.setattr("health_tools.api.analysis_operation._generate_raw_plots", lambda *_: None)
+    monkeypatch.setattr("health_tools.api.analysis_operation._generate_psd_plots", lambda *_: None)
+
+    run_analyze(
+        AnalyzeRequest(
+            source,
+            tmp_path / "out",
+            analysis_type="other",
+            rule_file=str(rule),
+            allow_offline=False,
+            report="markdown",
+        )
+    )
+
+    state = json.loads((tmp_path / "out" / "analysis_state.json").read_text(encoding="utf-8"))
+    statuses = {name: stage["status"] for name, stage in state["stages"].items()}
+    assert statuses == {
+        "discover": "completed",
+        "check": "completed",
+        "raw": "completed",
+        "evaluate": "completed",
+        "offline": "completed",
+        "plot": "completed",
+        "diagnose": "completed",
+        "report": "completed",
+    }
+
+
+def test_run_analyze_invalidates_resume_when_input_file_changes(tmp_path: Path, monkeypatch):
+    source = tmp_path / "input.csv"
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    _write_csv(source)
+    output = tmp_path / "out"
+    calls = Counter()
+
+    def fake_run_raw_stage(request, source_path, rule_object, context):
+        calls["raw"] += 1
+        return (
+            [
+                AnalysisRecord(
+                    "input.csv",
+                    str(source),
+                    "other",
+                    scene="static",
+                    conclusion="未发现异常",
+                    confidence=1.0,
+                    notes=[f"raw-{calls['raw']}"],
+                )
+            ],
+            tmp_path,
+            [source],
+            set(),
+            None,
+        )
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.detect_chip", lambda _path: None)
+    monkeypatch.setattr("health_tools.api.analysis_operation.run_raw_stage", fake_run_raw_stage)
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._run_supporting_stages",
+        lambda *_args, **_kwargs: ([], None, None),
+    )
+    monkeypatch.setattr("health_tools.api.analysis_operation._escalate", lambda *_args: [])
+    monkeypatch.setattr("health_tools.api.analysis_operation._generate_psd_plots", lambda *_: None)
+    monkeypatch.setattr("health_tools.api.analysis_operation._generate_raw_plots", lambda *_: None)
+
+    request = AnalyzeRequest(
+        source,
+        output,
+        analysis_type="other",
+        rule_file=str(rule),
+        allow_offline=False,
+        report="markdown",
+    )
+    run_analyze(request)
+    source.write_text(source.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    run_analyze(request)
+
+    assert calls["raw"] == 2
+    summary = json.loads((output / "analysis_summary.json").read_text(encoding="utf-8"))
+    assert summary[0]["notes"] == ["raw-2"]
 
 
 def test_structured_conditions_do_not_evaluate_expressions():

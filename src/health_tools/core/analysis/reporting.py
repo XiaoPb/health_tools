@@ -117,6 +117,7 @@ def _plain(record: AnalysisRecord) -> Dict[str, Any]:
         "source": record.source,
         "analysis_type": record.analysis_type,
         "scene": record.scene,
+        "activity": record.activity,
         "focused": record.focused,
         "features": record.features,
         "metrics": record.metrics,
@@ -128,6 +129,7 @@ def _plain(record: AnalysisRecord) -> Dict[str, Any]:
         "notes": record.notes,
         "warnings": record.warnings,
         "figure": record.figure,
+        "secondary_figure": record.secondary_figure,
     }
 
 
