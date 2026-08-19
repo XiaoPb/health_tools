@@ -54,7 +54,7 @@ def _accuracy_rows(
         comparison_items: Dict[str, List[Dict[str, Any]]] = {}
         for item in items:
             comparisons = item.metrics.get("comparisons")
-            if isinstance(comparisons, dict):
+            if isinstance(comparisons, dict) and comparisons:
                 for comparison, metrics in comparisons.items():
                     if isinstance(metrics, dict) and int(metrics.get("samples") or 0) > 0:
                         comparison_items.setdefault(str(comparison), []).append(metrics)

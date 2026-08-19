@@ -329,6 +329,33 @@ def test_accuracy_report_files_exclude_zero_sample_comparisons():
     assert overall_online["samples"] == 2
 
 
+def test_accuracy_report_falls_back_to_raw_metrics_for_empty_comparisons():
+    record = AnalysisRecord(
+        file="sample.csv",
+        source="sample.csv",
+        analysis_type="hr",
+        metrics={
+            "samples": 2,
+            "mae": 1.0,
+            "max_error": 2.0,
+            "within_5": 100.0,
+            "within_10": 100.0,
+            "within_15": 100.0,
+            "comparisons": {},
+        },
+    )
+
+    rows = _accuracy_rows([record])
+    overall_online = next(
+        row for row in rows if row["scene"] == "整体" and row["comparison"] == "Online vs Polar"
+    )
+
+    assert overall_online["available"] is True
+    assert overall_online["files"] == 1
+    assert overall_online["samples"] == 2
+    assert overall_online["mae"] == 1.0
+
+
 def test_supporting_evaluate_receives_analyze_accuracy_options(monkeypatch, tmp_path: Path):
     source = tmp_path / "input.csv"
     source.write_text("value\n1\n", encoding="utf-8")
