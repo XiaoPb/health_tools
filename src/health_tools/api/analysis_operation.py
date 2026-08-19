@@ -300,6 +300,90 @@ def _specific_acc_title(values: pd.Series) -> str:
     return f"check 检测到 ACC {'、'.join(kinds)}异常" if kinds else "check 检测到 ACC 异常"
 
 
+def _normalized_artifact_key(value: object) -> str:
+    text = "" if value is None else str(value).strip()
+    return "" if text.lower() == "nan" else text.replace("\\", "/")
+
+
+def _record_file_counts(records: Sequence[AnalysisRecord]) -> Tuple[Counter[str], Counter[str]]:
+    names = Counter(Path(record.file).name for record in records)
+    stems = Counter(Path(record.file).stem for record in records)
+    return names, stems
+
+
+def _rows_for_record(
+    report: pd.DataFrame,
+    records: Sequence[AnalysisRecord],
+    record: AnalysisRecord,
+    exact_columns: Sequence[str],
+    fallback_columns: Sequence[str],
+) -> pd.DataFrame:
+    relative = _normalized_artifact_key(record.file)
+    for column in exact_columns:
+        if column not in report.columns:
+            continue
+        values: pd.Series = report[column].map(_normalized_artifact_key)
+        rows: pd.DataFrame = report.loc[values == relative]
+        if not rows.empty:
+            return rows
+    names, stems = _record_file_counts(records)
+    if names[Path(record.file).name] == 1:
+        for column in fallback_columns:
+            if column not in report.columns:
+                continue
+            values = report[column].map(_normalized_artifact_key)
+            rows = report.loc[values.map(lambda value: Path(value).name) == Path(record.file).name]
+            if not rows.empty:
+                return rows
+    if stems[Path(record.file).stem] == 1:
+        for column in fallback_columns:
+            if column not in report.columns:
+                continue
+            values = report[column].map(_normalized_artifact_key)
+            rows = report.loc[values.map(lambda value: Path(value).stem) == Path(record.file).stem]
+            if not rows.empty:
+                return rows
+    return report.iloc[0:0]
+
+
+def _record_for_file(file_name: str, records: Sequence[AnalysisRecord]) -> Optional[AnalysisRecord]:
+    normalized = _normalized_artifact_key(file_name)
+    exact = [record for record in records if _normalized_artifact_key(record.file) == normalized]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+    name_matches = [record for record in records if Path(record.file).name == Path(normalized).name]
+    if len(name_matches) == 1:
+        return name_matches[0]
+    if len(name_matches) > 1:
+        return None
+    stem_matches = [record for record in records if Path(record.file).stem == Path(normalized).stem]
+    return stem_matches[0] if len(stem_matches) == 1 else None
+
+
+def _offline_record_for(
+    record: AnalysisRecord, offline_records: Sequence[AnalysisRecord]
+) -> Optional[AnalysisRecord]:
+    normalized = _normalized_artifact_key(record.file)
+    exact = [item for item in offline_records if _normalized_artifact_key(item.file) == normalized]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+    name_matches = [
+        item for item in offline_records if Path(item.file).name == Path(record.file).name
+    ]
+    if len(name_matches) == 1:
+        return name_matches[0]
+    if len(name_matches) > 1:
+        return None
+    stem_matches = [
+        item for item in offline_records if Path(item.file).stem == Path(record.file).stem
+    ]
+    return stem_matches[0] if len(stem_matches) == 1 else None
+
+
 def _apply_check_results(records: List[AnalysisRecord], report_path: Optional[Path], rule) -> None:
     import pandas as pd
 
@@ -309,10 +393,7 @@ def _apply_check_results(records: List[AnalysisRecord], report_path: Optional[Pa
     for record in records:
         if record.features.get("input_status") == "SKIP":
             continue
-        row = report[
-            (report.get("文件相对路径", pd.Series(dtype=str)).astype(str) == record.file)
-            | (report.get("文件名", pd.Series(dtype=str)).astype(str) == Path(record.file).name)
-        ]
+        row = _rows_for_record(report, records, record, ("文件相对路径",), ("文件名",))
         if row.empty:
             continue
         values = row.iloc[0]
@@ -371,26 +452,7 @@ def _apply_compact_check_results(
     for record in records:
         if record.features.get("input_status") == "SKIP":
             continue
-        relative = (
-            report["文件相对路径"].fillna("").astype(str)
-            if "文件相对路径" in report.columns
-            else pd.Series("", index=report.index, dtype=str)
-        )
-        rows = report[relative.str.replace("\\", "/") == record.file.replace("\\", "/")]
-        if rows.empty and (
-            "文件相对路径" not in report.columns or relative.str.strip().eq("").all()
-        ):
-            names = (
-                report["文件名"].fillna("").astype(str)
-                if "文件名" in report.columns
-                else pd.Series("", index=report.index, dtype=str)
-            )
-            name_rows = report[names == Path(record.file).name]
-            matching_records = sum(
-                Path(item.file).name == Path(record.file).name for item in records
-            )
-            if matching_records == 1 and not name_rows.empty:
-                rows = name_rows
+        rows = _rows_for_record(report, records, record, ("文件相对路径",), ("文件名",))
         if rows.empty:
             continue
         channel_metrics: Dict[str, Dict[str, float]] = {}
@@ -443,16 +505,16 @@ def _apply_evaluate_results(
         return
     details = pd.read_csv(detail_path)
     for record in records:
-        row = details[
-            details.get("file", pd.Series(dtype=str)).astype(str) == Path(record.file).name
-        ]
+        row = _rows_for_record(details, records, record, ("file",), ("file",))
         if row.empty:
             continue
         values = row.iloc[0]
         for key in ("mae", "rmse", "std", "correlation", "samples"):
-            if key in values and pd.notna(values[key]):
-                record.metrics[f"evaluate_{key}"] = float(values[key])
-                record.features[f"evaluate_{key}"] = float(values[key])
+            value = values.get(key)
+            if value is not None and pd.notna(value):
+                numeric = float(value)
+                record.metrics[f"evaluate_{key}"] = numeric
+                record.features[f"evaluate_{key}"] = numeric
         _refresh_diagnosis(record, rule)
 
 
@@ -672,14 +734,36 @@ def _escalate(
     else:
         psd_results = analyze_psd_directory(result.output_dir or output / "offline", rule)
     for record in candidates:
-        matches = [
-            value for key, value in psd_results.items() if Path(key).stem == Path(record.file).stem
-        ]
-        if matches:
-            _merge_psd(record, matches[0], rule)
+        match = _psd_for_record(record, psd_results)
+        if match:
+            _merge_psd(record, match, rule)
         else:
             record.notes.append("离线结果中未找到对应 PSD")
     return paths
+
+
+def _psd_for_record(
+    record: AnalysisRecord, psd_results: Dict[str, Dict[str, object]]
+) -> Optional[Dict[str, object]]:
+    normalized = _normalized_artifact_key(record.file)
+    exact = [
+        value for key, value in psd_results.items() if _normalized_artifact_key(key) == normalized
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return None
+    by_name = [
+        value for key, value in psd_results.items() if Path(key).name == Path(record.file).name
+    ]
+    if len(by_name) == 1:
+        return by_name[0]
+    if len(by_name) > 1:
+        return None
+    by_stem = [
+        value for key, value in psd_results.items() if Path(key).stem == Path(record.file).stem
+    ]
+    return by_stem[0] if len(by_stem) == 1 else None
 
 
 def _generate_psd_plots(
@@ -717,9 +801,9 @@ def _generate_psd_plots(
         return
     for item in result.items:
         image = Path(item.output)
-        matches = [record for record in records if Path(record.file).stem == image.stem]
-        if matches and image.exists():
-            matches[0].figure = str(image)
+        match = _record_for_file(image.stem, records)
+        if match and image.exists():
+            match.figure = str(image)
 
 
 def _generate_raw_plots(
@@ -961,17 +1045,15 @@ def run_analyze(
         existing_offline = request.offline_result_path
         if existing_offline is not None:
             offline_records, _ = _offline_records(request, _require_path(existing_offline), rule)
-            by_name = {Path(item.file).stem: item for item in offline_records}
             for record in records:
-                match = by_name.get(Path(record.file).stem)
+                match = _offline_record_for(record, offline_records)
                 if match:
                     _merge_psd(record, match.psd, rule)
             escalated = []
         elif state.state.stages["offline"].status == "completed" and (stages / "offline").exists():
             offline_records, _ = _offline_records(request, stages / "offline", rule)
-            by_name = {Path(item.file).stem: item for item in offline_records}
             for record in records:
-                match = by_name.get(Path(record.file).stem)
+                match = _offline_record_for(record, offline_records)
                 if match:
                     _merge_psd(record, match.psd, rule)
             escalated = []

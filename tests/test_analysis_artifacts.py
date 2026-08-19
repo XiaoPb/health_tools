@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from health_tools.core.analysis.artifacts import ArtifactIndex
+import pytest
+
+from health_tools.core.analysis.artifacts import ArtifactAmbiguityError, ArtifactIndex
 
 
 def test_index_matches_selected_csv_to_existing_png_by_relative_stem(tmp_path: Path):
@@ -72,3 +74,51 @@ def test_report_relative_path_wins_over_duplicate_file_names(tmp_path: Path):
 
     assert list(index.items) == ["b/same.csv"]
     assert index.items["b/same.csv"].csv_path == second
+
+
+def test_report_rejects_ambiguous_duplicate_file_name(tmp_path: Path):
+    source = tmp_path / "data"
+    first = source / "a" / "same.csv"
+    second = source / "b" / "same.csv"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+    second.write_text("Ipd0,Ipd1\n3,4\n", encoding="utf-8")
+    report = source / "check_report.csv"
+    import pandas as pd
+
+    pd.DataFrame(
+        {
+            "文件名": ["same.csv"],
+            "总异常(结果)": ["FAIL"],
+        }
+    ).to_csv(report, index=False, encoding="utf-8-sig")
+
+    with pytest.raises(ArtifactAmbiguityError, match="same.csv"):
+        ArtifactIndex.build(source.rglob("*.csv"), check_report=report)
+
+
+def test_item_for_uses_unique_stem_after_relative_and_file_name(tmp_path: Path):
+    source = tmp_path / "data"
+    csv_file = source / "a" / "sample.csv"
+    csv_file.parent.mkdir(parents=True)
+    csv_file.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+
+    index = ArtifactIndex.build([csv_file])
+
+    assert index.item_for("sample") == index.items["sample.csv"]
+
+
+def test_item_for_rejects_ambiguous_unique_stem(tmp_path: Path):
+    source = tmp_path / "data"
+    first = source / "a" / "same.csv"
+    second = source / "b" / "same.csv"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+    second.write_text("Ipd0,Ipd1\n3,4\n", encoding="utf-8")
+
+    index = ArtifactIndex.build([first, second])
+
+    with pytest.raises(ArtifactAmbiguityError, match="same"):
+        index.item_for("same")
