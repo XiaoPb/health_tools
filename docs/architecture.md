@@ -127,11 +127,19 @@ analyze:  raw CSV -> check/evaluate -> feature diagnosis
           -> optional copied offline run -> PSD evidence -> Markdown/PPT
 ```
 
+`analyze` 还有一层明确的工作区状态机：`analysis_state.json` 记录 `discover`、`check`、`raw`、`evaluate`、`offline`、`plot`、`diagnose`、`report`，每个阶段只有 `pending`、`running`、`completed`、`failed` 四种状态。`--resume` 只复用状态一致且产物仍有效的已完成阶段，`--no-resume` 遇到既有状态就拒绝继续，`--restart` 则清理分析目录内已归属的产物后重新开始。
+
+分析输入也按路径角色分开：`--input` 只定义待分析源，`--check-report`、`--offline-result`、`--figure-dir` 是独立的复用输入。若输出目录嵌在输入目录内，源文件发现会自动排除输出子树，避免把历史分析产物再次纳入原始 CSV。
+
 ## 列展开
 
 `utils/columns.py` 统一处理 `{start-end}` 范围。`CH{0-3}` 展开为 `CH0` 到 `CH3`，
 `rawdata[{0-1}]` 展开为 `rawdata[0]`、`rawdata[1]`。方括号范围语法为旧规则兼容能力；
 转换映射中 `[]` 通常表示字面量。
+
+## 诊断优先级
+
+`core/analysis/diagnosis.py` 会先按规则 `priority` 从高到低排序，再从上到下寻找第一个满足条件的原因。也就是说，当多个原因都能解释同一批特征时，数字更大的规则先赢；`origin=algorithm` 的原因还要求原始数据、参考数据和算法异常条件同时成立。
 
 ## 扩展原则
 
