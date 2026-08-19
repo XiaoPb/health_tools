@@ -14,6 +14,7 @@ import re
 import shutil
 from collections import Counter
 from dataclasses import replace
+from inspect import signature
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, cast
 
@@ -777,6 +778,28 @@ def run_raw_stage(
     return _raw_records(request, source, rule, context, root, files)
 
 
+def _invoke_raw_stage(
+    request: AnalyzeRequest,
+    source: Path,
+    rule,
+    context: ExecutionContext,
+    root: Path,
+    files: Sequence[Path],
+):
+    """兼容旧四参数替换函数，并向新版入口传递预发现输入。"""
+    base_args = (request, source, rule, context)
+    discovered_args = (root, files)
+    try:
+        stage_signature = signature(run_raw_stage)
+    except (TypeError, ValueError):
+        return run_raw_stage(*base_args)
+    try:
+        stage_signature.bind(*base_args, *discovered_args)
+    except TypeError:
+        return run_raw_stage(*base_args)
+    return run_raw_stage(*base_args, *discovered_args)
+
+
 def run_check_stage(
     request: AnalyzeRequest,
     source: Path,
@@ -1217,7 +1240,7 @@ def run_analyze(
         raw_fingerprint = _stage_fingerprint("raw", request_key)
         state.start("raw", raw_fingerprint)
         try:
-            records, root, raw_files, _, chip = run_raw_stage(
+            records, root, raw_files, _, chip = _invoke_raw_stage(
                 request, source, rule, ctx, root, raw_files
             )
         except Exception as exc:

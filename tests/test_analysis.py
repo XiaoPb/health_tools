@@ -237,6 +237,62 @@ def test_run_analyze_raw_stage_reuses_discovered_files_when_output_is_nested(
     assert records[0]["source"] == str(sample)
 
 
+def test_run_analyze_supports_legacy_four_argument_raw_stage_override(tmp_path: Path, monkeypatch):
+    source = tmp_path / "input.csv"
+    _write_csv(source)
+    output = tmp_path / "out"
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    calls = Counter()
+
+    def legacy_run_raw_stage(request, source_path, rule_object, context):
+        calls["raw"] += 1
+        return (
+            [
+                AnalysisRecord(
+                    file=source.name,
+                    source=str(source),
+                    analysis_type=request.analysis_type,
+                    scene="static",
+                    conclusion="未发现异常",
+                    confidence=1.0,
+                )
+            ],
+            source.parent,
+            [source],
+            set(),
+            request.chip_name,
+        )
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.run_raw_stage", legacy_run_raw_stage)
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._run_supporting_stages",
+        lambda *_, **__: ([], None, None),
+    )
+    monkeypatch.setattr("health_tools.api.analysis_operation._escalate", lambda *_, **__: [])
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_psd_plots", lambda *_, **__: None
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_raw_plots", lambda *_, **__: None
+    )
+
+    result = run_analyze(
+        AnalyzeRequest(
+            source,
+            output,
+            analysis_type="other",
+            rule_file=str(rule),
+            allow_offline=False,
+            report="markdown",
+        )
+    )
+
+    assert calls["raw"] == 1
+    assert result.summary_path.exists()
+
+
 def test_run_analyze_rejects_directory_with_only_auxiliary_csvs(tmp_path: Path):
     source = tmp_path / "data"
     source.mkdir()
