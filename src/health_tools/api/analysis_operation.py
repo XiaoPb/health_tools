@@ -659,11 +659,6 @@ def _generate_raw_plots(
 def _offline_records(
     request: AnalyzeRequest, source: Path, rule
 ) -> Tuple[List[AnalysisRecord], Set[str]]:
-    from health_tools.utils.accuracy import (
-        DEFAULT_ACCURACY_THRESHOLDS,
-        format_accuracy_threshold,
-    )
-
     if "hr_psd" not in rule.detectors:
         raise RequestValidationError("当前 analysis 规则未启用 hr_psd，不能应用心率 PSD 检测")
     if _custom_accuracy(request):
@@ -686,13 +681,12 @@ def _offline_records(
         features.setdefault("signal_flat", False)
         features.setdefault("scene", psd.get("scene", "unknown"))
         decision = diagnose(features, rule)
-        thresholds = request.accuracy_thresholds or DEFAULT_ACCURACY_THRESHOLDS
         metric_names = [
             "samples",
             "mae",
             "max_error",
             "error_ratio",
-            *(f"within_{format_accuracy_threshold(value)}" for value in thresholds),
+            *(key for key in psd if key.startswith("within_")),
         ]
         records.append(
             AnalysisRecord(

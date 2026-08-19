@@ -12,6 +12,7 @@ from health_tools.api.analysis_operation import (
     _escalate,
     _generate_psd_plots,
     _generate_raw_plots,
+    _offline_records,
     _run_supporting_stages,
 )
 from health_tools.api.context import ExecutionContext
@@ -202,6 +203,48 @@ def test_raw_accuracy_uses_shared_boundary_and_dynamic_strict_thresholds(
     assert strict["segments"][0]["end_s"] == 3.0
 
 
+@pytest.mark.parametrize(
+    ("inclusive", "expected"),
+    [
+        (False, (0.0, 33.33, 66.67)),
+        (True, (33.33, 66.67, 100.0)),
+    ],
+)
+def test_raw_accuracy_default_threshold_exact_boundaries(
+    monkeypatch, tmp_path: Path, inclusive: bool, expected: tuple[float, float, float]
+):
+    frame = pd.DataFrame(
+        {
+            "time": np.arange(3, dtype=float),
+            "PPG": [1000.0, 1001.0, 1002.0],
+            "REF": [100.0, 100.0, 100.0],
+            "PRED": [95.0, 90.0, 85.0],
+        }
+    )
+    monkeypatch.setattr(raw_analysis, "_read", lambda path, chip: (frame, None))
+    rule = AnalysisRule(
+        columns={
+            "reference": "REF",
+            "prediction": "PRED",
+            "timestamp": "time",
+            "ppg_patterns": ["^PPG$"],
+            "acc": [],
+        },
+        sampling={"sample_rate": 1},
+        thresholds={"error": 20, "ref_min": 30, "ref_max": 220},
+    )
+
+    features, _, _ = analyze_raw_file(
+        tmp_path / "sample.csv",
+        rule,
+        "hr",
+        accuracy_inclusive=inclusive,
+    )
+
+    metrics = features["metrics"]
+    assert (metrics["within_5"], metrics["within_10"], metrics["within_15"]) == expected
+
+
 def test_accuracy_report_uses_dynamic_thresholds_and_per_comparison_samples(tmp_path: Path):
     records = [
         AnalysisRecord(
@@ -284,6 +327,33 @@ def test_accuracy_report_uses_dynamic_thresholds_and_per_comparison_samples(tmp_
     assert "±7.5 bpm" in report
     assert "75.0%" in report
     assert "Online vs Offline" in report
+
+
+def test_accuracy_report_preserves_threshold_input_order(tmp_path: Path):
+    thresholds = (15.0, 5.0, 10.0)
+    records = [
+        AnalysisRecord(
+            file="sample.csv",
+            source="sample.csv",
+            analysis_type="hr",
+            metrics={
+                "samples": 2,
+                "mae": 1.0,
+                "max_error": 2.0,
+                "within_15": 100.0,
+                "within_5": 50.0,
+                "within_10": 75.0,
+            },
+        )
+    ]
+
+    structured = write_structured(records, tmp_path / "structured", thresholds)
+    columns = pd.read_csv(structured[1]).columns.tolist()
+    assert columns[-3:] == ["within_15", "within_5", "within_10"]
+
+    report = write_markdown(records, tmp_path / "report.md", thresholds).read_text(encoding="utf-8")
+    header = next(line for line in report.splitlines() if line.startswith("| 对比对象"))
+    assert header.index("±15 bpm") < header.index("±5 bpm") < header.index("±10 bpm")
 
 
 def test_accuracy_report_files_exclude_zero_sample_comparisons():
@@ -964,6 +1034,42 @@ def test_existing_psd_includes_comp_comparison_when_nonzero(tmp_path: Path):
     assert "Comp vs Polar" in report
 
 
+def test_offline_records_preserve_actual_accuracy_metric_keys(monkeypatch, tmp_path: Path):
+    source = tmp_path / "result"
+    source.mkdir()
+    psd_result = {
+        "available": True,
+        "scene": "static",
+        "reference_valid": True,
+        "samples": 2,
+        "mae": 1.0,
+        "max_error": 2.0,
+        "error_ratio": 0.0,
+        "within_2.5": 100.0,
+        "comparisons": {
+            "online": {
+                "samples": 2,
+                "mae": 1.0,
+                "max_error": 2.0,
+                "within_7.5": 100.0,
+            }
+        },
+    }
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation.analyze_psd_directory",
+        lambda *_args, **_kwargs: {"sample.csv": psd_result},
+    )
+
+    records, _ = _offline_records(
+        AnalyzeRequest(source, tmp_path / "out"),
+        source,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+    )
+
+    assert records[0].metrics["within_2.5"] == 100.0
+    assert records[0].metrics["comparisons"]["online"]["within_7.5"] == 100.0
+
+
 def test_vshb_accuracy_remains_available_when_psd_files_are_missing(tmp_path: Path):
     source = tmp_path / "result"
     source.mkdir()
@@ -1013,6 +1119,36 @@ def test_vshb_accuracy_uses_global_boundary_and_keeps_middle_zero(
     assert comparisons["online"]["within_5"] == expected
     assert comparisons["online"]["within_12.5"] == 66.67
     assert "comp" not in comparisons
+
+
+@pytest.mark.parametrize(
+    ("inclusive", "expected"),
+    [
+        (False, (0.0, 33.33, 66.67)),
+        (True, (33.33, 66.67, 100.0)),
+    ],
+)
+def test_vshb_accuracy_default_threshold_exact_boundaries(
+    tmp_path: Path, inclusive: bool, expected: tuple[float, float, float]
+):
+    source = tmp_path / "result"
+    source.mkdir()
+    (source / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n"
+        "1,100,95,0,95\n"
+        "2,100,90,0,90\n"
+        "3,100,85,0,85\n",
+        encoding="utf-8",
+    )
+
+    details = analyze_psd_directory(
+        source,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+        accuracy_inclusive=inclusive,
+    )
+
+    metrics = details["sample.csv"]["comparisons"]["offline"]
+    assert (metrics["within_5"], metrics["within_10"], metrics["within_15"]) == expected
 
 
 def test_vshb_accuracy_enables_comp_and_falls_back_without_polar(tmp_path: Path):
