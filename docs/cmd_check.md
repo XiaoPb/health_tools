@@ -42,7 +42,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - 默认先输出“检查处理结果”汇总，按无法识别芯片、规则加载失败、读取失败、空文件、列结构不符合规则等原因统计。
 - `-v/--verbose` 会显示跳过文件明细和每个检查项的详情。
 - 有可检查文件时生成 `check_report.csv`；如果启用 ACC 且存在 Ipd FAIL，会额外生成 `ipd_detail_<文件名>.csv`。
-- 同目录固定生成 `check_report_compact.csv`，仅保留 `WARNING`/`FAIL` 检查项的通道长表，便于后续分析程序直接读取。
+- 同目录固定生成 `check_report_compact.csv`，仅保留 `WARNING`/`FAIL` 检查项的通道长表，便于后续分析程序直接读取。AGC 证据同时包含变化次数、有效相邻对数和变化占比，避免用 PPG 通道样本数误算调光比例。
 
 数据居中统计先计算 `Rawdata - adc_offset`。低于居中下限或高于居中上限分别统计偏低/偏高占比；其中不高于
 `0.05 * adc_full_scale` 记为接近 0，不低于 `0.95 * adc_full_scale` 记为接近满量程。

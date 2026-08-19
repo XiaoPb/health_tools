@@ -38,6 +38,13 @@ def infer_activity(
         if any(word in text for word in words):
             return activity
     observed = features or {}
+    hr_range = float(observed.get("hr_change_range", 0) or 0)
+    start_end = float(observed.get("hr_start_end_change", 0) or 0)
+    direction_changes = int(observed.get("hr_direction_changes", 0) or 0)
+    if hr_range >= 20 and direction_changes >= 2:
+        return "interval"
+    if hr_range >= 15 and start_end <= -10:
+        return "recovery"
     if observed.get("motion_rms", 0) >= 0.3:
         return "other"
     return "rest"
@@ -324,11 +331,11 @@ def analyze_raw_file(
                 centered = numeric - adc_offset
                 near_zero_ratio = max(
                     near_zero_ratio,
-                    float(np.mean(np.abs(centered) <= full_scale * 0.05)),
+                    float(np.mean(centered <= full_scale * 0.05)),
                 )
                 near_full_ratio = max(
                     near_full_ratio,
-                    float(np.mean(np.abs(centered) >= full_scale * 0.95)),
+                    float(np.mean(centered >= full_scale * 0.95)),
                 )
                 dc_level_ratio = max(
                     dc_level_ratio,
@@ -435,7 +442,19 @@ def analyze_raw_file(
         pulse_amplitude <= float(rule.thresholds.get("pulse_amplitude_low", 1.0))
         or (dc_level_ratio > 0 and pulse_amplitude / max(full_scale, 1.0) < 0.01)
     )
-    activity = infer_activity(path, activity_override, {"motion_rms": motion})
+    activity_facts: Dict[str, Any] = {"motion_rms": motion}
+    activity_hr = ref if ref is not None else pred
+    if activity_hr is not None:
+        hr_values = activity_hr.dropna().to_numpy(dtype=float)
+        if len(hr_values) > 2:
+            activity_facts["hr_change_range"] = float(np.ptp(hr_values))
+            activity_facts["hr_start_end_change"] = float(hr_values[-1] - hr_values[0])
+            deltas = np.diff(hr_values)
+            signs = np.sign(deltas[np.abs(deltas) >= 1.0])
+            activity_facts["hr_direction_changes"] = int(
+                np.sum(signs[1:] != signs[:-1]) if len(signs) > 1 else 0
+            )
+    activity = infer_activity(path, activity_override, activity_facts)
     features: Dict[str, Any] = {
         "data_complete": data_complete,
         "missing_ratio": missing_ratio,

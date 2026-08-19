@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 import health_tools.core.analysis.raw as raw_analysis
+import health_tools.core.analysis.reporting as analysis_reporting
 from health_tools.api import AnalyzeRequest, RequestValidationError, run_analyze
 from health_tools.api.analysis_operation import (
     _apply_check_results,
@@ -641,6 +642,25 @@ def test_pi_applies_adc_offset_only_to_rawdata_columns(
     assert expected_min < result["features"]["pi"] < expected_max
     expected_unit = "pA" if column.startswith("Ipd") else "adc_lsb"
     assert result["features"]["pi_units"][column] == expected_unit
+
+
+def test_near_full_only_counts_positive_adc_upper_rail(monkeypatch, tmp_path: Path):
+    frame = pd.DataFrame({"Rawdata0": np.full(100, -900.0)})
+    chip_rule = ChipRule(
+        chip="test",
+        csv={},
+        columns=["Rawdata0"],
+        chip_info={"adc_offset": 1000, "adc_full_scale": 2000},
+    )
+    monkeypatch.setattr(raw_analysis, "_read", lambda path, chip: (frame, chip_rule))
+    rule = AnalysisRule(
+        columns={"ppg_patterns": ["^Rawdata0$"], "acc": []},
+        sampling={"sample_rate": 25},
+    )
+
+    result, _, _ = analyze_raw_file(tmp_path / "sample.csv", rule, "hr", chip_name="test")
+
+    assert result["features"]["near_full_ratio"] == 0.0
 
 
 def test_spo2_low_pi_requires_recollection(tmp_path: Path):
@@ -1506,6 +1526,67 @@ def test_ppt_body_uses_scene_filename_slots_and_compact_body_font(tmp_path: Path
     assert body.text_frame.paragraphs[0].line_spacing == 1
 
 
+def test_ppt_preserves_current_named_template_slots(monkeypatch, tmp_path: Path):
+    pytest.importorskip("pptx")
+    from PIL import Image
+    from pptx import Presentation
+
+    template = Path(analysis_reporting.files("health_tools") / "templates" / "analysis_report.pptx")
+    source = Presentation(str(template))
+    source_slide = source.slides[1]
+    by_name = {shape.name: shape for shape in source_slide.shapes}
+    expected_names = {
+        "标题 3",
+        "文本占位符 4",
+        "文本占位符 5",
+        "内容占位符 6",
+        "内容占位符 1",
+        "内容占位符 2",
+    }
+    if not expected_names.issubset(by_name):
+        pytest.skip("当前工作树未携带主工作区最新模板；合入主分支后执行命名槽位验收")
+    primary_rect = tuple(
+        getattr(by_name["内容占位符 1"], key) for key in ("left", "top", "width", "height")
+    )
+    secondary_rect = tuple(
+        getattr(by_name["内容占位符 2"], key) for key in ("left", "top", "width", "height")
+    )
+    primary = tmp_path / "primary.png"
+    secondary = tmp_path / "secondary.png"
+    Image.new("RGB", (640, 360), "white").save(primary)
+    Image.new("RGB", (640, 180), "gray").save(secondary)
+    output = write_ppt(
+        [
+            AnalysisRecord(
+                "run/a.csv",
+                "a.csv",
+                "hr",
+                activity="run",
+                focused=True,
+                figure=str(primary),
+                secondary_figure=str(secondary),
+            )
+        ],
+        tmp_path / "latest.pptx",
+    )
+    detail = next(
+        slide
+        for slide in Presentation(str(output)).slides
+        if any(getattr(shape, "text", "") == "跑步" for shape in slide.shapes)
+    )
+    detail_names = {shape.name: shape for shape in detail.shapes}
+    for name in ("标题 3", "文本占位符 4", "文本占位符 5", "内容占位符 6"):
+        assert not detail_names[name]._element.xpath(".//a:rPr[@sz]")
+    pictures = sorted(
+        (shape for shape in detail.shapes if shape.shape_type == 13), key=lambda shape: shape.top
+    )
+    for picture, rect in zip(pictures, (primary_rect, secondary_rect)):
+        left, top, width, height = rect
+        assert left <= picture.left and top <= picture.top
+        assert picture.left + picture.width <= left + width
+        assert picture.top + picture.height <= top + height
+
+
 def test_ppt_includes_psd_page_for_evidence_insufficient(tmp_path: Path):
     pytest.importorskip("pptx")
     from PIL import Image
@@ -1576,6 +1657,23 @@ def test_activity_uses_explicit_value_then_path_hint(path: str, explicit: str, e
     assert infer_activity(Path(path), explicit=explicit) == expected
 
 
+def test_activity_uses_heart_rate_change_after_path_hints():
+    assert (
+        infer_activity(
+            Path("unknown/a.csv"),
+            features={"motion_rms": 0.2, "hr_change_range": 35, "hr_direction_changes": 3},
+        )
+        == "interval"
+    )
+    assert (
+        infer_activity(
+            Path("unknown/b.csv"),
+            features={"motion_rms": 0.05, "hr_change_range": 25, "hr_start_end_change": -20},
+        )
+        == "recovery"
+    )
+
+
 def test_hr_wear_causes_require_combined_evidence():
     from health_tools.core.analysis.diagnosis import diagnose
 
@@ -1609,6 +1707,8 @@ def test_compact_check_metrics_feed_diagnosis_features(tmp_path: Path):
                 "近0占比": 2.5,
                 "近满量程占比": 12.5,
                 "AGC变化次数": 8,
+                "AGC有效对数": 10,
+                "AGC变化占比": 80.0,
             }
         ]
     ).to_csv(report, index=False, encoding="utf-8-sig")
@@ -1620,7 +1720,90 @@ def test_compact_check_metrics_feed_diagnosis_features(tmp_path: Path):
 
     assert record.features["near_full_ratio"] == pytest.approx(12.5)
     assert record.features["agc_change_count"] == 8
+    assert record.features["agc_change_ratio"] == pytest.approx(0.8)
     assert record.features["check_channel_metrics"]["Rawdata3"]["abnormal_ratio"] == 15.0
+
+
+def test_compact_check_prefers_relative_path_for_duplicate_filenames(tmp_path: Path):
+    report = tmp_path / "check_report_compact.csv"
+    pd.DataFrame(
+        [
+            {
+                "文件名": "x.csv",
+                "文件相对路径": "a/x.csv",
+                "检查项": "数据居中",
+                "状态": "FAIL",
+                "通道": "Rawdata0",
+                "近满量程占比": 10,
+            },
+            {
+                "文件名": "x.csv",
+                "文件相对路径": "b/x.csv",
+                "检查项": "数据居中",
+                "状态": "FAIL",
+                "通道": "Rawdata0",
+                "近满量程占比": 20,
+            },
+        ]
+    ).to_csv(report, index=False, encoding="utf-8-sig")
+    records = [AnalysisRecord("a/x.csv", "x.csv", "hr"), AnalysisRecord("b/x.csv", "x.csv", "hr")]
+
+    _apply_compact_check_results(records, report, RuleLoader.load_analysis_rule("analysis_hr.yaml"))
+
+    assert records[0].features["near_full_ratio"] == 10
+    assert records[1].features["near_full_ratio"] == 20
+
+
+def test_compact_check_basename_fallback_keeps_all_rows_for_one_file(tmp_path: Path):
+    report = tmp_path / "check_report_compact.csv"
+    pd.DataFrame(
+        [
+            {
+                "文件名": "x.csv",
+                "文件相对路径": "",
+                "检查项": "数据居中",
+                "状态": "FAIL",
+                "通道": "Rawdata0",
+                "近满量程占比": 10,
+            },
+            {
+                "文件名": "x.csv",
+                "文件相对路径": "",
+                "检查项": "数据居中",
+                "状态": "FAIL",
+                "通道": "Rawdata1",
+                "近满量程占比": 20,
+            },
+        ]
+    ).to_csv(report, index=False, encoding="utf-8-sig")
+    record = AnalysisRecord("x.csv", "x.csv", "hr")
+
+    _apply_compact_check_results(
+        [record], report, RuleLoader.load_analysis_rule("analysis_hr.yaml")
+    )
+
+    assert set(record.features["check_channel_metrics"]) == {"Rawdata0", "Rawdata1"}
+
+
+def test_offline_records_honor_explicit_activity(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation.analyze_psd_directory",
+        lambda *_args, **_kwargs: {
+            "a.csv": {
+                "available": True,
+                "scene": "dynamic",
+                "raw_valid": True,
+                "reference_valid": True,
+                "algorithm_abnormal": False,
+            }
+        },
+    )
+    records, _ = _offline_records(
+        AnalyzeRequest(tmp_path, tmp_path / "out", activity="run"),
+        tmp_path,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+    )
+    assert records[0].activity == "run"
 
 
 def test_ppt_uses_activity_and_two_template_picture_areas(tmp_path: Path):

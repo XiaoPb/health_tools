@@ -592,7 +592,13 @@ class TestCheckResultStatus:
                     True,
                     "已统计",
                     status="PASS",
-                    channel_metrics={"AGC_INFO_CH0": {"change_count": 3}},
+                    channel_metrics={
+                        "AGC_INFO_CH0": {
+                            "change_count": 3,
+                            "total_count": 4,
+                            "change_ratio": 75.0,
+                        }
+                    },
                 ),
             ],
         )
@@ -603,6 +609,8 @@ class TestCheckResultStatus:
         assert rows[0]["状态"] == "FAIL"
         assert rows[0]["通道"] == "Rawdata0"
         assert rows[0]["AGC变化次数"] == "3"
+        assert rows[0]["AGC有效对数"] == "4"
+        assert rows[0]["AGC变化占比"] == "75.0"
 
     def test_frame_ratio_boundary_is_warning(self, checker):
         df = pd.DataFrame({"FRAME_ID": list(range(50)) + list(range(51, 100))})

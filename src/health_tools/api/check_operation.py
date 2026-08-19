@@ -147,6 +147,8 @@ COMPACT_HEADER = [
     "近0占比",
     "近满量程占比",
     "AGC变化次数",
+    "AGC有效对数",
+    "AGC变化占比",
 ]
 
 
@@ -168,12 +170,16 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                 metrics = result.channel_metrics or {"-": {}}
                 for channel, metric in metrics.items():
                     agc_count = metric.get("change_count", "")
+                    agc_total = metric.get("total_count", "")
+                    agc_ratio = metric.get("change_ratio", "")
                     if not agc_count and channel != "-":
                         suffix = channel.lower().replace("rawdata", "").replace("ch", "")
                         for agc_name, agc_metric in agc_metrics.items():
                             agc_suffix = agc_name.lower().replace("agc_info_", "").replace("ch", "")
                             if agc_suffix == suffix:
                                 agc_count = agc_metric.get("change_count", "")
+                                agc_total = agc_metric.get("total_count", "")
+                                agc_ratio = agc_metric.get("change_ratio", "")
                                 break
                     writer.writerow(
                         {
@@ -191,6 +197,8 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                             "近0占比": metric.get("near_zero_ratio", ""),
                             "近满量程占比": metric.get("near_full_ratio", ""),
                             "AGC变化次数": agc_count,
+                            "AGC有效对数": agc_total,
+                            "AGC变化占比": agc_ratio,
                         }
                     )
 

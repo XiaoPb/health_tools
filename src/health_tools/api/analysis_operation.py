@@ -35,7 +35,7 @@ from health_tools.core.analysis.artifacts import ArtifactIndex
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord, AnalysisSegment
 from health_tools.core.analysis.psd import analyze_psd_directory
-from health_tools.core.analysis.raw import analyze_raw_file, detect_chip
+from health_tools.core.analysis.raw import analyze_raw_file, detect_chip, infer_activity
 from health_tools.core.analysis.reporting import (
     write_evidence_figure,
     write_markdown,
@@ -353,10 +353,26 @@ def _apply_compact_check_results(
     if "检查项" not in report.columns:
         return
     for record in records:
-        rows = report[
-            (report.get("文件相对路径", pd.Series(dtype=str)).astype(str) == record.file)
-            | (report.get("文件名", pd.Series(dtype=str)).astype(str) == Path(record.file).name)
-        ]
+        relative = (
+            report["文件相对路径"].fillna("").astype(str)
+            if "文件相对路径" in report.columns
+            else pd.Series("", index=report.index, dtype=str)
+        )
+        rows = report[relative.str.replace("\\", "/") == record.file.replace("\\", "/")]
+        if rows.empty and (
+            "文件相对路径" not in report.columns or relative.str.strip().eq("").all()
+        ):
+            names = (
+                report["文件名"].fillna("").astype(str)
+                if "文件名" in report.columns
+                else pd.Series("", index=report.index, dtype=str)
+            )
+            name_rows = report[names == Path(record.file).name]
+            matching_records = sum(
+                Path(item.file).name == Path(record.file).name for item in records
+            )
+            if matching_records == 1 and not name_rows.empty:
+                rows = name_rows
         if rows.empty:
             continue
         channel_metrics: Dict[str, Dict[str, float]] = {}
@@ -366,6 +382,8 @@ def _apply_compact_check_results(
             "近0占比": "near_zero_ratio",
             "近满量程占比": "near_full_ratio",
             "AGC变化次数": "agc_change_count",
+            "AGC有效对数": "agc_pair_count",
+            "AGC变化占比": "agc_change_ratio_percent",
         }
         for _, row in rows.iterrows():
             channel = str(row.get("通道", "-") or "-")
@@ -384,10 +402,12 @@ def _apply_compact_check_results(
                 record.features[key] = max(values)
         record.features["near_zero"] = record.features.get("near_zero_ratio", 0.0) >= 5.0
         record.features["near_full"] = record.features.get("near_full_ratio", 0.0) >= 5.0
-        ratios = [
-            metric.get("agc_change_count", 0.0) / max(metric.get("total_count", 0.0), 1.0)
-            for metric in channel_metrics.values()
-        ]
+        ratios = []
+        for metric in channel_metrics.values():
+            if "agc_change_ratio_percent" in metric:
+                ratios.append(metric["agc_change_ratio_percent"] / 100.0)
+            elif metric.get("agc_pair_count", 0.0) > 0:
+                ratios.append(metric.get("agc_change_count", 0.0) / metric["agc_pair_count"])
         record.features["agc_change_ratio"] = max(ratios, default=0.0)
         record.features["agc_unstable"] = record.features["agc_change_ratio"] >= 0.05
         record.features["channel_dropout"] = any(
@@ -766,6 +786,8 @@ def _offline_records(
         features.setdefault("signal_saturated", False)
         features.setdefault("signal_flat", False)
         features.setdefault("scene", psd.get("scene", "unknown"))
+        activity = infer_activity(Path(name), request.activity, features)
+        features.setdefault("activity", activity)
         decision = diagnose(features, rule)
         metric_names = [
             "samples",
@@ -780,6 +802,7 @@ def _offline_records(
                 source=str(psd.get("vshb_path", source)),
                 analysis_type=request.analysis_type,
                 scene=str(features.get("scene", "unknown")),
+                activity=activity,
                 focused=name in focused,
                 features=features,
                 metrics={key: psd.get(key) for key in metric_names},
