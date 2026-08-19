@@ -33,6 +33,12 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | `--accuracy-inclusive/--accuracy-strict` | 阈值边界包含/严格模式；默认 strict，即 `abs(error) < threshold` |
 | `-v, --verbose` | 显示文件级结果 |
 
+## 路径分工
+
+`--input` 只负责提供待分析源数据，可以是原始 CSV 目录，也可以是已有 offline 结果目录。`--check-report`、`--offline-result` 和 `--figure-dir` 都是独立输入，允许来自不同目录；其中 `--figure-dir` 可重复，便于拼接多批证据图。
+
+输出目录与输入目录可以不同，也可以嵌套，但分析会自动排除输出目录及其子树，不把既有分析产物再次当作原始 CSV。原始文件不会被移动、改名或覆盖。
+
 ## 处理阶段
 
 原始 CSV 先执行完整性、参考值、信号质量和准确度检查。普通文件在证据足够时结束；`--focus` 文件无论正常与否都会继续所有适用阶段。证据不足时，心率分析会把文件复制到输出工作区，再按指定或默认版本调用离线算法并分析 PPG/ACC PSD。源文件不会被移动或覆盖。
@@ -59,6 +65,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 7. **结论合成**：按原因优先级匹配结构化条件，依次输出参考数据问题、原始数据问题、算法异常机制、算法性能极限、未发现异常或证据不足。
 
 心率活动细分保留 `--scene static|dynamic` 的兼容行为，并用 `--activity` 补充静息、步行、跑步、骑行、力量、间歇和恢复阶段。佩戴松动和佩戴过紧均至少需要两个独立证据；单一 AGC 变化、低 PI 或基线漂移不会直接形成佩戴结论。骑行/力量场景中的低 PI、脉搏幅度压缩、近 0 或通道掉线可提示疑似压迫，动态场景中的 AGC 不稳定、基线漂移、掉线和运动频谱污染可提示疑似松动。
+
+诊断原因按规则里的 `priority` 从高到低匹配，先命中的原因生效。`origin=algorithm` 的原因只在原始数据、参考数据和算法异常条件都成立时才参与匹配。
 
 结论依据遵循以下优先级：
 
@@ -169,3 +177,5 @@ ghealth_tool analyze -i E:/data/fail_category -o E:/reports/analysis \
 
 输出目录中的 `analysis_state.json` 记录阶段状态。报告生成失败后再次使用相同参数并保留
 `--resume` 会复用已完成阶段；需要完全重跑时使用 `--restart`。
+
+`--no-resume` 会拒绝复用已有状态，适合显式阻止断点续跑。`analysis_state.json` 记录 `discover`、`check`、`raw`、`evaluate`、`offline`、`plot`、`diagnose`、`report` 的阶段机状态，重载时运行中的阶段会回退为失败，以免把半成品当作已完成结果。
