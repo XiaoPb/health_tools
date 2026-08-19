@@ -31,6 +31,7 @@ from health_tools.api.models import (
     ProgressEvent,
 )
 from health_tools.api.operations import _context, _load_rule, _require_path
+from health_tools.core.analysis.artifacts import ArtifactIndex
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord, AnalysisSegment
 from health_tools.core.analysis.psd import analyze_psd_directory
@@ -41,6 +42,7 @@ from health_tools.core.analysis.reporting import (
     write_ppt,
     write_structured,
 )
+from health_tools.core.analysis.workspace import AnalysisWorkspace, request_fingerprint
 from health_tools.rules.loader import RuleLoader
 
 
@@ -181,23 +183,6 @@ def _run_supporting_stages(
     notes: List[str] = []
     check_path: Optional[Path] = None
     evaluate_path: Optional[Path] = None
-    if chip:
-        from health_tools.api.check_operation import run_check
-
-        try:
-            check_result = run_check(
-                CheckRequest(
-                    input_path=source,
-                    chip_name=chip,
-                    timestamp_column=request.timestamp_column or rule.columns.get("timestamp"),
-                    output_path=output / "check" / "check_report.csv",
-                    workers=request.workers,
-                ),
-                context=context,
-            )
-            check_path = check_result.report_path
-        except GHealthError as exc:
-            notes.append(f"数据检查未完成: {exc}")
     staging = output / "evaluate_input"
     _copy_files(files, root, staging)
     from health_tools.api.operations import run_evaluate
@@ -448,6 +433,37 @@ def _raw_records(
         records.append(record)
         context.emit(ProgressEvent("analyze", "raw", index, total, "完成", name))
     return records, root, files, focused, chip
+
+
+def run_raw_stage(request: AnalyzeRequest, source: Path, rule, context: ExecutionContext):
+    """可替换的原始数据阶段入口，便于断点编排和测试。"""
+    return _raw_records(request, source, rule, context)
+
+
+def run_check_stage(
+    request: AnalyzeRequest,
+    source: Path,
+    chip: Optional[str],
+    output: Path,
+    context: ExecutionContext,
+) -> Optional[Path]:
+    if request.check_report_path is not None:
+        return request.check_report_path
+    if not chip:
+        return None
+    from health_tools.api.check_operation import run_check
+
+    result = run_check(
+        CheckRequest(
+            input_path=source,
+            chip_name=chip,
+            timestamp_column=request.timestamp_column,
+            output_path=output / "check" / "check_report.csv",
+            workers=request.workers,
+        ),
+        context=context,
+    )
+    return result.report_path
 
 
 def _merge_psd(record: AnalysisRecord, psd: Dict[str, object], rule) -> None:
@@ -725,8 +741,25 @@ def run_analyze(
         output / "analysis_report.md",
         output / "analysis_report.pptx",
     ]
-    if any(path.exists() for path in core_outputs):
-        raise RequestValidationError(f"输出目录已包含分析产物: {output}")
+    state_path = output / "analysis_state.json"
+    if any(path.exists() for path in core_outputs) and not state_path.exists():
+        raise RequestValidationError(f"输出目录已包含分析产物但没有状态清单: {output}")
+    state: Optional[AnalysisWorkspace] = None
+    request_key = {
+        "input": str(source),
+        "analysis_type": request.analysis_type,
+        "rule": request.rule_file,
+        "check_report": str(request.check_report_path or ""),
+        "offline_result": str(request.offline_result_path or ""),
+    }
+    if request.restart and state_path.exists():
+        state_path.unlink()
+    if request.resume and state_path.exists():
+        state = AnalysisWorkspace.load(output)
+        if state.state.request_fingerprint != request_fingerprint(request_key):
+            state = None
+    if state is None:
+        state = AnalysisWorkspace.create(output, request_key)
     rule_name = request.rule_file or f"analysis_{request.analysis_type}.yaml"
     rule = _load_rule(RuleLoader.load_analysis_rule, rule_name, "分析")
     if request.analysis_type != "other" and rule.type != request.analysis_type:
@@ -735,8 +768,13 @@ def run_analyze(
     stages = output / "stages"
     figures = output / "figures"
     escalated: List[Path] = []
-    if source.is_dir() and any(source.rglob("*_result.vshb")):
+    if request.offline_result_path is not None:
+        offline_source = _require_path(request.offline_result_path)
+        records, _ = _offline_records(request, offline_source, rule)
+        state.complete("offline", [offline_source])
+    elif source.is_dir() and any(source.rglob("*_result.vshb")):
         records, _ = _offline_records(request, source, rule)
+        state.complete("offline", [source])
         if _custom_accuracy(request):
             _generate_psd_plots(
                 source,
@@ -749,16 +787,54 @@ def run_analyze(
         else:
             _generate_psd_plots(source, records, figures / "psd", ctx)
     else:
-        records, root, raw_files, _, chip = _raw_records(request, source, rule, ctx)
-        stage_notes, check_path, evaluate_path = _run_supporting_stages(
+        root, raw_files = _raw_files(source)
+        chip = request.chip_name or detect_chip(raw_files[0])
+        check_path: Optional[Path] = request.check_report_path
+        if check_path is None and chip:
+            try:
+                check_path = run_check_stage(request, source, chip, stages, ctx)
+                if check_path:
+                    state.complete("check", [check_path])
+            except GHealthError as exc:
+                check_path = None
+                stage_notes = [f"数据检查未完成: {exc}"]
+            else:
+                stage_notes = []
+        else:
+            stage_notes = []
+            if check_path is not None and Path(check_path).exists():
+                state.complete("check", [Path(check_path)])
+        records, root, raw_files, _, chip = run_raw_stage(request, source, rule, ctx)
+        supporting_notes, _unused_check_path, evaluate_path = _run_supporting_stages(
             request, source, raw_files, root, chip, stages, rule, ctx
         )
+        stage_notes.extend(supporting_notes)
         if stage_notes:
             for record in records:
                 record.notes.extend(stage_notes)
         _apply_check_results(records, check_path, rule)
         _apply_evaluate_results(records, evaluate_path, rule)
-        escalated = _escalate(request, records, root, chip, rule, stages, ctx)
+        existing_offline = request.offline_result_path
+        if existing_offline is not None:
+            offline_records, _ = _offline_records(request, _require_path(existing_offline), rule)
+            by_name = {Path(item.file).stem: item for item in offline_records}
+            for record in records:
+                match = by_name.get(Path(record.file).stem)
+                if match:
+                    _merge_psd(record, match.psd, rule)
+            escalated = []
+        elif state.state.stages["offline"].status == "completed" and (stages / "offline").exists():
+            offline_records, _ = _offline_records(request, stages / "offline", rule)
+            by_name = {Path(item.file).stem: item for item in offline_records}
+            for record in records:
+                match = by_name.get(Path(record.file).stem)
+                if match:
+                    _merge_psd(record, match.psd, rule)
+            escalated = []
+        else:
+            escalated = _escalate(request, records, root, chip, rule, stages, ctx)
+            if (stages / "offline").exists():
+                state.complete("offline", [stages / "offline"])
         if _custom_accuracy(request):
             _generate_psd_plots(
                 stages / "offline",
@@ -771,6 +847,19 @@ def run_analyze(
         else:
             _generate_psd_plots(stages / "offline", records, figures / "psd", ctx)
         _generate_raw_plots(request, records, chip, figures / "raw", rule, ctx)
+        if request.figure_paths:
+            artifact_index = ArtifactIndex.build(
+                raw_files, request.figure_paths, request.check_report_path
+            )
+            for record in records:
+                item = artifact_index.item_for(record.file)
+                if item and item.primary_figure:
+                    record.figure = str(item.primary_figure)
+                    if item.secondary_figures:
+                        record.notes.append(
+                            "已复用现有副图: "
+                            + ", ".join(path.name for path in item.secondary_figures)
+                        )
     for index, record in enumerate(records):
         if (
             not record.figure
@@ -807,6 +896,7 @@ def run_analyze(
             )
         else:
             reports.append(write_ppt(records, output / "analysis_report.pptx"))
+    state.complete("report", [*detail_paths, *reports])
     items = tuple(
         ItemResult(
             ItemStatus.OK if record.conclusion == "未发现异常" else ItemStatus.WARN,

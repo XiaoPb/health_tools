@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 MATCH_ORDER = ("relative_path", "file_name", "unique_stem")
 _KINDS = ("time", "ac", "psd", "stft", "evidence")
@@ -78,7 +78,11 @@ class ArtifactIndex:
         normalized = relative_path.replace("\\", "/")
         if normalized in self.items:
             return self.items[normalized]
-        matches = [item for item in self.items.values() if Path(item.csv_path).name == Path(normalized).name]
+        matches = [
+            item
+            for item in self.items.values()
+            if Path(item.csv_path).name == Path(normalized).name
+        ]
         if len(matches) == 1:
             return matches[0]
         return None
@@ -117,7 +121,9 @@ def _relative(path: Path, root: Path) -> str:
         return path.name
 
 
-def _match_figures(relative: str, csv_file: Path, figures: Sequence[Path], roots: Sequence[Path]) -> Tuple[Path, ...]:
+def _match_figures(
+    relative: str, csv_file: Path, figures: Sequence[Path], roots: Sequence[Path]
+) -> Tuple[Path, ...]:
     rel = relative.replace("\\", "/")
     rel_stem = Path(rel).with_suffix("").as_posix()
     same_relative: List[Path] = []
@@ -162,7 +168,9 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[Path]:
         frame = pd.read_csv(report, encoding="utf-8-sig")
     except Exception:
         return []
-    columns = [name for name in ("文件相对路径", "文件名", "file", "input") if name in frame.columns]
+    columns = [
+        name for name in ("文件相对路径", "文件名", "file", "input") if name in frame.columns
+    ]
     if not columns:
         return []
     values = [str(value) for value in frame[columns[0]].dropna().tolist()]
