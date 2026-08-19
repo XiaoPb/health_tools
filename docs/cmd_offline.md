@@ -33,6 +33,7 @@ ghealth_tool offline --list [--chip <chip>]
 | `--list` | 列出可用芯片和版本 |
 | `--timeout` | 外部工具超时时间；显式设置时固定使用该值 |
 | `--settle-timeout` | 外部工具异常返回后等待输出稳定的时间，默认 10 秒 |
+| `--workers` | 并发线程数，范围 1-8，默认 8 |
 | `-v/--verbose` | 详细输出 |
 
 当前没有 `offline` 的短别名。

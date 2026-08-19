@@ -53,6 +53,7 @@ TIMEOUT_SECONDS_PER_EXTRA_FILE = 20
 @click.option(
     "--settle-timeout", type=int, default=10, help="异常返回后等待输出稳定的时间（秒，默认10）"
 )
+@click.option("--workers", type=click.IntRange(min=1, max=8), default=8, show_default=True)
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
 def offline_cmd(
     input_path: Optional[str],
@@ -75,6 +76,7 @@ def offline_cmd(
     settle_timeout: int,
     accuracy_thresholds: Optional[Tuple[float, ...]],
     accuracy_inclusive: bool,
+    workers: int,
     verbose: bool,
 ) -> None:
     """离线跑库（调用TEE_Algorithm.exe）"""
@@ -105,6 +107,7 @@ def offline_cmd(
                     settle_timeout=settle_timeout,
                     accuracy_thresholds=accuracy_thresholds,
                     accuracy_inclusive=accuracy_inclusive,
+                    workers=workers,
                 ),
                 context=context,
             )

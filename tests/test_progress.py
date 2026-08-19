@@ -122,6 +122,51 @@ def test_parallel_process_uses_rich_progress(monkeypatch):
     assert calls == [{"description": "处理文件", "enabled": True, "total": 3}]
 
 
+def test_plot_command_forwards_workers(monkeypatch, tmp_path: Path):
+    import health_tools.api as api
+
+    requests = []
+
+    def fake_run_plot(request, *, context=None):
+        requests.append(request)
+        return api.BatchResult("plot")
+
+    monkeypatch.setattr(api, "run_plot", fake_run_plot)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "plot",
+            "-i",
+            str(tmp_path / "input"),
+            "-o",
+            str(tmp_path / "output"),
+            "--workers",
+            "3",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert requests[0].workers == 3
+
+
+def test_offline_command_forwards_workers(monkeypatch):
+    import health_tools.api as api
+
+    requests = []
+
+    def fake_run_offline(request, *, context=None):
+        requests.append(request)
+        return api.OfflineResult(api.BatchResult("offline"))
+
+    monkeypatch.setattr(api, "run_offline", fake_run_offline)
+
+    result = CliRunner().invoke(main, ["offline", "--workers", "5", "--list"])
+
+    assert result.exit_code == 0
+    assert requests[0].workers == 5
+
+
 def test_plot_directory_uses_api_file_orchestration(monkeypatch, tmp_path: Path):
     from health_tools.api import ItemResult, ItemStatus
 

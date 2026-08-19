@@ -256,6 +256,7 @@ class PlotRequest:
     filter_name: Optional[str] = None
     accuracy_thresholds: Optional[Tuple[float, ...]] = None
     accuracy_inclusive: bool = False
+    workers: int = 8
 
 
 @dataclass(frozen=True)
@@ -424,6 +425,7 @@ class OfflineRequest:
     settle_timeout: int = 10
     accuracy_thresholds: Optional[Tuple[float, ...]] = None
     accuracy_inclusive: bool = False
+    workers: int = 8
 
 
 @dataclass(frozen=True)

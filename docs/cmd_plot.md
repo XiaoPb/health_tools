@@ -35,6 +35,7 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--accuracy-inclusive/--accuracy-strict` | PSD 阈值边界包含/严格模式；默认 strict，即 `abs(error) < threshold` |
 | `--no-show` | 仅保存不显示 |
 | `--filter` | 目录模式下仅处理文件名包含指定字符的 CSV |
+| `--workers` | 并发线程数，范围 1-8，默认 8 |
 | `-v/--verbose` | 详细输出 |
 
 ## AC/PI 模式

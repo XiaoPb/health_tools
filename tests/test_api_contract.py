@@ -161,6 +161,11 @@ def test_new_request_defaults_and_config_compatibility():
 def test_accuracy_request_defaults(request_model):
     assert request_model.accuracy_thresholds is None
     assert request_model.accuracy_inclusive is False
+
+
+def test_parallel_request_defaults():
+    assert PlotRequest(Path("in"), Path("out")).workers == 8
+    assert OfflineRequest().workers == 8
     EvaluateRequest,
     OfflineRequest,
 
