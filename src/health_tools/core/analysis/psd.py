@@ -181,13 +181,17 @@ def analyze_psd_directory(
     rule: AnalysisRule,
     accuracy_thresholds: Optional[Sequence[float]] = None,
     accuracy_inclusive: bool = False,
+    vshb_files: Optional[Sequence[Path]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     results: Dict[str, Dict[str, Any]] = {}
     clarity_threshold = float(rule.thresholds.get("psd_clarity", 3))
     lock_hz = float(rule.thresholds.get("psd_lock_hz", 0.2))
     pull_hz = float(rule.thresholds.get("psd_pull_hz", 0.5))
     presence_threshold = float(rule.thresholds.get("psd_presence", 0.6))
-    for vshb in sorted(result_dir.rglob("*_result.vshb")):
+    input_files = (
+        list(vshb_files) if vshb_files is not None else list(result_dir.rglob("*_result.vshb"))
+    )
+    for vshb in sorted(input_files):
         base_name = vshb.stem.replace("_result", "")
         logical = (vshb.parent / f"{base_name}.csv").relative_to(result_dir).as_posix()
         base = vshb.parent / base_name

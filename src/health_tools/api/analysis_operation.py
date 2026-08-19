@@ -111,6 +111,17 @@ def _raw_files(source: Path, excluded_root: Optional[Path] = None) -> Tuple[Path
     return root, files
 
 
+def _vshb_files(source: Path, excluded_root: Optional[Path] = None) -> List[Path]:
+    if not source.is_dir():
+        return []
+    excluded = excluded_root.resolve() if excluded_root is not None else None
+    return [
+        path
+        for path in sorted(source.rglob("*_result.vshb"))
+        if excluded is None or not _inside(path, excluded)
+    ]
+
+
 def _logical(path: Path, root: Path) -> str:
     try:
         return path.relative_to(root).as_posix()
@@ -177,6 +188,7 @@ def _remove_owned_analysis_outputs(output: Path) -> None:
         output / "stages",
         output / "figures",
         output / "evaluate_input",
+        output / "offline_input",
     ]
     for target in targets:
         if not target.exists() or not _inside(target, output):
@@ -806,6 +818,8 @@ def run_check_stage(
     chip: Optional[str],
     output: Path,
     context: ExecutionContext,
+    root: Optional[Path] = None,
+    files: Optional[Sequence[Path]] = None,
 ) -> Optional[Path]:
     if request.check_report_path is not None:
         return request.check_report_path
@@ -813,9 +827,15 @@ def run_check_stage(
         return None
     from health_tools.api.check_operation import run_check
 
+    check_input = source
+    if source.is_dir() and root is not None and files is not None:
+        check_input = output / "check_input"
+        if check_input.exists():
+            shutil.rmtree(check_input)
+        _copy_files(files, root, check_input)
     result = run_check(
         CheckRequest(
-            input_path=source,
+            input_path=check_input,
             chip_name=chip,
             timestamp_column=request.timestamp_column,
             output_path=output / "check" / "check_report.csv",
@@ -824,6 +844,29 @@ def run_check_stage(
         context=context,
     )
     return result.report_path
+
+
+def _invoke_check_stage(
+    request: AnalyzeRequest,
+    source: Path,
+    chip: Optional[str],
+    output: Path,
+    context: ExecutionContext,
+    root: Path,
+    files: Sequence[Path],
+) -> Optional[Path]:
+    """兼容旧五参数替换函数，并向新版入口传递预发现输入。"""
+    base_args = (request, source, chip, output, context)
+    discovered_args = (root, files)
+    try:
+        stage_signature = signature(run_check_stage)
+    except (TypeError, ValueError):
+        return run_check_stage(*base_args)
+    try:
+        stage_signature.bind(*base_args, *discovered_args)
+    except TypeError:
+        return run_check_stage(*base_args)
+    return run_check_stage(*base_args, *discovered_args)
 
 
 def _merge_psd(record: AnalysisRecord, psd: Dict[str, object], rule) -> None:
@@ -1060,7 +1103,10 @@ def _generate_raw_plots(
 
 
 def _offline_records(
-    request: AnalyzeRequest, source: Path, rule
+    request: AnalyzeRequest,
+    source: Path,
+    rule,
+    vshb_files: Optional[Sequence[Path]] = None,
 ) -> Tuple[List[AnalysisRecord], Set[str]]:
     if "hr_psd" not in rule.detectors:
         raise RequestValidationError("当前 analysis 规则未启用 hr_psd，不能应用心率 PSD 检测")
@@ -1070,9 +1116,10 @@ def _offline_records(
             rule,
             request.accuracy_thresholds,
             request.accuracy_inclusive,
+            vshb_files,
         )
     else:
-        psd_results = analyze_psd_directory(source, rule)
+        psd_results = analyze_psd_directory(source, rule, vshb_files=vshb_files)
     if not psd_results:
         raise RequestValidationError(f"结果目录未找到 _result.vshb: {source}")
     focused = _focus(list(psd_results), request.focus)
@@ -1117,6 +1164,23 @@ def _offline_records(
     return records, focused
 
 
+def _offline_input_view(source: Path, output: Path, vshb_files: Sequence[Path]) -> Path:
+    view = output / "offline_input"
+    if view.exists():
+        shutil.rmtree(view)
+    for vshb in vshb_files:
+        relative = vshb.relative_to(source)
+        target = view / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(vshb, target)
+        base = vshb.stem.replace("_result", "")
+        for extension in ("0.prepsd", ".prepsd", ".accrmspsd", ".accxpsd", ".accypsd", ".acczpsd"):
+            companion = vshb.parent / f"{base}{extension}"
+            if companion.exists():
+                shutil.copy2(companion, target.parent / companion.name)
+    return view
+
+
 def run_analyze(
     request: AnalyzeRequest, *, context: Optional[ExecutionContext] = None
 ) -> AnalyzeResult:
@@ -1128,6 +1192,8 @@ def run_analyze(
     output = Path(request.output_path)
     core_outputs = [
         output / "analysis_summary.json",
+        output / "file_diagnosis.csv",
+        output / "segment_diagnosis.csv",
         output / "analysis_report.md",
         output / "analysis_report.pptx",
     ]
@@ -1141,7 +1207,8 @@ def run_analyze(
     stages = output / "stages"
     figures = output / "figures"
     source_offline_result = request.offline_result_path is not None
-    source_psd_result = source.is_dir() and any(source.rglob("*_result.vshb"))
+    source_psd_files = _vshb_files(source, output)
+    source_psd_result = bool(source_psd_files)
     current_input_artifacts: List[Path] = []
     current_raw_root: Optional[Path] = None
     current_raw_files: List[Path] = []
@@ -1154,7 +1221,7 @@ def run_analyze(
         offline_source = _require_path(offline_result_path)
         current_input_artifacts = [offline_source]
     else:
-        current_input_artifacts = list(source.rglob("*_result.vshb"))
+        current_input_artifacts = source_psd_files
     upstream_stages = ("discover", "check", "raw", "evaluate", "offline", "plot")
     for stage in upstream_stages:
         stage_state = state.state.stages[stage]
@@ -1190,12 +1257,13 @@ def run_analyze(
         offline_source = _require_path(request.offline_result_path)
         records, _ = _offline_records(request, offline_source, rule)
         state.complete("offline", [offline_source])
-    elif source.is_dir() and any(source.rglob("*_result.vshb")):
-        records, _ = _offline_records(request, source, rule)
+    elif source_psd_result:
+        records, _ = _offline_records(request, source, rule, source_psd_files)
         state.complete("offline", [source])
+        offline_view = _offline_input_view(source, output, source_psd_files)
         if _custom_accuracy(request):
             _generate_psd_plots(
-                source,
+                offline_view,
                 records,
                 figures / "psd",
                 ctx,
@@ -1203,7 +1271,7 @@ def run_analyze(
                 request.accuracy_inclusive,
             )
         else:
-            _generate_psd_plots(source, records, figures / "psd", ctx)
+            _generate_psd_plots(offline_view, records, figures / "psd", ctx)
     else:
         if current_raw_root is not None:
             root, raw_files = current_raw_root, current_raw_files
@@ -1220,7 +1288,9 @@ def run_analyze(
         state.start("check", check_fingerprint)
         if check_path is None and chip:
             try:
-                check_path = run_check_stage(request, source, chip, stages, ctx)
+                check_path = _invoke_check_stage(
+                    request, source, chip, stages, ctx, root, raw_files
+                )
                 if check_path:
                     state.complete("check", [check_path], fingerprint=check_fingerprint)
                 else:
