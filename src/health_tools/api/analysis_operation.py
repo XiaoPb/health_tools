@@ -1321,10 +1321,24 @@ def _offline_records(
     records: List[AnalysisRecord] = []
     for name, psd in psd_results.items():
         features = dict(psd)
+        name_path = Path(name)
+        scene_path = name_path if name_path.is_absolute() else source / name_path
+        path_scene = infer_scene(scene_path, source)
         features.setdefault("data_complete", bool(psd.get("available")))
         features.setdefault("signal_saturated", False)
         features.setdefault("signal_flat", False)
-        features.setdefault("scene", psd.get("scene", "unknown"))
+        if request.scene in {"static", "dynamic"}:
+            resolved_scene = request.scene
+        elif path_scene is not None:
+            resolved_scene = path_scene.mode
+        else:
+            resolved_scene = str(psd.get("scene", features.get("scene", "unknown")))
+        features["scene"] = resolved_scene
+        scene_label = (
+            path_scene.label
+            if path_scene
+            else (str(psd["scene_label"]) if psd.get("scene_label") else None)
+        )
         activity = infer_activity(Path(name), request.activity, features)
         features.setdefault("activity", activity)
         decision = diagnose(features, rule)
@@ -1340,10 +1354,8 @@ def _offline_records(
                 file=name,
                 source=str(psd.get("vshb_path", source)),
                 analysis_type=request.analysis_type,
-                scene=str(features.get("scene", "unknown")),
-                scene_label=(
-                    str(features.get("scene_label")) if features.get("scene_label") else None
-                ),
+                scene=resolved_scene,
+                scene_label=scene_label,
                 activity=activity,
                 focused=name in focused,
                 features=features,

@@ -2113,6 +2113,39 @@ def test_offline_records_preserve_actual_accuracy_metric_keys(monkeypatch, tmp_p
     assert records[0].metrics["comparisons"]["online"]["within_7.5"] == 100.0
 
 
+def test_offline_records_explicit_scene_overrides_psd_scene(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation.analyze_psd_directory",
+        lambda *_args, **_kwargs: {
+            "sample.csv": {"available": True, "scene": "static", "raw_valid": True}
+        },
+    )
+    records, _ = _offline_records(
+        AnalyzeRequest(tmp_path, tmp_path / "out", scene="dynamic"),
+        tmp_path,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+    )
+    assert records[0].scene == "dynamic"
+
+
+def test_offline_records_prefer_path_scene_over_psd_scene_and_set_label(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation.analyze_psd_directory",
+        lambda *_args, **_kwargs: {
+            "跑步/a.csv": {"available": True, "scene": "static", "raw_valid": True}
+        },
+    )
+    records, _ = _offline_records(
+        AnalyzeRequest(tmp_path, tmp_path / "out", scene="auto"),
+        tmp_path,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+    )
+    assert records[0].scene == "dynamic"
+    assert records[0].scene_label == "跑步"
+
+
 def test_vshb_accuracy_remains_available_when_psd_files_are_missing(tmp_path: Path):
     source = tmp_path / "result"
     source.mkdir()
