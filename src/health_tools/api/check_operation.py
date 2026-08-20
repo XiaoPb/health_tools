@@ -29,6 +29,7 @@ SORT_CATEGORIES = (
     "acc_warning",
     "timestamp",
     "center",
+    "reference",
     "other",
     "normal",
 )
@@ -56,6 +57,11 @@ def _sort_category(row: Dict[str, str]) -> str:
         return "timestamp"
     if checks["center"] == "FAIL":
         return "center"
+    if (
+        row.get("心率金标(结果)", "").strip().upper() == "FAIL"
+        or row.get("血氧金标(结果)", "").strip().upper() == "FAIL"
+    ):
+        return "reference"
     return "other" if status == "FAIL" else "normal"
 
 

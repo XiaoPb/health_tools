@@ -170,6 +170,7 @@ def check_cmd(
             "acc_warning",
             "timestamp",
             "center",
+            "reference",
             "other",
             "normal",
         )

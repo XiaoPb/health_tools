@@ -152,14 +152,15 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 4. `ACC异常(结果)=WARNING` → `abnormal/acc_warning/`
 5. `时间戳间隔(结果)=FAIL` → `abnormal/timestamp/`
 6. `数据居中(结果)=FAIL` → `abnormal/center/`
-7. 其他 `总异常(结果)=FAIL`（例如 Ipd 转换失败）→ `abnormal/other/`
-8. 其余文件（包括只有 WARNING 的非 ACC 检查项）→ `normal/`
+7. `心率金标(结果)=FAIL` 或 `血氧金标(结果)=FAIL` → `abnormal/reference/`
+8. 其他 `总异常(结果)=FAIL`（例如 Ipd 转换失败）→ `abnormal/other/`
+9. 其余文件（包括只有 WARNING 的非 ACC 检查项）→ `normal/`
 
 例如 `sub/a.csv` 被判定为帧不完整时，目标路径为 `abnormal/frame/sub/a.csv`。如果同一文件同时有多项异常，只按上面的第一项分类；因此帧不完整会优先于数据范围，数据范围优先于 ACC。
 
 报告必须包含 `文件相对路径` 列；旧报告缺少具体检查项列时，会按可识别的列和 `总异常(结果)` 回退到 `abnormal/other/` 或 `normal/`。分拣不会覆盖目标同名文件，源文件不存在、路径非法或目标已存在时记录为跳过。
 
-正常文件生成 `normal_files.csv`，异常文件统一生成一个 `abnormal_files.csv`。异常清单新增 `分类` 列，列出 `frame`、`range`、`acc_fail`、`acc_warning`、`timestamp`、`center` 或 `other`；两个清单都包含文件名、相对路径、目标路径、移动状态、原因和场景分类。
+正常文件生成 `normal_files.csv`，异常文件统一生成一个 `abnormal_files.csv`。异常清单新增 `分类` 列，列出 `frame`、`range`、`acc_fail`、`acc_warning`、`timestamp`、`center`、`reference` 或 `other`；两个清单都包含文件名、相对路径、目标路径、移动状态、原因和场景分类。
 
 ```text
 abnormal_files.csv
