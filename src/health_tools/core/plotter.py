@@ -193,17 +193,24 @@ class DataPlotter:
         if not channels:
             raise SignalAnalysisError("没有有效的绘图列")
 
-        default_height = 3 * len(channels)
+        combined = len(channels) == 2
+        default_height = 3 if combined else 3 * len(channels)
         fig = _new_figure(_fig_size(12, default_height, fig_height, default_height))
         _set_title(fig, file_name)
-        axes = np.atleast_1d(fig.subplots(len(channels), 1, sharex=True))
+        if combined:
+            primary = fig.subplots()
+            axes = np.array([primary, primary.twinx()], dtype=object)
+        else:
+            axes = np.atleast_1d(fig.subplots(len(channels), 1, sharex=True))
 
         for ax, channel in zip(axes, channels):
             if channel in df.columns:
                 data = pd.to_numeric(df[channel], errors="coerce").values
-                ax.plot(_downsample(data), linewidth=0.5)
+                ax.plot(_downsample(data), linewidth=0.5, label=channel)
                 ax.set_ylabel(channel)
                 ax.grid(True, alpha=0.3)
+                if combined:
+                    ax.legend(loc="upper right")
 
         axes[-1].set_xlabel("Sample")
         fig.tight_layout(rect=(0, 0, 1, 0.96) if file_name else None)

@@ -287,6 +287,26 @@ def test_plot_time_filters_zero_columns_and_adds_filename_title(monkeypatch, tmp
     assert all("ZERO" not in axis.get_ylabel() for axis in figure.axes)
 
 
+def test_plot_time_combines_two_channels_with_independent_y_axes(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+
+    DataPlotter(sample_rate=10).plot_time(
+        _analysis_df(),
+        tmp_path / "time.png",
+        ["CH0", "CH1"],
+        file_name="sample.csv",
+    )
+
+    figure = saved[0]
+    assert len(figure.axes) == 2
+    assert [line.get_label() for line in figure.axes[0].lines] == ["CH0"]
+    assert [line.get_label() for line in figure.axes[1].lines] == ["CH1"]
+    assert figure.axes[0].get_ylabel() == "CH0"
+    assert figure.axes[1].get_ylabel() == "CH1"
+    assert figure.axes[0].get_shared_x_axes().joined(figure.axes[0], figure.axes[1])
+
+
 def test_plot_chip_stft_separates_file_and_base_titles(monkeypatch, tmp_path: Path):
     saved = []
     original_savefig = Figure.savefig
