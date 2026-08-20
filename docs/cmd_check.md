@@ -16,7 +16,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 |------|------|
 | `-i/--input` | 输入 CSV 文件或目录，普通检查模式必需 |
 | `-c/--chip` | 芯片型号，不指定则尝试从 CSV info 行自动识别 |
-| `--checks` | 指定检查项：`range,ipd,frame,center,acc,agc`，默认全部 |
+| `--checks` | 指定检查项：`range,ipd,frame,center,acc,agc,ref`，默认全部 |
 | `--tolerance` | Ipd 转换误差容忍度，单位 pA，默认 50 |
 | `--static-min` | ACC 静止检测最小连续帧数，默认 5 |
 | `--range-ratio` | 数据范围异常允许比例，默认 1% |
@@ -30,6 +30,11 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--timestamp-ms` | 时间戳间隔固定毫秒容差 |
 | `--timestamp-fail-ratio` | 时间戳异常间隔允许比例，默认 1% |
 | `--timestamp-base-ms` | 指定期望相邻时间戳间隔（毫秒）；统计基准相对它偏差超过 20% 时为 FAIL |
+| `--ref-hr-column` | 指定心率金标列名；指定后启用心率金标检查 |
+| `--ref-spo2-column` | 指定血氧金标列名；指定后启用血氧金标检查 |
+| `--ref-sample-rate` | 金标采样率（Hz），默认 25 |
+| `--ref-stale-seconds` | 金标连续不变判定时长（秒），默认 5 |
+| `--ref-step-threshold` | 金标相邻值阶跃阈值，默认 8；绝对变化严格大于该值判定阶跃 |
 | `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，未匹配时为 `default` |
 | `-o/--output` | 检查报告 CSV 输出路径，默认 `<path>/check_report.csv` |
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
@@ -109,6 +114,24 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 
 指定 `--timestamp-base-ms` 时，还会比较统计基准与期望基准；相对偏差严格大于 `20%` 直接 `FAIL`，等于 `20%` 不失败。
 
+### 金标数据（`--ref-hr-column`、`--ref-spo2-column`）
+
+只有显式指定对应列名时才会启动金标检查。指定 `--checks` 时使用 `ref` 检查项；未指定
+`--checks` 时，只要指定金标列名也会自动检查。
+
+心率金标有效范围为 `30-240`，血氧金标有效范围为 `70-100`，边界值正常。`0` 表示当前
+时间没有金标数据，不参与范围、阶跃和静止判断；非零样本占比低于 `70%` 时金标异常。
+
+阶跃和静止是两种独立异常：
+
+- 阶跃：相邻有效金标值的绝对变化严格大于 `--ref-step-threshold`，默认 `8`。
+- 静止：连续相同有效值的帧数严格大于
+  `--ref-sample-rate × --ref-stale-seconds`，默认 `25 × 5 = 125` 帧。
+
+任一条件异常都会使对应的“心率金标”或“血氧金标”检查项为 `FAIL`。主报告摘要会写明
+范围异常数、非零占比、阶跃次数和最长静止帧；`check_report_compact.csv` 也会同步写入这些
+指标及阈值列。
+
 ## 检查结果
 
 每个检查项输出三态：
@@ -166,6 +189,12 @@ ghealth_tool check -i data/ --scene-regex "subject\\d+_(?P<scene>rest|motion)_"
 
 # 把 ACC 单轴异常也计入结果
 ghealth_tool check -i data/ --checks acc --acc-axis
+
+# 检查心率和血氧金标
+ghealth_tool check -i data/ --ref-hr-column REF_HR --ref-spo2-column REF_SPO2
+
+# 使用 50 Hz 数据和可配置阶跃阈值
+ghealth_tool check -i data/ --ref-hr-column hr_ref --ref-sample-rate 50 --ref-step-threshold 6
 
 # 按检查报告分拣
 ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/

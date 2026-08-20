@@ -453,6 +453,91 @@ class DataChecker:
             "AGC调光", True, "已统计 AGC 相邻变化", status="PASS", channel_metrics=metrics
         )
 
+    def check_reference_data(
+        self,
+        df: pd.DataFrame,
+        column: str,
+        reference_type: str,
+        sample_rate: float = 25.0,
+        stale_seconds: float = 5.0,
+        step_threshold: float = 8.0,
+    ) -> CheckResult:
+        """检查心率/血氧金标的范围、有效率、阶跃和静止异常。"""
+        name_map = {"hr": "心率金标", "spo2": "血氧金标"}
+        range_map = {"hr": (30.0, 240.0), "spo2": (70.0, 100.0)}
+        name = name_map.get(reference_type, "金标")
+        if reference_type not in range_map:
+            return CheckResult(name, False, f"不支持的金标类型: {reference_type}")
+        if (
+            not np.isfinite(sample_rate)
+            or sample_rate <= 0
+            or not np.isfinite(stale_seconds)
+            or stale_seconds <= 0
+            or not np.isfinite(step_threshold)
+            or step_threshold < 0
+        ):
+            return CheckResult(name, False, "金标检测参数无效")
+        if column not in df.columns:
+            return CheckResult(name, False, f"未找到金标列: {column}")
+
+        values = pd.to_numeric(df[column], errors="coerce")
+        total_count = int(len(values))
+        finite = np.isfinite(values.to_numpy(dtype=float, na_value=np.nan))
+        finite_values = values[finite]
+        if total_count == 0 or finite_values.empty:
+            return CheckResult(name, False, "金标列没有有效数值")
+
+        low, high = range_map[reference_type]
+        range_mask = (~finite) | (
+            values.notna() & values.ne(0) & ((values < low) | (values > high))
+        )
+        range_count = int(range_mask.sum())
+        zero_count = int((values == 0).fillna(False).sum())
+        nonzero_ratio = (total_count - zero_count) / total_count * 100
+
+        valid_pairs = values.notna() & values.shift().notna() & values.ne(0) & values.shift().ne(0)
+        step_mask = valid_pairs & (values.diff().abs() > step_threshold)
+        step_count = int(step_mask.sum())
+
+        valid_values = values.where(values.ne(0))
+        groups = valid_values.ne(valid_values.shift()).cumsum()
+        run_lengths = valid_values.notna().groupby(groups).sum()
+        longest_run = int(run_lengths.max()) if not run_lengths.empty else 0
+        stale_limit = sample_rate * stale_seconds
+        stale = longest_run > stale_limit
+
+        metrics = {
+            column: {
+                "total_count": float(total_count),
+                "range_abnormal_count": float(range_count),
+                "nonzero_ratio": float(nonzero_ratio),
+                "zero_count": float(zero_count),
+                "step_count": float(step_count),
+                "step_threshold": float(step_threshold),
+                "longest_static_frames": float(longest_run),
+                "static_frame_threshold": float(stale_limit),
+            }
+        }
+        reasons = []
+        if range_count:
+            reasons.append(f"{range_count} 个值超出范围 {low:g}-{high:g}")
+        if nonzero_ratio < 70.0:
+            reasons.append(f"非零占比 {nonzero_ratio:.2f}% 低于 70%")
+        if step_count:
+            reasons.append(f"发现 {step_count} 次阶跃（阈值>{step_threshold:g}）")
+        if stale:
+            reasons.append(
+                f"最长静止 {longest_run} 帧，超过 {stale_limit:g} 帧（{stale_seconds:g} 秒）"
+            )
+        summary = "；".join(reasons) if reasons else "金标数据正常"
+        return CheckResult(
+            name,
+            not reasons,
+            summary,
+            status="FAIL" if reasons else "PASS",
+            channel_metrics=metrics,
+        )
+
     def check_timestamp_interval(
         self,
         df: pd.DataFrame,

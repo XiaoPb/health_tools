@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)，不指定则自动识别")
 @click.option(
     "--checks",
-    help="指定检查项 (逗号分隔: range,ipd,frame,center,acc,agc)，默认全部",
+    help="指定检查项 (逗号分隔: range,ipd,frame,center,acc,agc,ref)，默认全部",
 )
 @click.option("--tolerance", type=int, default=50, help="Ipd转换误差容忍度 (pA, 默认50)")
 @click.option("--static-min", type=int, default=5, help="ACC静止检测最小连续帧数 (默认5)")
@@ -43,6 +43,29 @@ if TYPE_CHECKING:
     type=float,
     default=None,
     help="指定期望时间戳间隔基准 (毫秒)，偏差超过20%则FAIL",
+)
+@click.option("--ref-hr-column", help="心率金标列名；指定后启用心率金标检查")
+@click.option("--ref-spo2-column", help="血氧金标列名；指定后启用血氧金标检查")
+@click.option(
+    "--ref-sample-rate",
+    type=click.FloatRange(min=0.0, min_open=True),
+    default=25.0,
+    show_default=True,
+    help="金标采样率（Hz）",
+)
+@click.option(
+    "--ref-stale-seconds",
+    type=click.FloatRange(min=0.0, min_open=True),
+    default=5.0,
+    show_default=True,
+    help="金标连续不变判定时长（秒）",
+)
+@click.option(
+    "--ref-step-threshold",
+    type=click.FloatRange(min=0.0),
+    default=8.0,
+    show_default=True,
+    help="金标阶跃相邻变化阈值",
 )
 @click.option(
     "--scene-regex",
@@ -82,6 +105,11 @@ def check_cmd(
     timestamp_ms: Optional[float],
     timestamp_fail_ratio: float,
     timestamp_base_ms: Optional[float],
+    ref_hr_column: Optional[str],
+    ref_spo2_column: Optional[str],
+    ref_sample_rate: float,
+    ref_stale_seconds: float,
+    ref_step_threshold: float,
     scene_regex: Optional[str],
     output_path: Optional[str],
     sort_report: bool,
@@ -114,6 +142,11 @@ def check_cmd(
                     timestamp_ms=timestamp_ms,
                     timestamp_fail_ratio=timestamp_fail_ratio,
                     timestamp_base_ms=timestamp_base_ms,
+                    ref_hr_column=ref_hr_column,
+                    ref_spo2_column=ref_spo2_column,
+                    ref_sample_rate=ref_sample_rate,
+                    ref_stale_seconds=ref_stale_seconds,
+                    ref_step_threshold=ref_step_threshold,
                     scene_regex=scene_regex,
                     output_path=Path(output_path) if output_path else None,
                     sort_report=sort_report,
@@ -181,6 +214,8 @@ def _check_rule_mismatch(
     timestamp_column: Optional[str] = None,
     chip: str = "",
     require_acc_columns: bool = False,
+    ref_hr_column: Optional[str] = None,
+    ref_spo2_column: Optional[str] = None,
 ) -> str:
     """检查CSV列结构是否满足本次启用的检查项，不匹配则返回跳过原因。"""
     missing: List[str] = []
@@ -202,6 +237,11 @@ def _check_rule_mismatch(
         missing.append("ACC列")
     if timestamp_column and timestamp_column not in df.columns:
         missing.append(f"时间戳列 {timestamp_column}")
+    if "ref" in check_set:
+        if ref_hr_column and ref_hr_column not in df.columns:
+            missing.append(f"心率金标列 {ref_hr_column}")
+        if ref_spo2_column and ref_spo2_column not in df.columns:
+            missing.append(f"血氧金标列 {ref_spo2_column}")
 
     if not missing:
         return ""
