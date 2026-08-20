@@ -173,6 +173,8 @@ def _request_key(request: AnalyzeRequest, source: Path) -> Dict[str, object]:
         "offline_result": str(request.offline_result_path or ""),
         "figure_paths": tuple(str(path) for path in request.figure_paths),
         "activity": request.activity,
+        "classify_rule": request.classify_rule or "",
+        "classify": tuple(request.classify),
     }
 
 
