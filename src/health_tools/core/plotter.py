@@ -105,6 +105,8 @@ def crop_time_range(
     if df.empty:
         return df
     total_duration = len(df) / sample_rate
+    if start >= total_duration or end <= 0:
+        return df.copy()
     requested_duration = end - start
     duration = max(requested_duration, min_duration)
     if duration >= total_duration:

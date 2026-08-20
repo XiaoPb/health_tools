@@ -370,6 +370,10 @@ def test_crop_time_range_out_of_file_range_returns_full_copy():
     assert cropped.index.tolist() == df.index.tolist()
     assert cropped is not df
 
+    tail_outside = crop_time_range(df, sample_rate=10, time_range=(11.0, 12.0), min_duration=4.0)
+    assert tail_outside.index.tolist() == df.index.tolist()
+    assert tail_outside is not df
+
 
 def test_limit_report_time_range_only_limits_25hz():
     assert limit_report_time_range((0.0, 20.0), sample_rate=25) == (5.0, 15.0)
