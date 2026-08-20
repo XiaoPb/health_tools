@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -16,6 +18,47 @@ from health_tools.rules.loader import RuleLoader
 from health_tools.utils.csv_handler import CSVHandler
 
 ACTIVITIES = ("auto", "rest", "walk", "run", "cycle", "strength", "interval", "recovery", "other")
+
+SCENE_ALIASES = {
+    "static": "static",
+    "静息": "static",
+    "静止": "static",
+    "dynamic": "dynamic",
+    "运动": "dynamic",
+    "跑步": "dynamic",
+    "步行": "dynamic",
+    "骑行": "dynamic",
+    "恢复": "dynamic",
+}
+
+
+@dataclass(frozen=True)
+class ScenePathInfo:
+    """从数据文件目录解析出的场景展示名及规范化模式。"""
+
+    label: str
+    mode: str
+
+
+def infer_scene(path: Path, root: Path) -> Optional[ScenePathInfo]:
+    """从 root 下数据文件的目录结构推断场景。
+
+    仅识别内置场景别名，按距离文件最近的目录优先；文件不在 root 下时返回 None。
+    """
+    try:
+        # 统一分隔符，兼容外部传入的 Windows 风格路径字符串。
+        normalized_path = Path(str(path).replace("\\", os.sep))
+        normalized_root = Path(str(root).replace("\\", os.sep))
+        relative = normalized_path.resolve().relative_to(normalized_root.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return None
+    directories = list(relative.parts[:-1])
+    for part in reversed(directories):
+        label = part.strip()
+        mode = SCENE_ALIASES.get(label.lower())
+        if mode:
+            return ScenePathInfo(label=label, mode=mode)
+    return None
 
 
 def infer_activity(

@@ -33,6 +33,7 @@ class AnalysisRecord:
     figure: Optional[str] = None
     secondary_figure: Optional[str] = None
     plot_data: Dict[str, Any] = field(default_factory=dict, repr=False)
+    scene_label: Optional[str] = None
 
     @property
     def abnormal(self) -> bool:

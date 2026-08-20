@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import health_tools.api.analysis_operation as analysis_operation
 import health_tools.core.analysis.raw as raw_analysis
 import health_tools.core.analysis.reporting as analysis_reporting
 from health_tools.api import AnalyzeRequest, RequestValidationError, run_analyze
@@ -19,6 +20,8 @@ from health_tools.api.analysis_operation import (
     _generate_raw_plots,
     _offline_records,
     _raw_files,
+    _raw_records,
+    _records_from_payload,
     _run_supporting_stages,
 )
 from health_tools.api.context import ExecutionContext
@@ -27,7 +30,12 @@ from health_tools.core.analysis.conditions import matches
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord
 from health_tools.core.analysis.psd import analyze_psd_directory
-from health_tools.core.analysis.raw import analyze_raw_file, infer_activity
+from health_tools.core.analysis.raw import (
+    ScenePathInfo,
+    analyze_raw_file,
+    infer_activity,
+    infer_scene,
+)
 from health_tools.core.analysis.reference import analyze_reference
 from health_tools.core.analysis.reporting import (
     _accuracy_rows,
@@ -71,6 +79,181 @@ causes:
     priority: 50
     when: {feature: algorithm_abnormal, op: eq, value: true}
 """
+
+
+@pytest.mark.parametrize(
+    ("relative", "expected_label", "expected_mode"),
+    [
+        ("静息/张三/a.csv", "静息", "static"),
+        ("跑步/a.csv", "跑步", "dynamic"),
+        ("张三/恢复/a.csv", "恢复", "dynamic"),
+    ],
+)
+def test_infer_scene_from_supported_directory_layouts(
+    tmp_path: Path, relative: str, expected_label: str, expected_mode: str
+):
+    root = tmp_path / "root"
+    source = root.joinpath(*relative.split("/"))
+
+    result = infer_scene(source, root)
+
+    assert result == ScenePathInfo(label=expected_label, mode=expected_mode)
+
+
+def test_infer_scene_uses_nearest_scene_directory_and_does_not_guess_person(tmp_path: Path):
+    root = tmp_path / "root"
+    source = root / "静息" / "跑步" / "张三" / "a.csv"
+
+    result = infer_scene(source, root)
+
+    assert result == ScenePathInfo(label="跑步", mode="dynamic")
+    assert infer_scene(root / "张三" / "unknown" / "a.csv", root) is None
+
+
+def test_infer_scene_handles_root_file_and_unrelated_root(tmp_path: Path):
+    root = tmp_path / "root"
+
+    assert infer_scene(root / "a.csv", root) is None
+    assert infer_scene(tmp_path / "other" / "a.csv", root) is None
+
+
+def test_infer_scene_normalizes_windows_separators(tmp_path: Path):
+    root = tmp_path / "root"
+    source = root / "跑步" / "a.csv"
+
+    result = infer_scene(Path(str(source).replace("/", "\\")), Path(str(root).replace("/", "\\")))
+
+    assert result == ScenePathInfo(label="跑步", mode="dynamic")
+
+
+def test_analysis_record_scene_label_is_optional():
+    record = AnalysisRecord("a.csv", "a.csv", "hr", scene="dynamic", scene_label="跑步")
+
+    assert record.scene == "dynamic"
+    assert record.scene_label == "跑步"
+
+
+def test_analysis_record_preserves_existing_positional_arguments():
+    plot_data = {"columns": ["CH0", "CH1"]}
+    record = AnalysisRecord(
+        "a.csv",
+        "a.csv",
+        "hr",
+        "dynamic",
+        "run",
+        True,
+        {"raw_valid": True},
+        {"mae": 1.0},
+        [],
+        {"peak": 1.2},
+        {"id": "algorithm"},
+        "疑似算法问题",
+        0.8,
+        ["note"],
+        ["warning"],
+        "main.png",
+        "secondary.png",
+        plot_data,
+    )
+
+    assert record.plot_data is plot_data
+    assert record.scene_label is None
+
+
+def test_raw_records_prefers_explicit_scene_then_path_scene(tmp_path: Path, monkeypatch):
+    root = tmp_path / "root"
+    csv_path = root / "跑步" / "张三" / "a.csv"
+    _write_csv(csv_path)
+
+    def fake_analyze(*args, **kwargs):
+        return (
+            {
+                "features": {"scene": "static", "activity": "rest"},
+                "metrics": {},
+                "segments": [],
+            },
+            pd.DataFrame({"time": [0.0], "PPG": [1.0]}),
+            None,
+        )
+
+    monkeypatch.setattr(analysis_operation, "analyze_raw_file", fake_analyze)
+    monkeypatch.setattr(analysis_operation, "_plot_data", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        analysis_operation,
+        "diagnose",
+        lambda features, rule: {
+            "cause": None,
+            "conclusion": "未发现异常",
+            "confidence": 1.0,
+            "evidence": "ok",
+        },
+    )
+    request = AnalyzeRequest(
+        input_path=root, output_path=tmp_path / "out", scene="auto", report="markdown"
+    )
+    context = ExecutionContext()
+    rule = type("Rule", (), {"columns": {}})()
+    records, *_ = _raw_records(request, root, rule, context, root=root, files=[csv_path])
+    assert records[0].scene == "dynamic"
+    assert records[0].scene_label == "跑步"
+
+    request = replace(request, scene="static")
+    records, *_ = _raw_records(request, root, rule, context, root=root, files=[csv_path])
+    assert records[0].scene == "static"
+    assert records[0].scene_label == "跑步"
+
+
+def test_payload_scene_label_round_trip_and_legacy_fallback():
+    records = _records_from_payload(
+        [
+            {"file": "run/a.csv", "source": "a.csv", "scene": "dynamic", "scene_label": "跑步"},
+            {"file": "rest/a.csv", "source": "a.csv", "scene": "static"},
+        ]
+    )
+    assert records[0].scene_label == "跑步"
+    assert records[1].scene_label is None
+
+
+def test_structured_and_markdown_include_scene_label(tmp_path: Path):
+    record = AnalysisRecord(
+        "跑步/a.csv",
+        "a.csv",
+        "hr",
+        scene="dynamic",
+        scene_label="跑步",
+        conclusion="未发现异常",
+    )
+    summary, detail, _ = write_structured([record], tmp_path / "structured")
+    payload = json.loads(summary.read_text(encoding="utf-8"))
+    assert payload[0]["scene_label"] == "跑步"
+    assert "scene_label" in detail.read_text(encoding="utf-8-sig").splitlines()[0]
+    markdown = write_markdown([record], tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "- 场景：跑步" in markdown
+
+
+def test_ppt_detail_title_prefers_scene_label(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    output = write_ppt(
+        [
+            AnalysisRecord(
+                "跑步/a.csv",
+                "a.csv",
+                "hr",
+                scene="dynamic",
+                scene_label="跑步",
+                activity="other",
+                focused=True,
+                conclusion="未发现异常",
+            )
+        ],
+        tmp_path / "report.pptx",
+    )
+    deck = Presentation(str(output))
+    assert any(
+        any(getattr(shape, "text", "") == "跑步" for shape in slide.shapes) for slide in deck.slides
+    )
 
 
 def _write_csv(path: Path, error: float = 0.0) -> None:
@@ -1928,6 +2111,39 @@ def test_offline_records_preserve_actual_accuracy_metric_keys(monkeypatch, tmp_p
 
     assert records[0].metrics["within_2.5"] == 100.0
     assert records[0].metrics["comparisons"]["online"]["within_7.5"] == 100.0
+
+
+def test_offline_records_explicit_scene_overrides_psd_scene(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation.analyze_psd_directory",
+        lambda *_args, **_kwargs: {
+            "sample.csv": {"available": True, "scene": "static", "raw_valid": True}
+        },
+    )
+    records, _ = _offline_records(
+        AnalyzeRequest(tmp_path, tmp_path / "out", scene="dynamic"),
+        tmp_path,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+    )
+    assert records[0].scene == "dynamic"
+
+
+def test_offline_records_prefer_path_scene_over_psd_scene_and_set_label(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation.analyze_psd_directory",
+        lambda *_args, **_kwargs: {
+            "跑步/a.csv": {"available": True, "scene": "static", "raw_valid": True}
+        },
+    )
+    records, _ = _offline_records(
+        AnalyzeRequest(tmp_path, tmp_path / "out", scene="auto"),
+        tmp_path,
+        RuleLoader.load_analysis_rule("analysis_hr.yaml"),
+    )
+    assert records[0].scene == "dynamic"
+    assert records[0].scene_label == "跑步"
 
 
 def test_vshb_accuracy_remains_available_when_psd_files_are_missing(tmp_path: Path):

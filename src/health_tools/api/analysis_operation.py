@@ -37,7 +37,12 @@ from health_tools.core.analysis.artifacts import ArtifactIndex
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord, AnalysisSegment
 from health_tools.core.analysis.psd import analyze_psd_directory
-from health_tools.core.analysis.raw import analyze_raw_file, detect_chip, infer_activity
+from health_tools.core.analysis.raw import (
+    analyze_raw_file,
+    detect_chip,
+    infer_activity,
+    infer_scene,
+)
 from health_tools.core.analysis.reporting import (
     write_evidence_figure,
     write_markdown,
@@ -251,6 +256,7 @@ def _records_from_payload(values: Sequence[Mapping[str, Any]]) -> List[AnalysisR
                 source=str(value.get("source", "")),
                 analysis_type=str(value.get("analysis_type", "hr")),
                 scene=str(value.get("scene", "unknown")),
+                scene_label=(str(value["scene_label"]) if value.get("scene_label") else None),
                 activity=str(value.get("activity", "other")),
                 focused=bool(value.get("focused", False)),
                 features=dict(value.get("features", {})),
@@ -746,12 +752,21 @@ def _raw_records(
                 )
             features = result["features"]
             features.update(result["metrics"])
+            path_scene = infer_scene(path, root)
+            if request.scene in {"static", "dynamic"}:
+                resolved_scene = request.scene
+            elif path_scene is not None:
+                resolved_scene = path_scene.mode
+            else:
+                resolved_scene = str(features.get("scene", "unknown"))
+            features["scene"] = resolved_scene
             decision = diagnose(features, rule)
             record = AnalysisRecord(
                 file=name,
                 source=str(path),
                 analysis_type=request.analysis_type,
-                scene=str(features.get("scene", "unknown")),
+                scene=resolved_scene,
+                scene_label=path_scene.label if path_scene else None,
                 activity=str(features.get("activity", "other")),
                 focused=name in focused,
                 features=features,
@@ -777,6 +792,8 @@ def _raw_records(
                 file=name,
                 source=str(path),
                 analysis_type=request.analysis_type,
+                scene=(request.scene if request.scene in {"static", "dynamic"} else "unknown"),
+                scene_label=(infer_scene(path, root).label if infer_scene(path, root) else None),
                 focused=name in focused,
                 conclusion="证据不足",
                 features=(
@@ -888,6 +905,8 @@ def _merge_psd(record: AnalysisRecord, psd: Dict[str, object], rule) -> None:
         record.features["reference_valid"] = False
     merged_warnings = [*record.warnings, *_polar_warnings(psd)]
     record.warnings = list(dict.fromkeys(merged_warnings))
+    if record.scene_label is None and psd.get("scene_label"):
+        record.scene_label = str(psd["scene_label"])
     comparisons = psd.get("comparisons")
     if isinstance(comparisons, dict):
         record.metrics["comparisons"] = comparisons
@@ -1302,10 +1321,24 @@ def _offline_records(
     records: List[AnalysisRecord] = []
     for name, psd in psd_results.items():
         features = dict(psd)
+        name_path = Path(name)
+        scene_path = name_path if name_path.is_absolute() else source / name_path
+        path_scene = infer_scene(scene_path, source)
         features.setdefault("data_complete", bool(psd.get("available")))
         features.setdefault("signal_saturated", False)
         features.setdefault("signal_flat", False)
-        features.setdefault("scene", psd.get("scene", "unknown"))
+        if request.scene in {"static", "dynamic"}:
+            resolved_scene = request.scene
+        elif path_scene is not None:
+            resolved_scene = path_scene.mode
+        else:
+            resolved_scene = str(psd.get("scene", features.get("scene", "unknown")))
+        features["scene"] = resolved_scene
+        scene_label = (
+            path_scene.label
+            if path_scene
+            else (str(psd["scene_label"]) if psd.get("scene_label") else None)
+        )
         activity = infer_activity(Path(name), request.activity, features)
         features.setdefault("activity", activity)
         decision = diagnose(features, rule)
@@ -1321,7 +1354,8 @@ def _offline_records(
                 file=name,
                 source=str(psd.get("vshb_path", source)),
                 analysis_type=request.analysis_type,
-                scene=str(features.get("scene", "unknown")),
+                scene=resolved_scene,
+                scene_label=scene_label,
                 activity=activity,
                 focused=name in focused,
                 features=features,
