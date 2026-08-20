@@ -186,6 +186,113 @@ git commit -m "feat: 统一绘图文件名标题" -m "Co-Authored-By: Codex Opus
 
 提交前确认不包含已有的 `src/health_tools/templates/analysis_report.pptx` 修改或临时锁文件。
 
+### Task 6: 统一支持时间范围裁剪和按类型设置最小时间宽度
+
+**Files:**
+- Modify: `src/health_tools/api/models.py:237-264`
+- Modify: `src/health_tools/commands/plot.py:20-115`
+- Modify: `src/health_tools/api/file_operations.py:879-1045`
+- Modify: `src/health_tools/core/plotter.py:118-325`
+- Modify: `src/health_tools/core/stft.py:275-428`
+- Modify: `docs/cmd_plot.md`
+- Test: `tests/test_plotter.py`, `tests/test_progress.py`, `tests/test_api_contract.py`
+
+- [ ] **Step 1: 定义公共时间范围参数和语义测试**
+
+在 `PlotRequest` 增加可选的 `time_range: Optional[Tuple[float, float]] = None`，CLI 增加：
+
+```text
+--time-range START-END    按秒指定绘图时间范围；未指定时使用完整数据
+```
+
+范围使用左闭右开区间 `[start, end)`，要求 `0 <= start < end`；解析失败、负数或反向范围返回 `RequestValidationError`。新增 `tests/test_api_contract.py` 测试默认值为 `None`，并覆盖非法范围。
+
+- [ ] **Step 2: 定义统一裁剪函数并写失败测试**
+
+在 `src/health_tools/core/plotter.py` 增加可复用函数：
+
+```python
+def crop_time_range(
+    df: pd.DataFrame,
+    sample_rate: float,
+    time_range: Optional[Tuple[float, float]],
+    min_duration: float,
+) -> pd.DataFrame:
+    """按秒裁剪数据；短于最小时长时以区间中心扩展并限制在数据边界内。"""
+```
+
+行为固定为：
+
+1. `time_range is None` 时从 0 秒开始使用完整数据，但不人为补充数据。
+2. 指定区间时先按采样率转换为行索引，裁剪所有绘图列；时间轴从裁剪起点重新归零。
+3. 指定区间短于该绘图类型最小时长时，以请求区间中心向两侧扩展到最小宽度；超出数据边界时平移区间，仍保持最小宽度。
+4. 原始数据总时长小于最小宽度时使用全部可用数据，不插值、不重复拼接。
+
+在 `tests/test_plotter.py` 增加测试，断言裁剪后的首尾时间、行数和中心扩展结果；再断言不指定范围时数据长度不变。
+
+- [ ] **Step 3: 固化不同绘图类型的最小时间宽度**
+
+在 `plotter.py` 定义集中常量，避免散落 magic number：
+
+```python
+MIN_PLOT_DURATION_SECONDS = {
+    "time": 10.0,
+    "freq": 5.0,
+    "ac": 10.0,
+    "fft": 5.0,
+    "spectrogram": 10.0,
+    "stft": 25.0,
+}
+```
+
+说明：`stft` 默认最小宽度与现有 25 秒窗口一致；实际裁剪宽度使用 `max(类型最小值, request.window)`。若调用者明确指定更大的时间范围，使用调用者范围，不强行缩短。
+
+- [ ] **Step 4: 将裁剪应用到普通图和 AC/FFT**
+
+在 API 的 `_plot_one` 中先按 `request.plot_type` 选择最小宽度并得到裁剪后的 `frame`，再传给 `time`、`freq`、`ac`、`fft`。`both` 模式分别使用 `time` 的最小宽度；因为两个图共享同一数据文件但不是同一绘图类型，计划中固定以 `time` 的 10 秒最小宽度裁剪，保证输出对齐。
+
+新增测试覆盖：
+
+```python
+PlotRequest(..., plot_type="ac", time_range=(100.0, 102.0))
+```
+
+验证 AC 实际收到扩展后的至少 10 秒数据；FFT/freq 验证至少 5 秒；数据不足时验证不报错且只使用全部数据。
+
+- [ ] **Step 5: 将裁剪应用到 STFT 和 spectrogram**
+
+`plot_stft`、多通道 STFT、芯片自动 STFT 和 spectrogram 使用相同的秒级裁剪结果；STFT 的最小宽度为 `max(25.0, window)`，确保现有 STFT 计算窗口不会因为过短数据失败。裁剪后时间轴从 0 秒重新开始，但文件名标题和通道标题保持不变。
+
+新增测试断言单通道、多通道和芯片自动 STFT 收到的有效行数符合裁剪区间与最小宽度规则。
+
+- [ ] **Step 6: 完成 CLI/API 校验和文档**
+
+在 `commands/plot.py` 解析 `START-END` 为浮点二元组，在 `run_plot` 中统一校验并传递；更新 `docs/cmd_plot.md`，说明：
+
+- 时间单位为秒，区间左闭右开；
+- 未指定时绘制全部数据；
+- 短区间会按图类型自动扩展到最小时间宽度；
+- 原始数据不足最小宽度时使用全部可用数据；
+- `psd` 输入是离线目录，不参与 CSV 时间范围裁剪。
+
+- [ ] **Step 7: 运行时间范围回归测试**
+
+运行：
+
+```bash
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'; pytest -q tests/test_plotter.py tests/test_progress.py tests/test_api_contract.py -k "time_range or duration or plot"
+```
+
+预期：新增范围解析、裁剪、最小宽度和 API/CLI 传递测试通过，既有绘图测试不回退。
+
+- [ ] **Step 8: 将时间范围纳入最终验证和提交**
+
+在 Task 5 的 Black、Ruff、compileall、全量 pytest 和 `git diff --check` 之前，确认 Task 6 涉及文件已加入暂存列表；提交信息改为：
+
+```bash
+git commit -m "feat: 统一绘图标题与时间范围" -m "Co-Authored-By: Codex Opus 4.6 <noreply@anthropic.com>"
+```
+
 ---
 
 ## Self-Review Checklist
@@ -196,3 +303,6 @@ git commit -m "feat: 统一绘图文件名标题" -m "Co-Authored-By: Codex Opus
 - [ ] 旧绘图方法调用和测试替身保持兼容。
 - [ ] 每个实现步骤都有对应的失败测试、通过测试和验证命令。
 - [ ] 没有引入新的 CLI 选项，也不改变输出文件名。
+- [ ] 时间范围使用秒级 `[start, end)`，并统一应用于普通图、AC、FFT、STFT 和 spectrogram。
+- [ ] 各绘图类型的最小时间宽度集中定义，短区间扩展且不超出数据边界。
+- [ ] PSD 目录绘图明确排除在 CSV 时间范围裁剪之外。
