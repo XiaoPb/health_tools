@@ -16,6 +16,29 @@ def test_index_matches_selected_csv_to_existing_png_by_relative_stem(tmp_path: P
     assert index.figure_for("dynamic/sample.csv") == png_file
 
 
+def test_fallback_png_matching_preserves_relative_directory_for_duplicate_stems(tmp_path: Path):
+    source = tmp_path / "data"
+    first_csv = source / "a" / "same.csv"
+    second_csv = source / "b" / "same.csv"
+    first_csv.parent.mkdir(parents=True)
+    second_csv.parent.mkdir(parents=True)
+    first_csv.write_text("A\n1\n", encoding="utf-8")
+    second_csv.write_text("A\n2\n", encoding="utf-8")
+
+    figures = tmp_path / "figures"
+    first_png = figures / "a" / "same_time.png"
+    second_png = figures / "b" / "same_time.png"
+    first_png.parent.mkdir(parents=True)
+    second_png.parent.mkdir(parents=True)
+    first_png.write_bytes(b"png")
+    second_png.write_bytes(b"png")
+
+    index = ArtifactIndex.build([first_csv, second_csv], [figures])
+
+    assert index.figures_for("a/same.csv") == (first_png,)
+    assert index.figures_for("b/same.csv") == (second_png,)
+
+
 def test_index_ranks_time_before_psd_and_keeps_secondary(tmp_path: Path):
     csv_file = tmp_path / "sample.csv"
     csv_file.write_text("A\n1\n", encoding="utf-8")
@@ -74,6 +97,29 @@ def test_report_relative_path_wins_over_duplicate_file_names(tmp_path: Path):
 
     assert list(index.items) == ["b/same.csv"]
     assert index.items["b/same.csv"].csv_path == second
+
+
+def test_report_relative_csv_path_prefers_input_file_over_same_cwd_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = tmp_path / "data"
+    input_csv = source / "same.csv"
+    input_csv.parent.mkdir(parents=True)
+    input_csv.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+    cwd_csv = tmp_path / "same.csv"
+    cwd_csv.write_text("Ipd0,Ipd1\n9,9\n", encoding="utf-8")
+    report = tmp_path / "reports" / "check_report.csv"
+    report.parent.mkdir()
+    import pandas as pd
+
+    pd.DataFrame({"文件相对路径": ["same.csv"], "总异常(结果)": ["FAIL"]}).to_csv(
+        report, index=False, encoding="utf-8-sig"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    index = ArtifactIndex.build([input_csv], check_report=report)
+
+    assert index.items["same.csv"].csv_path == input_csv
 
 
 def test_report_rejects_ambiguous_duplicate_file_name(tmp_path: Path):

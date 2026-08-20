@@ -170,14 +170,18 @@ def _match_figures(
                 if Path(candidate).with_suffix("").as_posix() == rel_stem:
                     same_relative.append(figure)
     candidates = same_relative
+    scoped_figures = _figures_in_relative_dir(relative, figures, roots)
+    fallback_figures = scoped_figures if Path(rel).parent.as_posix() != "." else list(figures)
     if not candidates:
-        candidates = [figure for figure in figures if figure.name == f"{csv_file.stem}.png"]
+        candidates = [
+            figure for figure in fallback_figures if figure.name == f"{csv_file.stem}.png"
+        ]
         if len(candidates) > 1:
             raise ArtifactAmbiguityError(f"图片文件名匹配存在歧义: {csv_file}")
     if not candidates:
         by_stem = [
             figure
-            for figure in figures
+            for figure in fallback_figures
             if figure.stem == csv_file.stem or figure.stem.startswith(f"{csv_file.stem}_")
         ]
         exact = [figure for figure in by_stem if figure.stem == csv_file.stem]
@@ -186,6 +190,27 @@ def _match_figures(
         if by_stem:
             candidates = by_stem
     return tuple(sorted(candidates, key=lambda path: (_figure_rank(path), path.as_posix().lower())))
+
+
+def _figures_in_relative_dir(
+    relative: str, figures: Sequence[Path], roots: Sequence[Path]
+) -> List[Path]:
+    parent = Path(relative.replace("\\", "/")).parent.as_posix()
+    if parent == ".":
+        parent = ""
+    scoped: List[Path] = []
+    for figure in figures:
+        for root in roots:
+            if not root.is_dir():
+                continue
+            try:
+                candidate = figure.relative_to(root)
+            except ValueError:
+                continue
+            if candidate.parent.as_posix() == parent:
+                scoped.append(figure)
+                break
+    return scoped
 
 
 def _figure_rank(path: Path) -> int:
@@ -222,7 +247,7 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
             continue
         relative_path = value.replace("\\", "/")
         candidate = Path(value)
-        if candidate.is_file():
+        if candidate.is_absolute():
             csv_path = candidate
         elif not candidate.is_absolute() and (report.parent / candidate).is_file():
             csv_path = report.parent / candidate
@@ -236,8 +261,10 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
             raise ArtifactAmbiguityError(f"CSV stem 匹配存在歧义: {value}")
         elif candidate.stem in by_unique_stem:
             csv_path = by_unique_stem[candidate.stem]
+        elif candidate.is_file():
+            csv_path = candidate
         else:
-            csv_path = report.parent / candidate
+            csv_path = candidate if candidate.is_absolute() else report.parent / candidate
         if csv_path.exists():
             result.append(_ReportCsvEntry(relative_path=relative_path, csv_path=csv_path))
         else:
