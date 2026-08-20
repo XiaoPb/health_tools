@@ -44,6 +44,29 @@ if TYPE_CHECKING:
     default=None,
     help="指定期望时间戳间隔基准 (毫秒)，偏差超过20%则FAIL",
 )
+@click.option("--ref-hr-column", help="心率金标列名；指定后启用心率金标检查")
+@click.option("--ref-spo2-column", help="血氧金标列名；指定后启用血氧金标检查")
+@click.option(
+    "--ref-sample-rate",
+    type=click.FloatRange(min=0.0, min_open=True),
+    default=25.0,
+    show_default=True,
+    help="金标采样率（Hz）",
+)
+@click.option(
+    "--ref-stale-seconds",
+    type=click.FloatRange(min=0.0, min_open=True),
+    default=5.0,
+    show_default=True,
+    help="金标连续不变判定时长（秒）",
+)
+@click.option(
+    "--ref-step-threshold",
+    type=click.FloatRange(min=0.0),
+    default=8.0,
+    show_default=True,
+    help="金标阶跃相邻变化阈值",
+)
 @click.option(
     "--scene-regex",
     type=str,
@@ -82,6 +105,11 @@ def check_cmd(
     timestamp_ms: Optional[float],
     timestamp_fail_ratio: float,
     timestamp_base_ms: Optional[float],
+    ref_hr_column: Optional[str],
+    ref_spo2_column: Optional[str],
+    ref_sample_rate: float,
+    ref_stale_seconds: float,
+    ref_step_threshold: float,
     scene_regex: Optional[str],
     output_path: Optional[str],
     sort_report: bool,
@@ -114,6 +142,11 @@ def check_cmd(
                     timestamp_ms=timestamp_ms,
                     timestamp_fail_ratio=timestamp_fail_ratio,
                     timestamp_base_ms=timestamp_base_ms,
+                    ref_hr_column=ref_hr_column,
+                    ref_spo2_column=ref_spo2_column,
+                    ref_sample_rate=ref_sample_rate,
+                    ref_stale_seconds=ref_stale_seconds,
+                    ref_step_threshold=ref_step_threshold,
                     scene_regex=scene_regex,
                     output_path=Path(output_path) if output_path else None,
                     sort_report=sort_report,

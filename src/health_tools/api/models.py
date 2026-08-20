@@ -506,6 +506,11 @@ class CheckRequest:
     timestamp_ms: Optional[float] = None
     timestamp_fail_ratio: float = 1.0
     timestamp_base_ms: Optional[float] = None
+    ref_hr_column: Optional[str] = None
+    ref_spo2_column: Optional[str] = None
+    ref_sample_rate: float = 25.0
+    ref_stale_seconds: float = 5.0
+    ref_step_threshold: float = 8.0
     scene_regex: Optional[str] = None
     output_path: Optional[Path] = None
     sort_report: bool = False
