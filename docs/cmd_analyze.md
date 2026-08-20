@@ -22,6 +22,7 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | `--focus` | 强制深度分析的带目录 glob，可重复；零匹配直接失败 |
 | `--classify-rule` | 分类 YAML 规则；`categories` 中可用正则、标签和优先级 |
 | `--classify` | 分类覆盖规则 `name=regex`，可重复，优先级高于 YAML |
+| `--include-category` | PPT 额外展示指定分类记录，可重复；默认只展示 normal 中低准确度记录 |
 | `--report` | `markdown`、`pptx` 或 `all`，默认 `all` |
 | `--offline-version` | 离线算法版本；未指定时使用芯片默认版本 |
 | `--no-offline` | 禁止自动离线 PSD 升级 |
