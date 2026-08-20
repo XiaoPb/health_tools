@@ -919,6 +919,7 @@ def test_run_analyze_records_all_pipeline_stages(tmp_path: Path, monkeypatch):
     assert statuses == {
         "discover": "completed",
         "check": "completed",
+        "classify": "completed",
         "raw": "completed",
         "evaluate": "completed",
         "offline": "completed",

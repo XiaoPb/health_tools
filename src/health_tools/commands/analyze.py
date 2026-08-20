@@ -32,6 +32,10 @@ console = Console()
 @click.option("--pred-column", help="算法结果列")
 @click.option("--timestamp-column", help="时间戳列")
 @click.option("--focus", multiple=True, help="强制深度分析的带目录 glob，可重复")
+@click.option(
+    "--classify-rule", type=click.Path(exists=True, path_type=Path), help="分类 YAML 规则"
+)
+@click.option("--classify", multiple=True, help="分类覆盖规则 name=regex，可重复")
 @click.option("--report", type=click.Choice(["markdown", "pptx", "all"]), default="all")
 @click.option("--offline-version", help="离线算法版本；默认使用已配置默认版本")
 @click.option("--no-offline", is_flag=True, help="禁止自动离线 PSD 升级")
@@ -65,6 +69,8 @@ def analyze_cmd(
     pred_column: Optional[str],
     timestamp_column: Optional[str],
     focus: Tuple[str, ...],
+    classify_rule: Optional[Path],
+    classify: Tuple[str, ...],
     report: str,
     offline_version: Optional[str],
     no_offline: bool,
@@ -98,6 +104,8 @@ def analyze_cmd(
                     pred_column=pred_column,
                     timestamp_column=timestamp_column,
                     focus=focus,
+                    classify_rule=str(classify_rule) if classify_rule else None,
+                    classify=classify,
                     report=report,
                     offline_version=offline_version,
                     allow_offline=not no_offline,

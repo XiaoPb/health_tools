@@ -27,6 +27,11 @@ thresholds:
   ref_jump_per_second: 20
   jump_per_second: 20
   near_limit_ratio: 0.05
+  loose_wear_amplitude_ua: 2.0
+  loose_wear_baseline_window_s: 2.0
+  loose_wear_min_duration_s: 5.0
+  agc_change_count: 5
+  agc_continuity_s: 5.0
   psd_clarity: 3
   psd_lock_hz: 0.20
   psd_pull_hz: 0.50

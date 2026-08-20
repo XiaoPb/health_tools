@@ -20,6 +20,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | `--pred-column` | 覆盖算法结果列 |
 | `--timestamp-column` | 指定时间戳列 |
 | `--focus` | 强制深度分析的带目录 glob，可重复；零匹配直接失败 |
+| `--classify-rule` | 分类 YAML 规则；`categories` 中可用正则、标签和优先级 |
+| `--classify` | 分类覆盖规则 `name=regex`，可重复，优先级高于 YAML |
 | `--report` | `markdown`、`pptx` 或 `all`，默认 `all` |
 | `--offline-version` | 离线算法版本；未指定时使用芯片默认版本 |
 | `--no-offline` | 禁止自动离线 PSD 升级 |
@@ -38,6 +40,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 `--input` 只负责提供待分析源数据，可以是原始 CSV 目录，也可以是已有 offline 结果目录。`--check-report`、`--offline-result` 和 `--figure-dir` 都是独立输入，允许来自不同目录；其中 `--figure-dir` 可重复，便于拼接多批证据图。
 
 原始 CSV 目录支持从 root 下的相对目录识别场景标签：`root/<场景>/<人名>/<数据.csv>`、`root/<场景>/<数据.csv>` 和 `root/<人名>/<场景>/<数据.csv>`。目录名命中内置别名（如 `静息`、`静止`、`跑步`、`步行`、`骑行`、`恢复`、`static`、`dynamic`）时，标签写入报告的 `scene_label`，并转换为 `static` 或 `dynamic` 参与规则判断；人名或未知目录不会被误判为场景。场景优先级为显式 `--scene static|dynamic`、路径场景、离线/PSD 场景、原始特征推断；`--scene auto` 不覆盖路径场景。
+
+分析会在检查后生成 `classification_manifest.csv/json`，并将文件复制到 `classified/normal`、`classified/acc_warning`、`classified/centered` 或 `classified/other`。默认检查阶段使用 `TimeStamp` 列和 40 ms 时间戳基准；该基准只用于完整性检查，不会强制重采样。
 
 输出目录与输入目录可以不同，也可以嵌套，但分析会自动排除输出目录及其子树，不把既有分析产物再次当作原始 CSV。原始文件不会被移动、改名或覆盖。
 
@@ -68,6 +72,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 
 心率活动细分保留 `--scene static|dynamic` 的兼容行为，并用 `--activity` 补充静息、步行、跑步、骑行、力量、间歇和恢复阶段。佩戴松动和佩戴过紧均至少需要两个独立证据；单一 AGC 变化、低 PI 或基线漂移不会直接形成佩戴结论。骑行/力量场景中的低 PI、脉搏幅度压缩、近 0 或通道掉线可提示疑似压迫，动态场景中的 AGC 不稳定、基线漂移、掉线和运动频谱污染可提示疑似松动。
 
+心率原始证据包括 IPD 去基线后的周期变化（默认幅度阈值 2 uA）和 AGC 在 5 秒窗口内连续变化超过 5 次；这些结果记录在诊断特征中，单独命中时只作为 supporting evidence。
+
 诊断原因按规则里的 `priority` 从高到低匹配，先命中的原因生效。`origin=algorithm` 的原因只在原始数据、参考数据和算法异常条件都成立时才参与匹配。
 
 结论依据遵循以下优先级：
@@ -88,6 +94,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 SpO2 只支持静止测试。三轴 ACC 合成幅度的归一化波动达到 `motion_rms` 阈值，或显式指定 `--scene dynamic` 时，直接报告“SpO2 仅支持静止测试，当前运动幅度过大”，即使当前算法值与参考值一致也不会判为正常。证据图默认使用 `plot --type ac`，并给出保持受测者、佩戴部位和设备静止后重新采集的措施。
 
 血氧原始数据还会检查低灌注相关信号质量、双波长平线或饱和、红光/红外一致性、基线漂移、遮光和佩戴变化。静止场景下以有效光学通道中的最低 PI 与 `pi_low` 比较，任一关键通道低于门槛即报告低灌注。算法原因仍只说明可能机制，不输出算法优化或调参建议。
+
+血氧诊断模块提供 ACC 静止/运动幅度判定和 FFT 通道能量/主峰清晰度特征；运动条件与静止条件分开解释，弱通道只作为信号质量证据，不作为临床判断。
 
 ## 配置判断阈值
 

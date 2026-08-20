@@ -11,6 +11,10 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from health_tools.core.analysis.hr_diagnostics import (
+    detect_agc_instability,
+    detect_ipd_periodic_drift,
+)
 from health_tools.core.analysis.reference import analyze_reference
 from health_tools.core.ppg_analysis import compute_pi, prepare_signal, resolve_acc_columns
 from health_tools.models.rules import AnalysisRule, ChipRule
@@ -470,6 +474,32 @@ def analyze_raw_file(
     agc_change_ratio = (
         float(agc_change_count / max(len(frame) - 1, 1)) if frame is not None else 0.0
     )
+    agc_evidence: Dict[str, Any] = {"status": "not_evaluable", "detected": False}
+    if agc_columns:
+        agc_values = _numeric(frame, agc_columns[0]).tolist()
+        agc_evidence = detect_agc_instability(
+            agc_values,
+            rate or 25.0,
+            min_changes=int(rule.thresholds.get("agc_change_count", 5)),
+            continuity_window_s=float(rule.thresholds.get("agc_continuity_s", 5.0)),
+        )
+    ipd_columns = [str(column) for column in ppg_columns if str(column).lower().startswith("ipd")]
+    ipd_evidence: Dict[str, Any] = {"status": "not_evaluable", "detected": False}
+    for column in ipd_columns:
+        values = _numeric(frame, column)
+        if values is None:
+            continue
+        candidate = detect_ipd_periodic_drift(
+            values.to_numpy(dtype=float),
+            rate or 25.0,
+            baseline_window_s=float(rule.thresholds.get("loose_wear_baseline_window_s", 2.0)),
+            amplitude_ua=float(rule.thresholds.get("loose_wear_amplitude_ua", 2.0)),
+            min_duration_s=float(rule.thresholds.get("loose_wear_min_duration_s", 5.0)),
+        )
+        if candidate.get("detected") and not ipd_evidence.get("detected"):
+            ipd_evidence = candidate
+        elif candidate.get("peak_to_peak_ua", 0.0) > ipd_evidence.get("peak_to_peak_ua", 0.0):
+            ipd_evidence = candidate
     channel_inconsistent = False
     if len(ppg_columns) >= 2:
         left = _numeric(frame, ppg_columns[0])
@@ -513,6 +543,11 @@ def analyze_raw_file(
         "agc_change_count": agc_change_count,
         "agc_change_ratio": agc_change_ratio,
         "agc_unstable": agc_change_ratio >= float(rule.thresholds.get("agc_unstable_ratio", 0.05)),
+        "agc_max_burst_count": int(agc_evidence.get("max_burst_count", 0) or 0),
+        "agc_evidence": agc_evidence,
+        "loose_wear_periodic": bool(ipd_evidence.get("detected")),
+        "ipd_periodic": bool(ipd_evidence.get("detected")),
+        "ipd_periodic_evidence": ipd_evidence,
         "channel_dropout": channel_dropout,
         "pulse_compressed": pulse_compressed,
         "hr_rise_lag_s": hr_rise_lag_s,
