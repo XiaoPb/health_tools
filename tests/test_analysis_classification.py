@@ -46,6 +46,7 @@ def test_classification_options_change_request_fingerprint_key(tmp_path):
     custom = AnalyzeRequest(
         tmp_path / "input", tmp_path / "out", classify_rule="rules.yaml", classify=("x=a",)
     )
-    assert _request_key(base, base.input_path)["classify"] != _request_key(
-        custom, custom.input_path
-    )["classify"]
+    assert (
+        _request_key(base, base.input_path)["classify"]
+        != _request_key(custom, custom.input_path)["classify"]
+    )

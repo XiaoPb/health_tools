@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 
 from health_tools.api.analysis_operation import _build_classification_manifest, run_check_stage
-from health_tools.api.models import AnalyzeRequest, CheckResult, BatchResult
+from health_tools.api.models import AnalyzeRequest, BatchResult, CheckResult
 
 
 def test_classification_manifest_copies_files_without_moving(tmp_path: Path):
