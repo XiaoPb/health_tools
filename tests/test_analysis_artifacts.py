@@ -192,6 +192,28 @@ def test_report_relative_path_wins_over_duplicate_file_names(tmp_path: Path):
     assert index.items["b/same.csv"].csv_path == second
 
 
+def test_report_relative_path_normalizes_dot_prefix_before_input_lookup(tmp_path: Path):
+    source = tmp_path / "data"
+    first = source / "a" / "same.csv"
+    second = source / "b" / "same.csv"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+    second.write_text("Ipd0,Ipd1\n3,4\n", encoding="utf-8")
+    report = tmp_path / "reports" / "check_report.csv"
+    report.parent.mkdir(parents=True)
+    import pandas as pd
+
+    pd.DataFrame({"文件相对路径": ["./b/same.csv"], "总异常(结果)": ["FAIL"]}).to_csv(
+        report, index=False, encoding="utf-8-sig"
+    )
+
+    index = ArtifactIndex.build(source.rglob("*.csv"), check_report=report)
+
+    assert list(index.items) == ["b/same.csv"]
+    assert index.items["b/same.csv"].csv_path == second
+
+
 def test_report_relative_csv_path_prefers_input_file_over_same_cwd_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
