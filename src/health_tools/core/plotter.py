@@ -90,12 +90,23 @@ def crop_time_range(
     time_range: Optional[Tuple[float, float]],
     min_duration: float,
 ) -> pd.DataFrame:
-    if time_range is None or df.empty:
+    if time_range is None:
         return df
     start, end = time_range
-    if sample_rate <= 0 or start < 0 or end <= start:
+    if (
+        not np.isfinite(float(sample_rate))
+        or sample_rate <= 0
+        or not np.isfinite(float(start))
+        or not np.isfinite(float(end))
+        or start < 0
+        or end <= start
+    ):
         raise SignalAnalysisError("时间范围必须满足 0 <= start < end，且采样率大于 0")
+    if df.empty:
+        return df
     total_duration = len(df) / sample_rate
+    if start >= total_duration or end <= 0:
+        return df.copy()
     requested_duration = end - start
     duration = max(requested_duration, min_duration)
     if duration >= total_duration:
@@ -106,6 +117,29 @@ def crop_time_range(
     start_index = int(round(start * sample_rate))
     end_index = min(len(df), start_index + max(1, int(round(duration * sample_rate))))
     return df.iloc[start_index:end_index].copy()
+
+
+def limit_report_time_range(
+    time_range: Tuple[float, float], sample_rate: float, max_seconds: float = 10.0
+) -> Tuple[float, float]:
+    """限制分析报告副图的时间窗口；仅对 25 Hz 数据启用 10 秒上限。"""
+    start, end = time_range
+    if (
+        not np.isfinite(float(sample_rate))
+        or sample_rate <= 0
+        or not np.isfinite(float(start))
+        or not np.isfinite(float(end))
+        or start < 0
+        or end <= start
+    ):
+        raise SignalAnalysisError("时间范围必须满足 0 <= start < end，且采样率大于 0")
+    if not np.isfinite(float(max_seconds)) or max_seconds <= 0:
+        raise SignalAnalysisError("报告时间范围上限必须大于 0")
+    if sample_rate == 25 and end - start > max_seconds:
+        center = (start + end) / 2.0
+        half = max_seconds / 2.0
+        return center - half, center + half
+    return start, end
 
 
 def _peak_symmetric_limit(signals: List[np.ndarray]) -> float:

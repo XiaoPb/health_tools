@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from matplotlib.figure import Figure
 
-from health_tools.core.plotter import DataPlotter, crop_time_range
+from health_tools.core.plotter import DataPlotter, crop_time_range, limit_report_time_range
 from health_tools.core.ppg_analysis import SignalAnalysisError
 
 
@@ -347,6 +347,50 @@ def test_crop_time_range_expands_short_request_to_minimum_duration():
     assert len(cropped) == 40
     assert cropped["CH0"].iloc[0] == 20.0
     assert cropped["CH0"].iloc[-1] == 59.0
+
+
+@pytest.mark.parametrize(
+    "sample_rate,time_range",
+    [(10, (10.0, 5.0)), (10, (-1.0, 5.0)), (0, (0.0, 5.0)), (-1, (0.0, 5.0))],
+)
+def test_crop_time_range_rejects_invalid_bounds(sample_rate, time_range):
+    df = pd.DataFrame({"CH0": np.arange(100, dtype=float)})
+    with pytest.raises(SignalAnalysisError, match="时间范围"):
+        crop_time_range(df, sample_rate=sample_rate, time_range=time_range, min_duration=4.0)
+
+
+def test_crop_time_range_validates_sample_rate_for_empty_frame():
+    with pytest.raises(SignalAnalysisError, match="采样率"):
+        crop_time_range(pd.DataFrame(), sample_rate=0, time_range=(0.0, 1.0), min_duration=1.0)
+
+
+def test_crop_time_range_out_of_file_range_returns_full_copy():
+    df = pd.DataFrame({"CH0": np.arange(100, dtype=float)})
+    cropped = crop_time_range(df, sample_rate=10, time_range=(20.0, 30.0), min_duration=4.0)
+    assert cropped.index.tolist() == df.index.tolist()
+    assert cropped is not df
+
+    tail_outside = crop_time_range(df, sample_rate=10, time_range=(11.0, 12.0), min_duration=4.0)
+    assert tail_outside.index.tolist() == df.index.tolist()
+    assert tail_outside is not df
+
+
+def test_limit_report_time_range_only_limits_25hz():
+    assert limit_report_time_range((0.0, 20.0), sample_rate=25) == (5.0, 15.0)
+    assert limit_report_time_range((0.0, 20.0), sample_rate=50) == (0.0, 20.0)
+    assert limit_report_time_range((0.0, 10.0), sample_rate=25) == (0.0, 10.0)
+
+
+def test_plot_time_only_draws_explicit_channels(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = _analysis_df(seconds=20)
+    df["CH2"] = np.arange(len(df), dtype=float)
+    DataPlotter(sample_rate=10).plot_time(
+        df, tmp_path / "time.png", channels=["CH1"], time_range=(5.0, 9.0)
+    )
+    assert [axis.get_ylabel() for axis in saved[0].axes] == ["CH1"]
+    assert len(saved[0].axes[0].lines[0].get_ydata()) == 100
 
 
 def test_plot_time_uses_requested_range(monkeypatch, tmp_path: Path):

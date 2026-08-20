@@ -20,7 +20,7 @@ ghealth_tool --help
 | 从设备日志生成标准 CSV | [`parse`](cmd_parse.md) | `validate`、`check` |
 | 把第三方 CSV 转为芯片格式 | [`convert`](cmd_convert.md) | `validate`、`check` |
 | 检查文件结构和信号质量 | [`check`](cmd_check.md) | `plot`、`split` |
-| 绘制时域、频域或时频图 | [`plot`](cmd_plot.md) | `check` |
+| 绘制时域、频域或时频图 | [`plot`](cmd_plot.md) | `check`、`analyze`（报告副图会重新生成 `time` 图） |
 | 按姿态、场景或文件名分类 | [`classify`](cmd_classify.md) | `evaluate` |
 | 评估心率或血氧准确度 | [`evaluate`](cmd_evaluate.md) | `classify` |
 | 运行离线算法并比较结果 | [`offline`](cmd_offline.md) | `config`、`plot` |

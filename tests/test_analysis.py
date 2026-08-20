@@ -2488,6 +2488,117 @@ def test_ppt_places_polar_warning_on_separate_review_page(tmp_path: Path):
     assert "不作为算法或原始数据错误归因" in warning_pages[0]
 
 
+def test_report_time_plot_is_generated_separately_and_keeps_psd_primary(monkeypatch, tmp_path):
+    from health_tools.api.analysis_operation import _generate_report_time_plots
+    from health_tools.core.analysis.models import AnalysisRecord, AnalysisSegment
+
+    source = tmp_path / "sample.csv"
+    source.write_text("CH0,REF_RESULT0,ALGO_RESULT0\n1,60,60\n", encoding="utf-8")
+    primary = tmp_path / "psd.png"
+    primary.write_bytes(b"png")
+    calls = []
+
+    class FakePlotter:
+        fmt = "png"
+
+        def plot_time(self, frame, target, channels=None, **kwargs):
+            calls.append((frame, target, channels, kwargs))
+            Path(target).write_bytes(b"time")
+
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+    record = AnalysisRecord(
+        file="sample.csv",
+        source=str(source),
+        analysis_type="hr",
+        focused=True,
+        figure=str(primary),
+        segments=[AnalysisSegment(2.0, 8.0, 150, max_error=12.0)],
+        features={"sample_rate": 25, "ppg_columns": ["CH0"]},
+    )
+
+    _generate_report_time_plots([record], tmp_path / "figures" / "time", None)
+
+    assert record.figure == str(primary)
+    assert record.secondary_figure is not None
+    assert Path(record.secondary_figure).parent == tmp_path / "figures" / "time"
+    assert calls[0][2] == ["CH0"]
+    assert calls[0][3]["time_range"] == (0.0, 10.0)
+
+
+def test_report_time_plot_clears_stale_secondary_on_source_failure(tmp_path):
+    from health_tools.api.analysis_operation import _generate_report_time_plots
+
+    record = AnalysisRecord(
+        file="missing.csv",
+        source=str(tmp_path / "missing.csv"),
+        analysis_type="hr",
+        secondary_figure=str(tmp_path / "old_time.png"),
+    )
+
+    _generate_report_time_plots([record], tmp_path / "figures" / "time", None)
+
+    assert record.secondary_figure is None
+
+
+def test_existing_frequency_figure_overrides_raw_figure(tmp_path: Path):
+    from health_tools.api.analysis_operation import _select_report_primary_figure
+
+    raw = tmp_path / "sample_time.png"
+    stft = tmp_path / "sample_stft.png"
+    psd = tmp_path / "sample_psd.png"
+    record = AnalysisRecord("sample.csv", "sample.csv", "hr", figure=str(raw))
+
+    selected = _select_report_primary_figure(record, (raw, stft, psd))
+
+    assert selected == psd
+
+
+def test_report_time_plot_handles_malformed_sample_rate_and_segment(monkeypatch, tmp_path: Path):
+    from health_tools.api.analysis_operation import _generate_report_time_plots
+    from health_tools.core.analysis.models import AnalysisSegment
+
+    source = tmp_path / "sample.csv"
+    source.write_text("CH0,REF_RESULT0,ALGO_RESULT0\n1,60,62\n2,61,60\n", encoding="utf-8")
+    calls = []
+
+    class FakePlotter:
+        def plot_time(self, frame, target, channels=None, **kwargs):
+            calls.append(kwargs)
+            Path(target).write_bytes(b"png")
+
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+    record = AnalysisRecord(
+        "sample.csv",
+        str(source),
+        "hr",
+        segments=[AnalysisSegment("bad", "also-bad", 1, max_error=float("nan"))],
+        features={"sample_rate": "not-a-number", "ppg_columns": ["CH0"]},
+    )
+
+    _generate_report_time_plots([record], tmp_path / "figures" / "time")
+
+    assert record.secondary_figure is not None
+    assert calls[0]["time_range"] == (0.0, 10.0)
+
+
+def test_current_plot_artifacts_filters_stale_paths(tmp_path: Path):
+    from health_tools.api.analysis_operation import _current_plot_artifacts
+
+    current = tmp_path / "figures" / "time.png"
+    current.parent.mkdir(parents=True)
+    current.write_bytes(b"png")
+    stale = tmp_path / "old" / "time.png"
+    record = AnalysisRecord(
+        "sample.csv",
+        "sample.csv",
+        "hr",
+        figure=str(current),
+        secondary_figure=str(stale),
+    )
+
+    assert _current_plot_artifacts([record], tmp_path) == [current.resolve()]
+
+
 @pytest.mark.parametrize(
     ("path", "explicit", "expected"),
     [("run/a.csv", "auto", "run"), ("cycle/a.csv", "auto", "cycle"), ("x.csv", "rest", "rest")],

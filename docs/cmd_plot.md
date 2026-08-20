@@ -18,7 +18,7 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `-c/--chip` | 芯片类型（指定 CSV 格式） |
 | `-r/--rule` | 转换规则文件（指定 CSV 格式） |
 | `--type` | 图表类型: time\|freq\|stft\|psd\|ac\|fft\|both（默认: both） |
-| `--channels` | 绘制通道；AC 模式支持用分号分组 |
+| `--channels` | 绘制通道；`time`、`stft`、`fft` 和 `both` 模式按逗号选择通道，AC 模式还支持用分号分组 |
 | `--sample-rate` | 采样率 Hz（默认: 25） |
 | `--window` | STFT 窗口大小秒（默认: 25） |
 | `--overlap` | 窗口重叠率 0-1（默认: 0.96） |
@@ -53,7 +53,9 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 
 所有普通绘图的顶部显示输入文件名。`--time-range` 使用左闭右开秒级范围；未指定时使用全部数据，短范围会按图类型扩展到可见的最小宽度。`--height` 控制整张图片高度，适合嵌入 PPT，不改变输出文件名、采样数据或 DPI。
 
-自动绘图会跳过全零、全 NaN、全 Inf 和非数值列；`time` 模式不再无条件绘制除 `timestamp` 外的所有列。显式指定的无效列会跳过并给出提示。PSD 输入为离线结果目录，时间范围和 CSV 列过滤不作用于 PSD 文件。
+自动绘图会跳过全零、全 NaN、全 Inf 和非数值列；`time` 模式未指定 `--channels` 时默认绘制输入 CSV 中的有效数值列（排除
+`timestamp`、参考/预测结果等元数据列），而不是无条件绘制除 `timestamp` 外的所有列。显式指定的无效列会跳过并给出提示。
+PSD 输入为离线结果目录，时间范围和 CSV 列过滤不作用于 PSD 文件。
 
 `time` 模式指定恰好两个通道时会合并为一张图，两个通道分别使用独立的 Y 轴；指定一个或超过两个通道时保持多子图布局。
 
