@@ -34,7 +34,15 @@ class AnalysisRecord:
     secondary_figure: Optional[str] = None
     plot_data: Dict[str, Any] = field(default_factory=dict, repr=False)
     scene_label: Optional[str] = None
+    classification: List[str] = field(default_factory=list)
+    channel_abnormal_ratio: Dict[str, float] = field(default_factory=dict)
+    excluded: bool = False
+    exclusion_reasons: List[str] = field(default_factory=list)
 
     @property
     def abnormal(self) -> bool:
         return self.conclusion not in {"未发现异常", "证据不足"} or bool(self.segments)
+
+    @property
+    def primary_classification(self) -> str:
+        return self.classification[0] if self.classification else "normal"

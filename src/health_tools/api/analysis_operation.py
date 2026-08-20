@@ -8,8 +8,8 @@ if TYPE_CHECKING:
     import numpy as np  # noqa: F401
     import pandas as pd  # noqa: F401
 
-import fnmatch
 import csv
+import fnmatch
 import json
 import re
 import shutil
@@ -35,6 +35,7 @@ from health_tools.api.models import (
 )
 from health_tools.api.operations import _context, _load_rule, _require_path
 from health_tools.core.analysis.artifacts import ArtifactIndex
+from health_tools.core.analysis.classification import classify_file, load_classification_rules
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord, AnalysisSegment
 from health_tools.core.analysis.psd import analyze_psd_directory
@@ -273,6 +274,10 @@ def _records_from_payload(values: Sequence[Mapping[str, Any]]) -> List[AnalysisR
                 secondary_figure=(
                     str(value["secondary_figure"]) if value.get("secondary_figure") else None
                 ),
+                classification=[str(item) for item in value.get("classification", [])],
+                channel_abnormal_ratio=dict(value.get("channel_abnormal_ratio", {})),
+                excluded=bool(value.get("excluded", False)),
+                exclusion_reasons=[str(item) for item in value.get("exclusion_reasons", [])],
             )
         )
     return records
@@ -768,6 +773,12 @@ def _raw_records(
     ] or discovered_files
     chip = request.chip_name or detect_chip(existing_files[0])
     records: List[AnalysisRecord] = []
+    try:
+        classification_rules = load_classification_rules(
+            request.classify_rule, cli=request.classify
+        )
+    except (OSError, ValueError) as exc:
+        raise RequestValidationError(f"分类规则无效: {exc}") from exc
     total = len(report_items) if report_items else len(discovered_files)
     context.emit(ProgressEvent("analyze", "raw", 0, total, "分析原始数据"))
     raw_items = (
@@ -844,6 +855,12 @@ def _raw_records(
                     request.timestamp_column or rule.columns.get("timestamp"),
                 ),
             )
+            classified = classify_file(
+                name, scene=resolved_scene, fields=features, rules=classification_rules
+            )
+            record.classification = list(classified.labels)
+            record.excluded = classified.excluded
+            record.exclusion_reasons = list(classified.exclusion_reasons)
             analyzed_files.append(path)
         except Exception as exc:
             skip_reason = reason if status == "SKIP" else ""
@@ -860,6 +877,10 @@ def _raw_records(
                 ),
                 notes=[skip_reason or f"读取或分析失败: {exc}"],
             )
+            classified = classify_file(
+                name, scene=record.scene, fields=record.features, rules=classification_rules
+            )
+            record.classification = list(classified.labels)
         records.append(record)
         context.emit(ProgressEvent("analyze", "raw", index, total, "完成", name))
     return records, root, analyzed_files or existing_files, focused, chip

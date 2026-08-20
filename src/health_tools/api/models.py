@@ -457,6 +457,8 @@ class AnalyzeRequest:
     resume: bool = True
     restart: bool = False
     activity: str = "auto"
+    classify_rule: Optional[str] = None
+    classify: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_path", Path(self.input_path))
@@ -466,6 +468,7 @@ class AnalyzeRequest:
         if self.offline_result_path is not None:
             object.__setattr__(self, "offline_result_path", Path(self.offline_result_path))
         object.__setattr__(self, "figure_paths", tuple(Path(path) for path in self.figure_paths))
+        object.__setattr__(self, "classify", tuple(self.classify))
 
 
 @dataclass(frozen=True)
