@@ -2,10 +2,74 @@
 
 from pathlib import Path
 
+import pandas as pd
 from click.testing import CliRunner
 
+from health_tools.api.check_operation import _save_compact_report
 from health_tools.api.models import BatchResult, CheckRequest, CheckResult
 from health_tools.commands.check import check_cmd
+from health_tools.core.checker import DataChecker, FileCheckReport
+from health_tools.models.rules import ChipRule
+
+
+def _checker():
+    return DataChecker(ChipRule(chip="gh3036", csv={}, columns=[]))
+
+
+def test_reference_range_and_nonzero_ratio():
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_HR": [30] * 70 + [0] * 30}), "REF_HR", "hr"
+    )
+    assert result.status == "PASS"
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_HR": [29, 241] + [0] * 98}), "REF_HR", "hr"
+    )
+    assert result.status == "FAIL"
+
+
+def test_reference_step_and_static_are_independent():
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_SPO2": [80] * 125 + [81] * 10}),
+        "REF_SPO2",
+        "spo2",
+    )
+    assert result.status == "PASS"
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_SPO2": [80] * 126 + [81] * 10}),
+        "REF_SPO2",
+        "spo2",
+    )
+    assert result.status == "FAIL"
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_SPO2": [80, 89, 90]}), "REF_SPO2", "spo2"
+    )
+    assert result.status == "FAIL"
+
+
+def test_reference_step_threshold_is_configurable():
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_HR": [80, 86, 87]}), "REF_HR", "hr", step_threshold=5
+    )
+    assert result.status == "FAIL"
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_HR": [80, 86, 87]}), "REF_HR", "hr", step_threshold=6
+    )
+    assert result.status == "PASS"
+
+
+def test_compact_report_contains_reference_metrics(tmp_path):
+    result = _checker().check_reference_data(
+        pd.DataFrame({"REF_HR": [80] * 126 + [90]}),
+        "REF_HR",
+        "hr",
+    )
+    report = FileCheckReport(tmp_path / "sample.csv", "gh3036", results=[result])
+    output = tmp_path / "check_report_compact.csv"
+    _save_compact_report([report], output, tmp_path)
+    text = output.read_text(encoding="utf-8-sig")
+    assert "金标非零占比" in text
+    assert "金标阶跃次数" in text
+    assert "金标最长静止帧" in text
 
 
 def test_check_request_keeps_reference_options():
@@ -57,6 +121,23 @@ def test_check_rejects_invalid_reference_numeric_options():
         result = runner.invoke(check_cmd, [option, value])
         assert result.exit_code == 2
         assert option in result.output
+
+
+def test_run_check_rejects_invalid_reference_numeric_options(tmp_path):
+    from health_tools.api import run_check
+    from health_tools.api.errors import RequestValidationError
+
+    for values in (
+        {"ref_sample_rate": 0},
+        {"ref_stale_seconds": 0},
+        {"ref_step_threshold": -1},
+    ):
+        request = CheckRequest(input_path=tmp_path, **values)
+        try:
+            run_check(request)
+        except RequestValidationError:
+            continue
+        raise AssertionError(f"expected validation error for {values}")
 
 
 def test_check_passes_reference_options_to_request(monkeypatch, tmp_path):

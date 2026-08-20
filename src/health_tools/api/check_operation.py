@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import re
 import shutil
 from pathlib import Path
@@ -69,7 +70,16 @@ def _detect_chip(csv_file: Path) -> Optional[str]:
     return None
 
 
-def _rule_mismatch(checker, frame, checks, timestamp_column, chip, require_acc) -> str:
+def _rule_mismatch(
+    checker,
+    frame,
+    checks,
+    timestamp_column,
+    chip,
+    require_acc,
+    ref_hr_column=None,
+    ref_spo2_column=None,
+) -> str:
     missing = []
     data_columns = [column for column in checker._get_data_columns() if column in frame.columns]
     frame_column = checker._resolve_frame_column(frame)
@@ -85,6 +95,11 @@ def _rule_mismatch(checker, frame, checks, timestamp_column, chip, require_acc) 
         missing.append("ACC列")
     if timestamp_column and timestamp_column not in frame.columns:
         missing.append(f"时间戳列 {timestamp_column}")
+    if "ref" in checks:
+        if ref_hr_column and ref_hr_column not in frame.columns:
+            missing.append(f"心率金标列 {ref_hr_column}")
+        if ref_spo2_column and ref_spo2_column not in frame.columns:
+            missing.append(f"血氧金标列 {ref_spo2_column}")
     return f"列结构不符合规则，缺少 {'、'.join(dict.fromkeys(missing))}" if missing else ""
 
 
@@ -208,6 +223,12 @@ COMPACT_HEADER = [
     "AGC变化次数",
     "AGC有效对数",
     "AGC变化占比",
+    "金标范围异常数",
+    "金标非零占比",
+    "金标阶跃次数",
+    "金标阶跃阈值",
+    "金标最长静止帧",
+    "金标静止帧阈值",
 ]
 
 
@@ -273,6 +294,14 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                             "AGC变化次数": agc_count,
                             "AGC有效对数": agc_total,
                             "AGC变化占比": _format_compact_percent(agc_ratio),
+                            "金标范围异常数": metric.get("range_abnormal_count", ""),
+                            "金标非零占比": _format_compact_percent(
+                                metric.get("nonzero_ratio", "")
+                            ),
+                            "金标阶跃次数": metric.get("step_count", ""),
+                            "金标阶跃阈值": metric.get("step_threshold", ""),
+                            "金标最长静止帧": metric.get("longest_static_frames", ""),
+                            "金标静止帧阈值": metric.get("static_frame_threshold", ""),
                         }
                     )
 
@@ -404,11 +433,17 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             "agc",
         }
     )
-    unknown = checks - {"range", "ipd", "frame", "center", "acc", "agc"}
+    unknown = checks - {"range", "ipd", "frame", "center", "acc", "agc", "ref"}
     if unknown:
         raise RequestValidationError(f"未知检查项: {', '.join(sorted(unknown))}")
     if request.workers < 1:
         raise RequestValidationError("workers 必须大于 0")
+    if not math.isfinite(request.ref_sample_rate) or request.ref_sample_rate <= 0:
+        raise RequestValidationError("ref_sample_rate 必须大于 0 且为有限数值")
+    if not math.isfinite(request.ref_stale_seconds) or request.ref_stale_seconds <= 0:
+        raise RequestValidationError("ref_stale_seconds 必须大于 0 且为有限数值")
+    if not math.isfinite(request.ref_step_threshold) or request.ref_step_threshold < 0:
+        raise RequestValidationError("ref_step_threshold 必须大于等于 0 且为有限数值")
     items: List[ItemResult] = []
     reports = []
     acc_reports = {}
@@ -435,6 +470,8 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 request.timestamp_column,
                 chip,
                 request.checks is not None and "acc" in checks,
+                request.ref_hr_column if (request.checks is None or "ref" in checks) else None,
+                request.ref_spo2_column if (request.checks is None or "ref" in checks) else None,
             )
             if mismatch:
                 return ItemResult(ItemStatus.SKIP, str(path), reason=mismatch), None, None, None
@@ -461,6 +498,29 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                         ms_tolerance=request.timestamp_ms,
                         threshold_ratio=request.timestamp_fail_ratio,
                         expected_base_ms=request.timestamp_base_ms,
+                    )
+                )
+            ref_enabled = request.checks is None or "ref" in checks
+            if ref_enabled and request.ref_hr_column:
+                report.results.append(
+                    checker.check_reference_data(
+                        frame,
+                        request.ref_hr_column,
+                        "hr",
+                        request.ref_sample_rate,
+                        request.ref_stale_seconds,
+                        request.ref_step_threshold,
+                    )
+                )
+            if ref_enabled and request.ref_spo2_column:
+                report.results.append(
+                    checker.check_reference_data(
+                        frame,
+                        request.ref_spo2_column,
+                        "spo2",
+                        request.ref_sample_rate,
+                        request.ref_stale_seconds,
+                        request.ref_step_threshold,
                     )
                 )
             if "ipd" in checks and chip.startswith("gh3036"):

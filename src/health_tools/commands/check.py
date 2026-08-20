@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)，不指定则自动识别")
 @click.option(
     "--checks",
-    help="指定检查项 (逗号分隔: range,ipd,frame,center,acc,agc)，默认全部",
+    help="指定检查项 (逗号分隔: range,ipd,frame,center,acc,agc,ref)，默认全部",
 )
 @click.option("--tolerance", type=int, default=50, help="Ipd转换误差容忍度 (pA, 默认50)")
 @click.option("--static-min", type=int, default=5, help="ACC静止检测最小连续帧数 (默认5)")
