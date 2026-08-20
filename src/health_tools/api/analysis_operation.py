@@ -1113,6 +1113,105 @@ def _generate_raw_plots(
             record.notes.append(f"plot {plot_type} 未生成图片: {result.items[0].detail}")
 
 
+def _report_time_interval(
+    record: AnalysisRecord, frame: "pd.DataFrame", sample_rate: float
+) -> Tuple[float, float]:
+    """Return the evidence window for a report time plot.
+
+    Segments produced by the accuracy analysis are preferred.  Short or
+    unusable inputs fall back to a deterministic ten-second window; the
+    plotter clips it to the actual file when rendering.
+    """
+    if len(frame) > 1 and record.segments:
+        segment = max(record.segments, key=lambda item: (item.max_error, item.samples))
+        start, end = float(segment.start_s), float(segment.end_s)
+        if end > start:
+            from health_tools.core.plotter import limit_report_time_range
+
+            return limit_report_time_range((start, end), sample_rate)
+    duration = max(float(len(frame)) / sample_rate, 10.0)
+    from health_tools.core.plotter import limit_report_time_range
+
+    return limit_report_time_range((0.0, duration), sample_rate)
+
+
+def _report_time_channels(record: AnalysisRecord, frame: "pd.DataFrame") -> List[str]:
+    import pandas as pd
+
+    configured = [str(item) for item in record.features.get("plot_channels", [])]
+    ppg = [str(item) for item in record.features.get("ppg_columns", [])]
+    channels = configured or ppg
+    for key in ("reference_column", "prediction_column"):
+        value = record.features.get(key)
+        if value:
+            channels.append(str(value))
+    if not channels:
+        channels.extend(
+            str(column)
+            for column in frame.columns
+            if str(column).upper().startswith(("REF_RESULT", "ALGO_RESULT"))
+        )
+    channels = list(dict.fromkeys(channels))
+    return [
+        channel
+        for channel in channels
+        if channel in frame.columns and pd.to_numeric(frame[channel], errors="coerce").notna().any()
+    ]
+
+
+def _generate_report_time_plots(
+    records: Sequence[AnalysisRecord], output: Path, channels: Optional[Sequence[str]] = None
+) -> None:
+    """Generate a fresh, per-record time evidence image for the report."""
+    import pandas as pd
+
+    from health_tools.core.plotter import DataPlotter, limit_report_time_range
+
+    output.mkdir(parents=True, exist_ok=True)
+    for index, record in enumerate(records):
+        source = Path(record.source)
+        if not source.is_file():
+            continue
+        try:
+            frame = pd.read_csv(source)
+        except Exception as exc:
+            record.notes.append(f"报告副图读取失败: {exc}")
+            continue
+        sample_rate = float(record.features.get("sample_rate") or 25)
+        selected = [str(item) for item in (channels or _report_time_channels(record, frame))]
+        selected = [
+            channel
+            for channel in selected
+            if channel in frame.columns
+            and pd.to_numeric(frame[channel], errors="coerce").notna().any()
+        ]
+        if not selected:
+            continue
+        interval = _report_time_interval(record, frame, sample_rate)
+        interval = limit_report_time_range(interval, sample_rate)
+        safe_name = _safe_name(record.file)
+        start_text, end_text = (f"{value:.3f}".replace(".", "p") for value in interval)
+        target = output / f"{index:04d}_{safe_name}_time_{start_text}-{end_text}.png"
+        try:
+            try:
+                plotter = DataPlotter(sample_rate=int(sample_rate))
+            except TypeError:
+                # 保持旧测试替身/扩展实现的无参构造兼容性。
+                plotter = DataPlotter()
+            plotter.plot_time(
+                frame,
+                target,
+                channels=selected,
+                file_name=source.name,
+                time_range=interval,
+            )
+        except Exception as exc:
+            record.notes.append(f"报告副图生成失败: {exc}")
+            continue
+        if target.exists():
+            record.secondary_figure = str(target)
+
+
 def _offline_records(
     request: AnalyzeRequest,
     source: Path,
@@ -1409,11 +1508,20 @@ def run_analyze(
                 for record in records:
                     item = artifact_index.item_for(record.file)
                     if item and item.primary_figure:
-                        record.figure = str(item.primary_figure)
+                        candidates = item.figures
+                        frequency = [
+                            path
+                            for path in candidates
+                            if any(
+                                token in path.stem.lower()
+                                for token in ("psd", "stft", "spectrogram", "时频")
+                            )
+                        ]
+                        if not record.figure:
+                            record.figure = str(frequency[0] if frequency else candidates[0])
                         if item.secondary_figures:
-                            record.secondary_figure = str(item.secondary_figures[0])
                             record.notes.append(
-                                "已复用现有副图: "
+                                "已发现现有副图: "
                                 + ", ".join(path.name for path in item.secondary_figures)
                             )
         except Exception as exc:
@@ -1426,6 +1534,8 @@ def run_analyze(
             if path
         ]
         state.complete("plot", plot_artifacts, fingerprint=plot_fingerprint)
+    # 副图属于本次报告证据，每次分析都重新生成；即使复用 PSD/诊断阶段也不能复用旧 time 图。
+    _generate_report_time_plots(records, figures / "time")
     if not diagnosis_reused:
         for index, record in enumerate(records):
             if (

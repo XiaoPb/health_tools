@@ -2488,6 +2488,43 @@ def test_ppt_places_polar_warning_on_separate_review_page(tmp_path: Path):
     assert "不作为算法或原始数据错误归因" in warning_pages[0]
 
 
+def test_report_time_plot_is_generated_separately_and_keeps_psd_primary(monkeypatch, tmp_path):
+    from health_tools.api.analysis_operation import _generate_report_time_plots
+    from health_tools.core.analysis.models import AnalysisRecord, AnalysisSegment
+
+    source = tmp_path / "sample.csv"
+    source.write_text("CH0,REF_RESULT0,ALGO_RESULT0\n1,60,60\n", encoding="utf-8")
+    primary = tmp_path / "psd.png"
+    primary.write_bytes(b"png")
+    calls = []
+
+    class FakePlotter:
+        fmt = "png"
+
+        def plot_time(self, frame, target, channels=None, **kwargs):
+            calls.append((frame, target, channels, kwargs))
+            Path(target).write_bytes(b"time")
+
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+    record = AnalysisRecord(
+        file="sample.csv",
+        source=str(source),
+        analysis_type="hr",
+        focused=True,
+        figure=str(primary),
+        segments=[AnalysisSegment(2.0, 8.0, 150, max_error=12.0)],
+        features={"sample_rate": 25, "ppg_columns": ["CH0"]},
+    )
+
+    _generate_report_time_plots([record], tmp_path / "figures" / "time", None)
+
+    assert record.figure == str(primary)
+    assert record.secondary_figure is not None
+    assert Path(record.secondary_figure).parent == tmp_path / "figures" / "time"
+    assert calls[0][2] == ["CH0"]
+    assert calls[0][3]["time_range"] == (0.0, 10.0)
+
+
 @pytest.mark.parametrize(
     ("path", "explicit", "expected"),
     [("run/a.csv", "auto", "run"), ("cycle/a.csv", "auto", "cycle"), ("x.csv", "rest", "rest")],
