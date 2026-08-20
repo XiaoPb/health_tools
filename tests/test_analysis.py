@@ -2672,23 +2672,26 @@ def test_ppt_includes_psd_page_for_evidence_insufficient(tmp_path: Path):
     )
 
 
-def test_ppt_places_polar_warning_on_separate_review_page(tmp_path: Path):
+def test_ppt_keeps_polar_warning_and_two_figures_on_same_record_slide(tmp_path: Path):
     pytest.importorskip("pptx")
     from PIL import Image
     from pptx import Presentation
 
-    figure = tmp_path / "sample.png"
+    figure = tmp_path / "sample_psd.png"
+    secondary = tmp_path / "sample_time.png"
     Image.new("RGB", (320, 180), "white").save(figure)
+    Image.new("RGB", (320, 120), "gray").save(secondary)
     output = write_ppt(
         [
             AnalysisRecord(
-                file="sample.csv",
+                file="scene/person/sample.csv",
                 source="sample_result.vshb",
                 analysis_type="hr",
                 conclusion="算法性能极限",
                 notes=["算法出值可能跟随运动主频"],
                 warnings=["Polar 警告：参考值局部跳变，位置(前10)=5，8，13；需人工复审"],
                 figure=str(figure),
+                secondary_figure=str(secondary),
             )
         ],
         tmp_path / "report.pptx",
@@ -2698,10 +2701,130 @@ def test_ppt_places_polar_warning_on_separate_review_page(tmp_path: Path):
     slide_text = [
         "\n".join(getattr(shape, "text", "") for shape in slide.shapes) for slide in deck.slides
     ]
-    warning_pages = [text for text in slide_text if "Polar 人工复审警告" in text]
-    assert len(warning_pages) == 1
-    assert "位置(前10)=5，8，13" in warning_pages[0]
-    assert "不作为算法或原始数据错误归因" in warning_pages[0]
+    detail_pages = [
+        slide for slide, text in zip(deck.slides, slide_text) if "scene/person/sample.csv" in text
+    ]
+    assert len(detail_pages) == 1
+    detail_text = "\n".join(getattr(shape, "text", "") for shape in detail_pages[0].shapes)
+    assert "位置(前10)=5，8，13" in detail_text
+    assert sum(1 for shape in detail_pages[0].shapes if shape.shape_type == 13) == 2
+    assert not any("Polar 人工复审警告" in text for text in slide_text)
+
+
+def test_ppt_long_polar_warnings_do_not_add_pages(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    base = AnalysisRecord(
+        file="sample.csv",
+        source="sample.csv",
+        analysis_type="hr",
+        focused=True,
+        conclusion="证据不足",
+    )
+    plain = write_ppt([base], tmp_path / "plain.pptx")
+    warned = write_ppt(
+        [
+            replace(
+                base,
+                warnings=[
+                    "Polar 参考值局部跳变，" + "需人工复审；" * 80,
+                    "Polar 参考值存在可疑停滞，" + "请核对金标；" * 80,
+                ],
+            )
+        ],
+        tmp_path / "warned.pptx",
+    )
+
+    plain_deck = Presentation(str(plain))
+    warned_deck = Presentation(str(warned))
+    assert len(warned_deck.slides) == len(plain_deck.slides)
+    detail = next(
+        slide
+        for slide in warned_deck.slides
+        if any(getattr(shape, "text", "") == "sample.csv" for shape in slide.shapes)
+    )
+    text = "\n".join(getattr(shape, "text", "") for shape in detail.shapes)
+    assert "复审警告" in text
+
+
+def test_ppt_deduplicates_normalized_record_path_and_merges_evidence(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from PIL import Image
+    from pptx import Presentation
+
+    primary = tmp_path / "primary.png"
+    secondary = tmp_path / "secondary.png"
+    Image.new("RGB", (320, 180), "white").save(primary)
+    Image.new("RGB", (320, 120), "gray").save(secondary)
+    records = [
+        AnalysisRecord(
+            "scene\\person\\sample.csv",
+            "sample.csv",
+            "hr",
+            focused=True,
+            conclusion="证据不足",
+            notes=["第一条证据"],
+            figure=str(primary),
+        ),
+        AnalysisRecord(
+            "scene/person/./sample.csv",
+            "sample.csv",
+            "hr",
+            conclusion="算法性能极限",
+            cause={"id": "limit", "title": "运动场景性能极限", "origin": "algorithm"},
+            notes=["第二条证据", "第一条证据"],
+            warnings=["Polar 需人工复审"],
+            secondary_figure=str(secondary),
+        ),
+    ]
+    merged = analysis_reporting._deduplicate_records(records)
+    assert len(merged) == 1
+    assert merged[0].notes == ["第一条证据", "第二条证据"]
+    assert merged[0].warnings == ["Polar 需人工复审"]
+    assert merged[0].figure == str(primary)
+    assert merged[0].secondary_figure == str(secondary)
+    assert merged[0].conclusion == "算法性能极限"
+    assert merged[0].cause and merged[0].cause["id"] == "limit"
+
+    output = write_ppt(records, tmp_path / "report.pptx")
+
+    deck = Presentation(str(output))
+    detail_pages = [
+        slide
+        for slide in deck.slides
+        if any(
+            "scene\\person\\sample.csv" in getattr(shape, "text", "")
+            or "scene/person/sample.csv" in getattr(shape, "text", "")
+            for shape in slide.shapes
+        )
+    ]
+    assert len(detail_pages) == 1
+    detail = detail_pages[0]
+    text = "\n".join(getattr(shape, "text", "") for shape in detail.shapes)
+    assert "运动场景性能极限" in text
+    assert "Polar 需人工复审" in text
+    assert sum(1 for shape in detail.shapes if shape.shape_type == 13) == 2
+
+
+def test_ppt_does_not_merge_same_basename_from_different_directories(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    output = write_ppt(
+        [
+            AnalysisRecord("scene_a/sample.csv", "sample.csv", "hr", focused=True),
+            AnalysisRecord("scene_b/sample.csv", "sample.csv", "hr", focused=True),
+        ],
+        tmp_path / "report.pptx",
+    )
+
+    deck = Presentation(str(output))
+    texts = [
+        "\n".join(getattr(shape, "text", "") for shape in slide.shapes) for slide in deck.slides
+    ]
+    assert sum("scene_a/sample.csv" in text for text in texts) == 1
+    assert sum("scene_b/sample.csv" in text for text in texts) == 1
 
 
 def test_report_time_plot_is_generated_separately_and_keeps_psd_primary(monkeypatch, tmp_path):

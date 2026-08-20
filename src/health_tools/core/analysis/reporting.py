@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import json
+import posixpath
+from copy import copy, deepcopy
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -472,6 +474,14 @@ def _set_compact_body_text(shape, text: str) -> None:
         paragraph.space_after = 0
 
 
+def _compact_warnings(warnings: Sequence[str], max_chars: int = 240) -> str:
+    unique = list(dict.fromkeys(str(item).strip() for item in warnings if str(item).strip()))
+    text = "；".join(unique)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip("；，。 ") + "..."
+
+
 def _add_picture(slide, placeholder, image_path: str) -> None:
     from PIL import Image
 
@@ -501,6 +511,7 @@ def _populate_content(
     subtitle_text: str = "",
     secondary_figure: str = "",
     check_text: str = "",
+    warnings: Sequence[str] = (),
 ) -> None:
     from pptx.enum.shapes import PP_PLACEHOLDER
 
@@ -515,6 +526,8 @@ def _populate_content(
     if subtitle:
         _set_text(subtitle, subtitle_text)
     if body:
+        if warnings:
+            body_text = f"{body_text}\n复审警告：{_compact_warnings(warnings)}"
         _set_compact_body_text(body, body_text)
     if check_shape:
         _set_text(check_shape, check_text or "未发现 check 异常")
@@ -530,28 +543,78 @@ def _populate_content(
             secondary._element.getparent().remove(secondary._element)
 
 
-def _populate_warning(slide, record: AnalysisRecord) -> None:
-    from pptx.enum.shapes import PP_PLACEHOLDER
+def _record_key(record: AnalysisRecord) -> str:
+    value = str(record.file).replace("\\", "/").strip()
+    return posixpath.normpath(value)
 
-    title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
-    body = _body_shape(slide)
-    content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
-    subtitle = _filename_shape(slide)
-    if title:
-        _set_text(title, "Polar 人工复审警告")
-    if body:
-        _set_compact_body_text(
-            body,
-            f"文件：{record.file}\n\n"
-            "Polar 可能仅在局部异常。\n\n"
-            "原分析结论与关键图表保留。\n\n"
-            "警告不作为算法或原始数据错误归因。",
-        )
-    if subtitle:
-        _set_text(subtitle, record.file)
-    if content:
-        _set_text(content, "\n\n".join(record.warnings))
-    _remove_secondary_picture(slide)
+
+def _record_specificity(record: AnalysisRecord) -> Tuple[int, int, float, int]:
+    conclusion_rank = {"": -1, "未发现异常": 0, "证据不足": 1}.get(record.conclusion, 2)
+    return (
+        conclusion_rank,
+        int(bool(record.cause)),
+        float(record.confidence),
+        len(record.conclusion),
+    )
+
+
+def _is_empty_value(value: Any) -> bool:
+    if value is None or (isinstance(value, str) and not value):
+        return True
+    return isinstance(value, (list, tuple, set, dict)) and not value
+
+
+def _merge_record(target: AnalysisRecord, candidate: AnalysisRecord) -> None:
+    target.focused = target.focused or candidate.focused
+    target.notes = list(dict.fromkeys([*target.notes, *candidate.notes]))
+    target.warnings = list(dict.fromkeys([*target.warnings, *candidate.warnings]))
+    if not target.figure and candidate.figure:
+        target.figure = candidate.figure
+    if not target.secondary_figure and candidate.secondary_figure:
+        target.secondary_figure = candidate.secondary_figure
+    if not target.segments and candidate.segments:
+        target.segments = deepcopy(candidate.segments)
+    for name in ("features", "metrics", "psd", "plot_data"):
+        current = getattr(target, name)
+        for key, value in getattr(candidate, name).items():
+            if key not in current or _is_empty_value(current[key]):
+                current[key] = deepcopy(value)
+    if _record_specificity(candidate) > _record_specificity(target):
+        target.conclusion = candidate.conclusion
+        target.cause = deepcopy(candidate.cause)
+        target.confidence = candidate.confidence
+    elif not target.cause and candidate.cause:
+        target.cause = deepcopy(candidate.cause)
+    if not target.scene_label and candidate.scene_label:
+        target.scene_label = candidate.scene_label
+    if target.scene == "unknown" and candidate.scene != "unknown":
+        target.scene = candidate.scene
+    if target.activity == "other" and candidate.activity != "other":
+        target.activity = candidate.activity
+
+
+def _copy_record(record: AnalysisRecord) -> AnalysisRecord:
+    result = copy(record)
+    result.features = dict(record.features)
+    result.metrics = dict(record.metrics)
+    result.segments = list(record.segments)
+    result.psd = dict(record.psd)
+    result.cause = deepcopy(record.cause)
+    result.notes = list(record.notes)
+    result.warnings = list(record.warnings)
+    result.plot_data = dict(record.plot_data)
+    return result
+
+
+def _deduplicate_records(records: Iterable[AnalysisRecord]) -> List[AnalysisRecord]:
+    merged: Dict[str, AnalysisRecord] = {}
+    for record in records:
+        key = _record_key(record)
+        if key not in merged:
+            merged[key] = _copy_record(record)
+            continue
+        _merge_record(merged[key], record)
+    return list(merged.values())
 
 
 def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
@@ -757,7 +820,7 @@ def write_ppt(
         raise RuntimeError("生成 PPT 需要安装 python-pptx") from exc
     template = Path(files("health_tools") / "templates" / "analysis_report.pptx")
     prs = Presentation(str(template))
-    records = list(records)
+    records = _deduplicate_records(records)
     cover = prs.slides[0]
     content = prs.slides[1]
     ending = prs.slides[-1]
@@ -856,10 +919,8 @@ def write_ppt(
             subtitle_text=record.file,
             secondary_figure=record.secondary_figure or "",
             check_text="\n".join(check_lines),
+            warnings=record.warnings,
         )
-        if record.warnings:
-            warning_slide = _duplicate_slide(prs, content)
-            _populate_warning(warning_slide, record)
     conclusion_slide = _duplicate_slide(prs, content)
     cause_summary = _populate_summary(content, records)
     _populate_content(
