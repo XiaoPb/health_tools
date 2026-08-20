@@ -29,6 +29,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--timestamp-ratio` | 时间戳间隔百分比容差，默认 20% |
 | `--timestamp-ms` | 时间戳间隔固定毫秒容差 |
 | `--timestamp-fail-ratio` | 时间戳异常间隔允许比例，默认 1% |
+| `--timestamp-base-ms` | 指定期望相邻时间戳间隔（毫秒）；统计基准相对它偏差超过 20% 时为 FAIL |
 | `-o/--output` | 检查报告 CSV 输出路径，默认 `<path>/check_report.csv` |
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
 | `--report` | 分拣使用的检查报告路径 |
@@ -82,6 +83,9 @@ ghealth_tool check -i data/ --frame-ratio 0.5 --acc-ratio 2 --center-ratio 5
 
 # 检查时间戳间隔稳定性
 ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-ratio 20 --timestamp-ms 5
+
+# 指定期望时间基准；实际间隔中位数偏离 40ms 超过20%时 FAIL
+ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-base-ms 40
 
 # 把 ACC 单轴异常也计入结果
 ghealth_tool check -i data/ --checks acc --acc-axis

@@ -755,3 +755,35 @@ class TestTimestampInterval:
 
         assert result.status == "FAIL"
         assert "时间戳倒退" in result.summary
+
+    def test_timestamp_expected_base_at_20_percent_passes(self, checker):
+        result = checker.check_timestamp_interval(
+            pd.DataFrame({"timestamp": [0, 48, 96, 144]}),
+            "timestamp",
+            expected_base_ms=40,
+        )
+
+        assert result.status == "PASS"
+        assert "指定基准 40ms" in result.summary
+        assert "偏差 20.0%" in result.summary
+
+    def test_timestamp_expected_base_over_20_percent_fails(self, checker):
+        result = checker.check_timestamp_interval(
+            pd.DataFrame({"timestamp": [0, 49, 98, 147]}),
+            "timestamp",
+            expected_base_ms=40,
+        )
+
+        assert result.status == "FAIL"
+        assert "指定基准 40ms" in result.summary
+        assert "偏差 22.5%" in result.summary
+
+    def test_timestamp_expected_base_lower_deviation_over_20_percent_fails(self, checker):
+        result = checker.check_timestamp_interval(
+            pd.DataFrame({"timestamp": [0, 31, 62, 93]}),
+            "timestamp",
+            expected_base_ms=40,
+        )
+
+        assert result.status == "FAIL"
+        assert "偏差 22.5%" in result.summary

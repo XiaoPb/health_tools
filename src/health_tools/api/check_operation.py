@@ -345,6 +345,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                         ratio_tolerance=request.timestamp_ratio,
                         ms_tolerance=request.timestamp_ms,
                         threshold_ratio=request.timestamp_fail_ratio,
+                        expected_base_ms=request.timestamp_base_ms,
                     )
                 )
             if "ipd" in checks and chip.startswith("gh3036"):

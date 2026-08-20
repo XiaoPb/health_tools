@@ -39,6 +39,12 @@ if TYPE_CHECKING:
     "--timestamp-fail-ratio", type=float, default=1.0, help="时间戳异常间隔允许比例 (%, 默认1)"
 )
 @click.option(
+    "--timestamp-base-ms",
+    type=float,
+    default=None,
+    help="指定期望时间戳间隔基准 (毫秒)，偏差超过20%则FAIL",
+)
+@click.option(
     "-o",
     "--output",
     "output_path",
@@ -69,6 +75,7 @@ def check_cmd(
     timestamp_ratio: float,
     timestamp_ms: Optional[float],
     timestamp_fail_ratio: float,
+    timestamp_base_ms: Optional[float],
     output_path: Optional[str],
     sort_report: bool,
     report_path: Optional[str],
@@ -99,6 +106,7 @@ def check_cmd(
                     timestamp_ratio=timestamp_ratio,
                     timestamp_ms=timestamp_ms,
                     timestamp_fail_ratio=timestamp_fail_ratio,
+                    timestamp_base_ms=timestamp_base_ms,
                     output_path=Path(output_path) if output_path else None,
                     sort_report=sort_report,
                     report_path=Path(report_path) if report_path else None,
@@ -287,6 +295,7 @@ def _print_criteria(
     timestamp_column: Optional[str] = None,
     timestamp_ratio: float = 20.0,
     timestamp_ms: Optional[float] = None,
+    timestamp_base_ms: Optional[float] = None,
     acc_axis: bool = False,
 ) -> None:
     """打印当前检查项及判断标准"""
@@ -320,9 +329,14 @@ def _print_criteria(
             console.print(f"  [dim]{criteria[key]}[/dim]")
     if timestamp_column:
         ms_text = f", 固定容差±{timestamp_ms:g}ms" if timestamp_ms is not None else ""
+        base_text = (
+            f", 指定基准 {timestamp_base_ms:g}ms，偏差超过20%为FAIL"
+            if timestamp_base_ms is not None
+            else ""
+        )
         console.print(
             f"  [dim]时间戳间隔: 列 {timestamp_column}, "
-            f"相邻间隔偏差≤±{timestamp_ratio:g}%{ms_text} "
+            f"相邻间隔偏差≤±{timestamp_ratio:g}%{ms_text}{base_text} "
             f"(异常比例≤{ratios.get('timestamp', 1.0):g}% 为Warning)[/dim]"
         )
 

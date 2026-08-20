@@ -457,6 +457,7 @@ class DataChecker:
         ratio_tolerance: float = 20.0,
         ms_tolerance: Optional[float] = None,
         threshold_ratio: float = 1.0,
+        expected_base_ms: Optional[float] = None,
     ) -> CheckResult:
         """检查相邻时间戳间隔是否稳定。"""
         if timestamp_column not in df.columns:
@@ -476,6 +477,22 @@ class DataChecker:
         if baseline_ms <= 0:
             return CheckResult("时间戳间隔", False, "基准间隔无效")
 
+        base_deviation = None
+        if expected_base_ms is not None:
+            if not np.isfinite(expected_base_ms) or expected_base_ms <= 0:
+                return CheckResult("时间戳间隔", False, "指定时间基准必须大于0且为有限数值")
+            base_deviation = abs(baseline_ms - expected_base_ms) / expected_base_ms * 100
+            if base_deviation > 20.0:
+                return CheckResult(
+                    "时间戳间隔",
+                    False,
+                    (
+                        f"统计基准 {self._format_ms(baseline_ms)}，"
+                        f"指定基准 {self._format_ms(expected_base_ms)}，"
+                        f"偏差 {base_deviation:.1f}%，超过允许偏差 20%"
+                    ),
+                )
+
         diff_ms = (intervals_ms - baseline_ms).abs()
         ratio_limit = baseline_ms * ratio_tolerance / 100
         abnormal_mask = diff_ms > ratio_limit
@@ -484,6 +501,13 @@ class DataChecker:
         if ms_tolerance is not None:
             abnormal_mask = abnormal_mask | (diff_ms > ms_tolerance)
             limits.append(f"±{ms_tolerance:g}ms")
+
+        base_info = ""
+        if expected_base_ms is not None and base_deviation is not None:
+            base_info = (
+                f"，指定基准 {self._format_ms(expected_base_ms)}"
+                f"，偏差 {base_deviation:.1f}%（允许≤20%）"
+            )
 
         abnormal_count = int(abnormal_mask.sum())
         total_count = len(intervals_ms)
@@ -517,11 +541,11 @@ class DataChecker:
             threshold_ratio=threshold_ratio,
             pass_summary=(
                 f"稳定 {total_count}个间隔; "
-                f"基准 {self._format_ms(baseline_ms)}{self._format_limits(limits)}; {max_info}"
+                f"基准 {self._format_ms(baseline_ms)}{self._format_limits(limits)}{base_info}; {max_info}"
             ),
             abnormal_summary=(
                 f"异常 {abnormal_count}/{total_count}({ratio:.1f}%); "
-                f"基准 {self._format_ms(baseline_ms)}{self._format_limits(limits)}; {max_info}"
+                f"基准 {self._format_ms(baseline_ms)}{self._format_limits(limits)}{base_info}; {max_info}"
             ),
             details=details,
         )
