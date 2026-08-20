@@ -634,7 +634,7 @@ def _apply_compact_check_results(
                 if raw_value is None:
                     continue
                 try:
-                    value = float(raw_value)
+                    value = float(str(raw_value).strip().rstrip("%"))
                 except (TypeError, ValueError):
                     continue
                 if pd.notna(value):

@@ -610,7 +610,37 @@ class TestCheckResultStatus:
         assert rows[0]["通道"] == "Rawdata0"
         assert rows[0]["AGC变化次数"] == "3"
         assert rows[0]["AGC有效对数"] == "4"
-        assert rows[0]["AGC变化占比"] == "75.0"
+        assert rows[0]["异常占比"] == "40.00%"
+        assert rows[0]["偏低占比"] == "20.00%"
+        assert rows[0]["偏高占比"] == "20.00%"
+        assert rows[0]["近0占比"] == "20.00%"
+        assert rows[0]["近满量程占比"] == "20.00%"
+        assert rows[0]["AGC变化占比"] == "75.00%"
+
+    def test_compact_report_includes_acc_frame_counts_and_percent(self, tmp_path):
+        report = FileCheckReport(
+            file_path=tmp_path / "acc.csv",
+            chip="gh3220",
+            results=[
+                CheckResult(
+                    "ACC异常",
+                    False,
+                    "检测到ACC异常帧 16/100 (16.0%)",
+                    status="FAIL",
+                    abnormal_ratio=16.0,
+                    channel_metrics={"-": {"abnormal_count": 16, "total_count": 100}},
+                )
+            ],
+        )
+
+        output = tmp_path / "check_report_compact.csv"
+        _save_compact_report([report], output, tmp_path)
+        rows = list(csv.DictReader(output.open(encoding="utf-8-sig")))
+
+        assert rows[0]["检查项"] == "ACC异常"
+        assert rows[0]["异常数"] == "16"
+        assert rows[0]["总数"] == "100"
+        assert rows[0]["异常占比"] == "16.00%"
 
     def test_frame_ratio_boundary_is_warning(self, checker):
         df = pd.DataFrame({"FRAME_ID": list(range(50)) + list(range(51, 100))})

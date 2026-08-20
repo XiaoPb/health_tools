@@ -136,6 +136,7 @@ class DataChecker:
         pass_summary: str,
         abnormal_summary: str,
         details: Optional[List[str]] = None,
+        channel_metrics: Optional[Dict[str, Dict[str, float]]] = None,
     ) -> CheckResult:
         status, ratio = cls._status_from_ratio(abnormal_count, total_count, threshold_ratio)
         return CheckResult(
@@ -146,6 +147,7 @@ class DataChecker:
             status=status,
             abnormal_ratio=ratio,
             threshold_ratio=threshold_ratio,
+            channel_metrics=channel_metrics or {},
         )
 
     def run_all(self, df: pd.DataFrame) -> List[CheckResult]:
@@ -889,6 +891,13 @@ class DataChecker:
                 f"({report.anomaly_ratio:.1f}%)"
             ),
             details=details,
+            channel_metrics={
+                "-": {
+                    "abnormal_count": report.anomaly_frame_count,
+                    "total_count": report.total_frames,
+                    "abnormal_ratio": report.anomaly_ratio,
+                }
+            },
         )
 
     @staticmethod

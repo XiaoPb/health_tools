@@ -152,6 +152,16 @@ COMPACT_HEADER = [
 ]
 
 
+def _format_compact_percent(value) -> str:
+    """将精简报告中的比例统一格式化为两位小数百分比。"""
+    if value is None or value == "":
+        return ""
+    try:
+        return f"{float(value):.2f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _save_compact_report(reports, output: Path, base: Path) -> None:
     """保存仅包含 WARNING/FAIL 检查项的通道长表。"""
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -191,14 +201,18 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                             "通道": channel,
                             "异常数": metric.get("abnormal_count", ""),
                             "总数": metric.get("total_count", ""),
-                            "异常占比": metric.get("abnormal_ratio", result.abnormal_ratio),
-                            "偏低占比": metric.get("low_ratio", ""),
-                            "偏高占比": metric.get("high_ratio", ""),
-                            "近0占比": metric.get("near_zero_ratio", ""),
-                            "近满量程占比": metric.get("near_full_ratio", ""),
+                            "异常占比": _format_compact_percent(
+                                metric.get("abnormal_ratio", result.abnormal_ratio)
+                            ),
+                            "偏低占比": _format_compact_percent(metric.get("low_ratio", "")),
+                            "偏高占比": _format_compact_percent(metric.get("high_ratio", "")),
+                            "近0占比": _format_compact_percent(metric.get("near_zero_ratio", "")),
+                            "近满量程占比": _format_compact_percent(
+                                metric.get("near_full_ratio", "")
+                            ),
                             "AGC变化次数": agc_count,
                             "AGC有效对数": agc_total,
-                            "AGC变化占比": agc_ratio,
+                            "AGC变化占比": _format_compact_percent(agc_ratio),
                         }
                     )
 
