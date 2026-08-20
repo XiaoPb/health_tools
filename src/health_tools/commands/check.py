@@ -214,6 +214,8 @@ def _check_rule_mismatch(
     timestamp_column: Optional[str] = None,
     chip: str = "",
     require_acc_columns: bool = False,
+    ref_hr_column: Optional[str] = None,
+    ref_spo2_column: Optional[str] = None,
 ) -> str:
     """检查CSV列结构是否满足本次启用的检查项，不匹配则返回跳过原因。"""
     missing: List[str] = []
@@ -235,6 +237,11 @@ def _check_rule_mismatch(
         missing.append("ACC列")
     if timestamp_column and timestamp_column not in df.columns:
         missing.append(f"时间戳列 {timestamp_column}")
+    if "ref" in check_set:
+        if ref_hr_column and ref_hr_column not in df.columns:
+            missing.append(f"心率金标列 {ref_hr_column}")
+        if ref_spo2_column and ref_spo2_column not in df.columns:
+            missing.append(f"血氧金标列 {ref_spo2_column}")
 
     if not missing:
         return ""
