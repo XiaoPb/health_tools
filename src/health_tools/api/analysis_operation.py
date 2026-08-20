@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     import pandas as pd  # noqa: F401
 
 import fnmatch
+import csv
 import json
 import re
 import shutil
@@ -349,6 +350,62 @@ def _copy_files(files: Sequence[Path], root: Path, output: Path) -> Dict[str, Pa
         shutil.copy2(path, target)
         copied[relative.as_posix()] = target
     return copied
+
+
+def _build_classification_manifest(
+    report_path: Path, output: Path
+) -> Tuple[Path, Path, List[Path]]:
+    """根据 check 报告复制分类数据，并写出可续跑的 manifest。"""
+    from health_tools.api.check_operation import _sort_category
+
+    report_path = Path(report_path)
+    classify_root = output / "classified"
+    manifest_path = output / "classification_manifest.csv"
+    manifest_json = output / "classification_manifest.json"
+    rows: List[Dict[str, str]] = []
+    copied: List[Path] = []
+    with report_path.open("r", newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            relative = (row.get("文件相对路径") or row.get("文件名") or "").strip()
+            if not relative:
+                continue
+            source = report_path.parent / Path(relative)
+            category = _sort_category(row)
+            category = {"center": "centered"}.get(category, category)
+            target = classify_root / category / Path(relative)
+            status = "copied"
+            reason = ""
+            if not source.exists():
+                status, reason = "missing", "源文件不存在"
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if not target.exists():
+                    shutil.copy2(source, target)
+                copied.append(target)
+            rows.append(
+                {
+                    "file": row.get("文件名", Path(relative).name),
+                    "source": str(source),
+                    "relative_path": relative,
+                    "category": category,
+                    "status": status,
+                    "reason": reason,
+                }
+            )
+    output.mkdir(parents=True, exist_ok=True)
+    with manifest_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=(
+                list(rows[0])
+                if rows
+                else ["file", "source", "relative_path", "category", "status", "reason"]
+            ),
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    manifest_json.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest_path, manifest_json, copied
 
 
 def _run_supporting_stages(
@@ -865,7 +922,9 @@ def run_check_stage(
         CheckRequest(
             input_path=check_input,
             chip_name=chip,
-            timestamp_column=request.timestamp_column,
+            # 分析流程默认校验 40 ms 时间戳间隔；显式列名仍优先。
+            timestamp_column=request.timestamp_column or "TimeStamp",
+            timestamp_base_ms=40.0,
             output_path=output / "check" / "check_report.csv",
             workers=request.workers,
         ),
@@ -1433,7 +1492,7 @@ def run_analyze(
         current_input_artifacts = [offline_source]
     else:
         current_input_artifacts = source_psd_files
-    upstream_stages = ("discover", "check", "raw", "evaluate", "offline", "plot")
+    upstream_stages = ("discover", "check", "classify", "raw", "evaluate", "offline", "plot")
     for stage in upstream_stages:
         stage_state = state.state.stages[stage]
         if stage_state.status != "completed":
@@ -1518,6 +1577,32 @@ def run_analyze(
                 state.complete("check", [Path(check_path)], fingerprint=check_fingerprint)
             else:
                 state.complete("check", fingerprint=check_fingerprint)
+        classify_fingerprint = _stage_fingerprint("classify", request_key)
+        classify_manifest = output / "classification_manifest.csv"
+        classify_json = output / "classification_manifest.json"
+        if check_path is not None and Path(check_path).exists():
+            if not state.can_reuse(
+                "classify",
+                request_key,
+                fingerprint=classify_fingerprint,
+                artifacts=[classify_manifest, classify_json],
+            ):
+                state.start("classify", classify_fingerprint)
+                try:
+                    manifest, manifest_json, _ = _build_classification_manifest(
+                        Path(check_path), output
+                    )
+                except Exception as exc:
+                    state.fail("classify", exc)
+                    raise
+                state.complete(
+                    "classify",
+                    [manifest, manifest_json],
+                    fingerprint=classify_fingerprint,
+                )
+        else:
+            state.start("classify", classify_fingerprint)
+            state.complete("classify", fingerprint=classify_fingerprint)
         raw_fingerprint = _stage_fingerprint("raw", request_key)
         state.start("raw", raw_fingerprint)
         try:

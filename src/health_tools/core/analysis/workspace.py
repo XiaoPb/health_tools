@@ -8,7 +8,17 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Union
 
-STAGES = ("discover", "check", "raw", "evaluate", "offline", "plot", "diagnose", "report")
+STAGES = (
+    "discover",
+    "check",
+    "classify",
+    "raw",
+    "evaluate",
+    "offline",
+    "plot",
+    "diagnose",
+    "report",
+)
 STATE_FILE = "analysis_state.json"
 
 
