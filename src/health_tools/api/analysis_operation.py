@@ -177,6 +177,17 @@ def _inside(child: Path, parent: Path) -> bool:
     return True
 
 
+def _nested_output_root(source: Path, output: Path) -> Optional[Path]:
+    """仅将严格位于 source 内部的 output 作为输入扫描排除目录。"""
+    if source.is_file():
+        return None
+    source_resolved = source.resolve()
+    output_resolved = output.resolve()
+    if output_resolved == source_resolved or not _inside(output_resolved, source_resolved):
+        return None
+    return output_resolved
+
+
 def _remove_owned_analysis_outputs(output: Path) -> None:
     targets = [
         output / "analysis_state.json",
@@ -1207,13 +1218,14 @@ def run_analyze(
     stages = output / "stages"
     figures = output / "figures"
     source_offline_result = request.offline_result_path is not None
-    source_psd_files = _vshb_files(source, output)
+    excluded_output = _nested_output_root(source, output)
+    source_psd_files = _vshb_files(source, excluded_output)
     source_psd_result = bool(source_psd_files)
     current_input_artifacts: List[Path] = []
     current_raw_root: Optional[Path] = None
     current_raw_files: List[Path] = []
     if not source_offline_result and not source_psd_result:
-        current_raw_root, current_raw_files = _raw_files(source, output)
+        current_raw_root, current_raw_files = _raw_files(source, excluded_output)
         current_input_artifacts = list(current_raw_files)
     elif source_offline_result:
         offline_result_path = request.offline_result_path
@@ -1276,7 +1288,7 @@ def run_analyze(
         if current_raw_root is not None:
             root, raw_files = current_raw_root, current_raw_files
         else:
-            root, raw_files = _raw_files(source, output)
+            root, raw_files = _raw_files(source, excluded_output)
         if not raw_files:
             raise RequestValidationError(f"未找到可分析的原始 CSV: {source}")
         discover_fingerprint = _stage_fingerprint("discover", request_key)

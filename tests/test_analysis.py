@@ -306,6 +306,29 @@ def test_run_analyze_offline_source_excludes_nested_output_vshb(tmp_path: Path, 
     assert plotted_vshb == ["real_result.vshb"]
 
 
+def test_run_analyze_offline_source_with_parent_output_keeps_source_vshb(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "offline"
+    source.mkdir()
+    real_vshb = source / "real_result.vshb"
+    real_vshb.write_text("second,polar,algo_hr,comp_hr,fw_hr\n1,80,80,0,80\n", encoding="utf-8")
+    plotted_vshb = []
+
+    def fake_run_plot(request, *, context=None):
+        plotted_vshb.extend(path.name for path in request.input_path.rglob("*_result.vshb"))
+        return BatchResult("plot")
+
+    monkeypatch.setattr("health_tools.api.file_operations.run_plot", fake_run_plot)
+
+    result = run_analyze(AnalyzeRequest(source, tmp_path, report="markdown", allow_offline=False))
+
+    records = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert [record["file"] for record in records] == ["real.csv"]
+    assert records[0]["source"] == str(real_vshb)
+    assert plotted_vshb == ["real_result.vshb"]
+
+
 def test_run_analyze_check_stage_uses_only_discovered_raw_files(tmp_path: Path, monkeypatch):
     source = tmp_path / "data"
     source.mkdir()
