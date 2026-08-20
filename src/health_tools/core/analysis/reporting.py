@@ -148,7 +148,9 @@ def _abnormal_rows(records: Sequence[AnalysisRecord]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _populate_abnormal(slide, rows: Sequence[Dict[str, Any]], page_number: int = 1, page_count: int = 1) -> None:
+def _populate_abnormal(
+    slide, rows: Sequence[Dict[str, Any]], page_number: int = 1, page_count: int = 1
+) -> None:
     from pptx.dml.color import RGBColor
     from pptx.enum.shapes import PP_PLACEHOLDER
     from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
@@ -158,7 +160,9 @@ def _populate_abnormal(slide, rows: Sequence[Dict[str, Any]], page_number: int =
     content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
     body = _body_shape(slide)
     if title:
-        _set_text(title, f"异常数据统计" + (f"（{page_number}/{page_count}）" if page_count > 1 else ""))
+        _set_text(
+            title, "异常数据统计" + (f"（{page_number}/{page_count}）" if page_count > 1 else "")
+        )
     if body:
         _set_compact_body_text(body, "按场景和异常类型统计；剔除指分类规则排除的数据。")
     if not content:
@@ -166,15 +170,31 @@ def _populate_abnormal(slide, rows: Sequence[Dict[str, Any]], page_number: int =
     left, top, width = content.left, content.top, content.width
     content._element.getparent().remove(content._element)
     row_height = Inches(0.38)
-    table = slide.shapes.add_table(len(rows) + 1, 8, left, top, width, row_height * (len(rows) + 1)).table
+    table = slide.shapes.add_table(
+        len(rows) + 1, 8, left, top, width, row_height * (len(rows) + 1)
+    ).table
     ratios = (0.14, 0.19, 0.09, 0.09, 0.09, 0.09, 0.11, 0.20)
     for column, ratio in zip(table.columns, ratios):
         column.width = int(width * ratio)
     headers = ["场景", "异常类型", "总数", "剔除", "剩余", "数量", "通道", "通道占比"]
-    for row_index, values in enumerate([headers, *[
-        [r["scene"], r["type"], str(r["total"]), str(r["excluded"]), str(r["remaining"]), str(r["count"]), r["channel"], "-" if r["ratio"] is None else f"{r['ratio']:.1f}%"]
-        for r in rows
-    ]]):
+    for row_index, values in enumerate(
+        [
+            headers,
+            *[
+                [
+                    r["scene"],
+                    r["type"],
+                    str(r["total"]),
+                    str(r["excluded"]),
+                    str(r["remaining"]),
+                    str(r["count"]),
+                    r["channel"],
+                    "-" if r["ratio"] is None else f"{r['ratio']:.1f}%",
+                ]
+                for r in rows
+            ],
+        ]
+    ):
         for column, value in enumerate(values):
             cell = table.cell(row_index, column)
             cell.text = str(value)
@@ -993,6 +1013,26 @@ def write_ppt(
             page_index + 1,
             len(pages),
         )
+    abnormal_rows = _abnormal_rows(source_records)
+    abnormal_slide = _add_slide_before_ending(prs, prs.slide_layouts[5])
+    abnormal_content = _placeholder(abnormal_slide, PP_PLACEHOLDER.OBJECT)
+    abnormal_row_height = Inches(0.38)
+    abnormal_per_page = (
+        min(max(int(abnormal_content.height // abnormal_row_height) - 1, 1), 10)
+        if abnormal_content
+        else 10
+    )
+    abnormal_pages = [
+        abnormal_rows[index : index + abnormal_per_page]
+        for index in range(0, len(abnormal_rows), abnormal_per_page)
+    ] or [[]]
+    for page_index, page_rows in enumerate(abnormal_pages):
+        slide = (
+            abnormal_slide
+            if page_index == 0
+            else _add_slide_before_ending(prs, prs.slide_layouts[5])
+        )
+        _populate_abnormal(slide, page_rows, page_index + 1, len(abnormal_pages))
     detail_records = [
         record
         for record in records
