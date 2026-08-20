@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 from health_tools.cli import main
 from health_tools.commands.accuracy_options import accuracy_options
+from health_tools.commands.plot import _parse_time_range
 
 
 def test_cli_help():
@@ -21,6 +22,20 @@ def test_cli_help_lists_aliases_without_loading_commands():
     assert result.exit_code == 0
     assert "parse (p)" in result.output
     assert "convert (cv)" in result.output
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("0-10", (0.0, 10.0)), (" 1.5 - 2.5 ", (1.5, 2.5))],
+)
+def test_plot_time_range_parser_accepts_seconds(value, expected):
+    assert _parse_time_range(value) == expected
+
+
+@pytest.mark.parametrize("value", ["", "10", "10-5", "-1-5", "1-nan", "1-inf"])
+def test_plot_time_range_parser_rejects_invalid_bounds(value):
+    with pytest.raises(click.BadParameter, match="START-END"):
+        _parse_time_range(value)
 
 
 def test_cli_version():

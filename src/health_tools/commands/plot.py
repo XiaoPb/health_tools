@@ -1,3 +1,4 @@
+import math
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -141,7 +142,7 @@ def _parse_time_range(value: Optional[str]):
         if len(parts) != 2:
             raise ValueError
         start, end = (float(part.strip()) for part in parts)
-        if start < 0 or end <= start:
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
             raise ValueError
     except (TypeError, ValueError):
         raise click.BadParameter("时间范围必须使用 START-END，且满足 0 <= START < END") from None
