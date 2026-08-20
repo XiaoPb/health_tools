@@ -459,6 +459,7 @@ class AnalyzeRequest:
     activity: str = "auto"
     classify_rule: Optional[str] = None
     classify: Tuple[str, ...] = ()
+    include_categories: Tuple[str, ...] = ()
     fast_report: bool = False
 
     def __post_init__(self) -> None:
@@ -470,6 +471,7 @@ class AnalyzeRequest:
             object.__setattr__(self, "offline_result_path", Path(self.offline_result_path))
         object.__setattr__(self, "figure_paths", tuple(Path(path) for path in self.figure_paths))
         object.__setattr__(self, "classify", tuple(self.classify))
+        object.__setattr__(self, "include_categories", tuple(self.include_categories))
 
 
 @dataclass(frozen=True)

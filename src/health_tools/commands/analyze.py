@@ -36,6 +36,9 @@ console = Console()
     "--classify-rule", type=click.Path(exists=True, path_type=Path), help="分类 YAML 规则"
 )
 @click.option("--classify", multiple=True, help="分类覆盖规则 name=regex，可重复")
+@click.option(
+    "--include-category", "include_categories", multiple=True, help="报告额外展示分类，可重复"
+)
 @click.option("--report", type=click.Choice(["markdown", "pptx", "all"]), default="all")
 @click.option("--offline-version", help="离线算法版本；默认使用已配置默认版本")
 @click.option("--no-offline", is_flag=True, help="禁止自动离线 PSD 升级")
@@ -72,6 +75,7 @@ def analyze_cmd(
     focus: Tuple[str, ...],
     classify_rule: Optional[Path],
     classify: Tuple[str, ...],
+    include_categories: Tuple[str, ...],
     report: str,
     offline_version: Optional[str],
     no_offline: bool,
@@ -120,6 +124,7 @@ def analyze_cmd(
                     focus=focus,
                     classify_rule=str(classify_rule) if classify_rule else None,
                     classify=classify,
+                    include_categories=include_categories,
                     fast_report=fast_report,
                     report=report,
                     offline_version=offline_version,

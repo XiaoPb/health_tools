@@ -186,6 +186,7 @@ def _request_key(request: AnalyzeRequest, source: Path) -> Dict[str, object]:
         "activity": request.activity,
         "classify_rule": request.classify_rule or "",
         "classify": tuple(request.classify),
+        "include_categories": tuple(request.include_categories),
     }
 
 
@@ -1837,10 +1838,19 @@ def run_analyze(
                             output / "analysis_report.pptx",
                             request.accuracy_thresholds,
                             request.accuracy_inclusive,
+                            include_categories=request.include_categories,
+                            focus=request.focus,
                         )
                     )
                 else:
-                    reports.append(write_ppt(records, output / "analysis_report.pptx"))
+                    reports.append(
+                        write_ppt(
+                            records,
+                            output / "analysis_report.pptx",
+                            include_categories=request.include_categories,
+                            focus=request.focus,
+                        )
+                    )
         except Exception as exc:
             state.fail("report", exc)
             raise

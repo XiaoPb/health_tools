@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import fnmatch
 import json
 import posixpath
 import re
@@ -672,6 +673,14 @@ def _merge_record(target: AnalysisRecord, candidate: AnalysisRecord) -> None:
     target.focused = target.focused or candidate.focused
     target.notes = list(dict.fromkeys([*target.notes, *candidate.notes]))
     target.warnings = list(dict.fromkeys([*target.warnings, *candidate.warnings]))
+    target.classification = list(dict.fromkeys([*target.classification, *candidate.classification]))
+    target.exclusion_reasons = list(
+        dict.fromkeys([*target.exclusion_reasons, *candidate.exclusion_reasons])
+    )
+    target.excluded = target.excluded or candidate.excluded
+    for channel, ratio in candidate.channel_abnormal_ratio.items():
+        if channel not in target.channel_abnormal_ratio:
+            target.channel_abnormal_ratio[channel] = ratio
     if not target.figure and candidate.figure:
         target.figure = candidate.figure
     if not target.secondary_figure and candidate.secondary_figure:
@@ -707,6 +716,9 @@ def _copy_record(record: AnalysisRecord) -> AnalysisRecord:
     result.notes = list(record.notes)
     result.warnings = list(record.warnings)
     result.plot_data = dict(record.plot_data)
+    result.classification = list(record.classification)
+    result.channel_abnormal_ratio = dict(record.channel_abnormal_ratio)
+    result.exclusion_reasons = list(record.exclusion_reasons)
     return result
 
 
@@ -719,6 +731,119 @@ def _deduplicate_records(records: Iterable[AnalysisRecord]) -> List[AnalysisReco
             continue
         _merge_record(merged[key], record)
     return list(merged.values())
+
+
+def _accuracy_metrics_for_record(record: AnalysisRecord) -> Dict[str, Any]:
+    """Return the most useful accuracy comparison for record-level ordering."""
+    comparisons = record.metrics.get("comparisons")
+    if isinstance(comparisons, dict):
+        preferred = comparisons.get("online")
+        if not isinstance(preferred, dict):
+            preferred = next(
+                (value for value in comparisons.values() if isinstance(value, dict)), None
+            )
+        if isinstance(preferred, dict) and int(preferred.get("samples") or 0) > 0:
+            return preferred
+    for values in (record.metrics, record.psd, record.features):
+        if isinstance(values, dict) and int(values.get("samples") or 0) > 0:
+            return values
+    return record.metrics
+
+
+def _record_accuracy_value(record: AnalysisRecord) -> float:
+    metrics = _accuracy_metrics_for_record(record)
+    within_values: List[float] = []
+    for key, value in metrics.items():
+        if not str(key).startswith("within_"):
+            continue
+        try:
+            within_values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if within_values:
+        return min(within_values)
+    try:
+        return 100.0 - float(metrics.get("mae") or 0.0)
+    except (TypeError, ValueError):
+        return 100.0
+
+
+def _record_max_error(record: AnalysisRecord) -> float:
+    metrics = _accuracy_metrics_for_record(record)
+    try:
+        return float(metrics.get("max_error") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _is_low_accuracy(record: AnalysisRecord) -> bool:
+    """Identify normal records that have concrete accuracy-deviation evidence."""
+    for values in (record.metrics, record.psd, record.features):
+        if not isinstance(values, dict):
+            continue
+        if values.get("low_accuracy") or values.get("algorithm_low_accuracy"):
+            return True
+        if values.get("algorithm_abnormal"):
+            return True
+        try:
+            if float(values.get("error_ratio") or 0.0) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+        for key, value in values.items():
+            if not str(key).startswith("within_"):
+                continue
+            try:
+                if int(values.get("samples") or 0) > 0 and float(value) < 100.0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return (
+        bool(record.segments)
+        or bool(record.warnings)
+        or (record.abnormal and bool(record.figure))
+        or "algorithm_low_accuracy" in record.classification
+    )
+
+
+def _detail_records(
+    records: Iterable[AnalysisRecord],
+    *,
+    include_categories: Sequence[str] = (),
+    focus: Sequence[str] = (),
+) -> List[AnalysisRecord]:
+    """Select and order one evidence page per logical record.
+
+    Normal records are shown only when they contain low-accuracy evidence. Explicit
+    categories and file globs broaden the selection; the existing ``focused`` flag
+    remains an equivalent file-level override.
+    """
+    include = {str(category).strip() for category in include_categories if str(category).strip()}
+    normalized_focus = [str(pattern).replace("\\", "/") for pattern in focus]
+    selected: List[AnalysisRecord] = []
+    for record in records:
+        labels = set(record.classification) or {record.primary_classification}
+        category_match = bool(labels & include)
+        file_name = str(record.file).replace("\\", "/")
+        file_focus = record.focused or any(
+            fnmatch.fnmatchcase(file_name, pattern)
+            or fnmatch.fnmatchcase(Path(file_name).name, pattern)
+            for pattern in normalized_focus
+        )
+        category_focus = bool(labels & set(normalized_focus))
+        default_match = record.primary_classification == "normal" and _is_low_accuracy(record)
+        legacy_match = record.conclusion == "证据不足" and bool(record.figure)
+        if default_match or category_match or file_focus or category_focus or legacy_match:
+            selected.append(record)
+    return sorted(
+        selected,
+        key=lambda record: (
+            record.primary_classification,
+            _record_accuracy_value(record),
+            -_record_max_error(record),
+            _record_key(record),
+        ),
+    )
 
 
 def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
@@ -917,6 +1042,8 @@ def write_ppt(
     accuracy_thresholds: Optional[Sequence[float]] = None,
     accuracy_inclusive: bool = False,
     fast_mode: bool = False,
+    include_categories: Sequence[str] = (),
+    focus: Sequence[str] = (),
 ) -> Path:
     try:
         from pptx import Presentation
@@ -1033,14 +1160,11 @@ def write_ppt(
             else _add_slide_before_ending(prs, prs.slide_layouts[5])
         )
         _populate_abnormal(slide, page_rows, page_index + 1, len(abnormal_pages))
-    detail_records = [
-        record
-        for record in records
-        if record.abnormal
-        or record.focused
-        or bool(record.warnings)
-        or (record.conclusion == "证据不足" and bool(record.figure))
-    ]
+    detail_records = _detail_records(
+        records,
+        include_categories=include_categories,
+        focus=focus,
+    )
     activity_names = {
         "rest": "静息",
         "walk": "步行",
