@@ -46,11 +46,12 @@ def test_sort_report_moves_files_and_keeps_relative_paths(tmp_path):
     assert not (src / "sub" / "bad.csv").exists()
 
     normal_rows = _read_csv(output / "normal_files.csv")
-    abnormal_rows = _read_csv(output / "other_files.csv")
+    abnormal_rows = _read_csv(output / "abnormal_files.csv")
     assert normal_rows[1][0:2] == ["ok.csv", "ok.csv"]
     assert normal_rows[1][3] == "已移动"
     assert abnormal_rows[1][0:2] == ["bad.csv", "sub/bad.csv"]
     assert abnormal_rows[1][3] == "已移动"
+    assert abnormal_rows[1][5] == "other"
 
 
 def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
@@ -151,7 +152,8 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
     }
     for category, relative in expected.items():
         assert (tmp_path / "sorted" / "abnormal" / category / relative).exists()
-        assert (tmp_path / "sorted" / f"{category}_files.csv").exists()
+        assert (tmp_path / "sorted" / "abnormal_files.csv").exists()
+        assert not (tmp_path / "sorted" / f"{category}_files.csv").exists()
     assert (tmp_path / "sorted" / "normal" / paths[7]).exists()
     assert (tmp_path / "sorted" / "normal_files.csv").exists()
 

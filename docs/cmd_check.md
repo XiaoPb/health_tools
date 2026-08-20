@@ -136,16 +136,10 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 
 报告必须包含 `文件相对路径` 列；旧报告缺少具体检查项列时，会按可识别的列和 `总异常(结果)` 回退到 `abnormal/other/` 或 `normal/`。分拣不会覆盖目标同名文件，源文件不存在、路径非法或目标已存在时记录为跳过。
 
-每个分类都会生成一个清单 CSV，列出文件名、相对路径、目标路径、移动状态、原因和场景分类：
+正常文件生成 `normal_files.csv`，异常文件统一生成一个 `abnormal_files.csv`。异常清单新增 `分类` 列，列出 `frame`、`range`、`acc_fail`、`acc_warning`、`timestamp`、`center` 或 `other`；两个清单都包含文件名、相对路径、目标路径、移动状态、原因和场景分类。
 
 ```text
-frame_files.csv
-range_files.csv
-acc_fail_files.csv
-acc_warning_files.csv
-timestamp_files.csv
-center_files.csv
-other_files.csv
+abnormal_files.csv
 normal_files.csv
 ```
 

@@ -487,7 +487,7 @@ def _relative_report_path(file_path: Path, base_dir: Optional[Path]) -> str:
 
 def _sort_report_files(report_path: Path, output_dir: Path) -> Dict[str, int]:
     """根据检查报告按异常优先级移动文件，并生成分类列表CSV。"""
-    from health_tools.api.check_operation import SORT_CATEGORIES, _sort_category
+    from health_tools.api.check_operation import _sort_category
 
     rows = _read_report_rows(report_path)
     if not rows:
@@ -503,7 +503,7 @@ def _sort_report_files(report_path: Path, output_dir: Path) -> Dict[str, int]:
             + "，请重新运行 check 生成带文件相对路径的新报告"
         )
 
-    records: Dict[str, List[List[str]]] = {category: [] for category in SORT_CATEGORIES}
+    records: Dict[str, List[List[str]]] = {"normal": [], "abnormal": []}
     stats: Dict[str, int] = {"skipped": 0}
     report_dir = report_path.parent
 
@@ -512,10 +512,11 @@ def _sort_report_files(report_path: Path, output_dir: Path) -> Dict[str, int]:
         file_name = row.get("文件名", "").strip()
         scene = row.get("场景分类", "default") or "default"
         category = _sort_category(row)
-        category_records = records[category]
+        bucket = "normal" if category == "normal" else "abnormal"
+        category_records = records[bucket]
         if not rel_path_text:
             category_records.append(
-                [file_name, rel_path_text, "", "跳过", "文件相对路径为空", scene]
+                [file_name, rel_path_text, "", "跳过", "文件相对路径为空", category, scene]
             )
             stats["skipped"] += 1
             continue
@@ -523,7 +524,7 @@ def _sort_report_files(report_path: Path, output_dir: Path) -> Dict[str, int]:
         rel_path = Path(rel_path_text)
         if rel_path.is_absolute() or ".." in rel_path.parts:
             category_records.append(
-                [file_name, rel_path_text, "", "跳过", "文件相对路径非法", scene]
+                [file_name, rel_path_text, "", "跳过", "文件相对路径非法", category, scene]
             )
             stats["skipped"] += 1
             continue
@@ -536,25 +537,27 @@ def _sort_report_files(report_path: Path, output_dir: Path) -> Dict[str, int]:
 
         if not src_path.exists():
             category_records.append(
-                [file_name, rel_path_text, str(dst_path), "跳过", "源文件不存在", scene]
+                [file_name, rel_path_text, str(dst_path), "跳过", "源文件不存在", category, scene]
             )
             stats["skipped"] += 1
             continue
         if dst_path.exists():
             category_records.append(
-                [file_name, rel_path_text, str(dst_path), "跳过", "目标文件已存在", scene]
+                [file_name, rel_path_text, str(dst_path), "跳过", "目标文件已存在", category, scene]
             )
             stats["skipped"] += 1
             continue
 
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src_path), str(dst_path))
-        category_records.append([file_name, rel_path_text, str(dst_path), "已移动", "", scene])
+        category_records.append(
+            [file_name, rel_path_text, str(dst_path), "已移动", "", category, scene]
+        )
         stats[category] = stats.get(category, 0) + 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    for category in SORT_CATEGORIES:
-        _write_sort_list(output_dir / f"{category}_files.csv", records[category])
+    _write_sort_list(output_dir / "normal_files.csv", records["normal"])
+    _write_sort_list(output_dir / "abnormal_files.csv", records["abnormal"])
     return stats
 
 
@@ -579,5 +582,5 @@ def _write_sort_list(path: Path, records: List[List[str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-        writer.writerow(["文件名", "文件相对路径", "目标路径", "状态", "原因", "场景分类"])
+        writer.writerow(["文件名", "文件相对路径", "目标路径", "状态", "原因", "分类", "场景分类"])
         writer.writerows(records)
