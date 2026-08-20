@@ -2827,6 +2827,47 @@ def test_ppt_does_not_merge_same_basename_from_different_directories(tmp_path: P
     assert sum("scene_b/sample.csv" in text for text in texts) == 1
 
 
+def test_ppt_batch_statistics_keep_duplicate_input_records(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    records = [
+        AnalysisRecord(
+            "scene/sample.csv",
+            "sample.csv",
+            "hr",
+            focused=True,
+            conclusion="证据不足",
+            metrics={"samples": 10, "mae": 4.0, "max_error": 8.0},
+        ),
+        AnalysisRecord(
+            "scene/sample.csv",
+            "sample.csv",
+            "hr",
+            focused=True,
+            conclusion="证据不足",
+            metrics={"samples": 20, "mae": 6.0, "max_error": 12.0},
+        ),
+    ]
+    output = write_ppt(records, tmp_path / "report.pptx")
+    deck = Presentation(str(output))
+    tables = [shape.table for slide in deck.slides for shape in slide.shapes if shape.has_table]
+    accuracy_values = [cell.text for table in tables for row in table.rows for cell in row.cells]
+    summary_text = "\n".join(
+        getattr(shape, "text", "") for slide in deck.slides for shape in slide.shapes
+    )
+    assert "文件数" in "\n".join(accuracy_values)
+    assert any(cell == "2" for cell in accuracy_values)
+    assert "证据不足：2 个文件" in summary_text
+    assert (
+        sum(
+            "scene/sample.csv" in "\n".join(getattr(shape, "text", "") for shape in slide.shapes)
+            for slide in deck.slides
+        )
+        == 1
+    )
+
+
 def test_report_time_plot_is_generated_separately_and_keeps_psd_primary(monkeypatch, tmp_path):
     from health_tools.api.analysis_operation import _generate_report_time_plots
     from health_tools.core.analysis.models import AnalysisRecord, AnalysisSegment

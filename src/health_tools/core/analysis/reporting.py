@@ -820,7 +820,8 @@ def write_ppt(
         raise RuntimeError("生成 PPT 需要安装 python-pptx") from exc
     template = Path(files("health_tools") / "templates" / "analysis_report.pptx")
     prs = Presentation(str(template))
-    records = _deduplicate_records(records)
+    source_records = list(records)
+    records = _deduplicate_records(source_records)
     cover = prs.slides[0]
     content = prs.slides[1]
     ending = prs.slides[-1]
@@ -833,13 +834,13 @@ def write_ppt(
         if "THANK" in shape.text.upper():
             _replace_text_preserving_style(shape, "分析完成")
     counts: Dict[str, int] = {}
-    for record in records:
+    for record in source_records:
         counts[record.conclusion] = counts.get(record.conclusion, 0) + 1
     summary_text = "\n".join(f"{name}：{count} 个文件" for name, count in counts.items())
     from pptx.util import Inches
 
     thresholds = _accuracy_thresholds(accuracy_thresholds)
-    rows = _accuracy_rows(records, thresholds)
+    rows = _accuracy_rows(source_records, thresholds)
     threshold_pages = [thresholds[index : index + 3] for index in range(0, len(thresholds), 3)]
     accuracy_slide = _add_slide_before_ending(prs, prs.slide_layouts[5])
     accuracy_content = _placeholder(accuracy_slide, PP_PLACEHOLDER.OBJECT)
@@ -922,7 +923,7 @@ def write_ppt(
             warnings=record.warnings,
         )
     conclusion_slide = _duplicate_slide(prs, content)
-    cause_summary = _populate_summary(content, records)
+    cause_summary = _populate_summary(content, source_records)
     _populate_content(
         conclusion_slide,
         "综合结论",
