@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+import fnmatch
 import json
 import posixpath
+import re
 from copy import copy, deepcopy
 from importlib.resources import files
 from pathlib import Path
@@ -111,6 +113,109 @@ def _cause_counts(records: List[AnalysisRecord]) -> List[Dict[str, Any]]:
         {"category": category, "cause": cause, "files": count}
         for (category, cause), count in sorted(counts.items())
     ]
+
+
+def _abnormal_rows(records: Sequence[AnalysisRecord]) -> List[Dict[str, Any]]:
+    grouped: Dict[Tuple[str, str], List[AnalysisRecord]] = {}
+    for record in records:
+        scene = record.scene_label or record.scene or "unknown"
+        kind = record.primary_classification
+        if kind == "normal" and record.abnormal:
+            kind = str((record.cause or {}).get("title") or record.conclusion)
+        grouped.setdefault((scene, kind), []).append(record)
+    rows: List[Dict[str, Any]] = []
+    for (scene, kind), items in sorted(grouped.items()):
+        total = len(items)
+        excluded = sum(1 for item in items if item.excluded)
+        channels: Dict[str, List[float]] = {}
+        for item in items:
+            for channel, ratio in item.channel_abnormal_ratio.items():
+                channels.setdefault(str(channel), []).append(float(ratio))
+        if not channels:
+            channels = {"-": []}
+        for channel, ratios in sorted(channels.items()):
+            rows.append(
+                {
+                    "scene": scene,
+                    "type": kind,
+                    "total": total,
+                    "excluded": excluded,
+                    "remaining": total - excluded,
+                    "count": sum(1 for item in items if item.abnormal),
+                    "channel": channel,
+                    "ratio": (sum(ratios) / len(ratios) if ratios else None),
+                }
+            )
+    return rows
+
+
+def _populate_abnormal(
+    slide, rows: Sequence[Dict[str, Any]], page_number: int = 1, page_count: int = 1
+) -> None:
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import PP_PLACEHOLDER
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+    from pptx.util import Inches, Pt
+
+    title = _placeholder(slide, PP_PLACEHOLDER.TITLE)
+    content = _placeholder(slide, PP_PLACEHOLDER.OBJECT)
+    body = _body_shape(slide)
+    if title:
+        _set_text(
+            title, "异常数据统计" + (f"（{page_number}/{page_count}）" if page_count > 1 else "")
+        )
+    if body:
+        _set_compact_body_text(body, "按场景和异常类型统计；剔除指分类规则排除的数据。")
+    if not content:
+        return
+    left, top, width = content.left, content.top, content.width
+    content._element.getparent().remove(content._element)
+    row_height = Inches(0.38)
+    table = slide.shapes.add_table(
+        len(rows) + 1, 8, left, top, width, row_height * (len(rows) + 1)
+    ).table
+    ratios = (0.14, 0.19, 0.09, 0.09, 0.09, 0.09, 0.11, 0.20)
+    for column, ratio in zip(table.columns, ratios):
+        column.width = int(width * ratio)
+    headers = ["场景", "异常类型", "总数", "剔除", "剩余", "数量", "通道", "通道占比"]
+    for row_index, values in enumerate(
+        [
+            headers,
+            *[
+                [
+                    r["scene"],
+                    r["type"],
+                    str(r["total"]),
+                    str(r["excluded"]),
+                    str(r["remaining"]),
+                    str(r["count"]),
+                    r["channel"],
+                    "-" if r["ratio"] is None else f"{r['ratio']:.1f}%",
+                ]
+                for r in rows
+            ],
+        ]
+    ):
+        for column, value in enumerate(values):
+            cell = table.cell(row_index, column)
+            cell.text = str(value)
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            cell.margin_left = Inches(0.03)
+            cell.margin_right = Inches(0.03)
+            cell.fill.solid()
+            if row_index == 0:
+                cell.fill.fore_color.rgb = RGBColor(13, 110, 253)
+            elif row_index % 2 == 0:
+                cell.fill.fore_color.rgb = RGBColor(238, 246, 255)
+            for paragraph in cell.text_frame.paragraphs:
+                paragraph.alignment = PP_ALIGN.CENTER
+                for run in paragraph.runs:
+                    run.font.name = "微软雅黑"
+                    run.font.size = Pt(9 if row_index else 9.5)
+                    if row_index == 0:
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(255, 255, 255)
+    _remove_secondary_picture(slide)
 
 
 def _plain(record: AnalysisRecord) -> Dict[str, Any]:
@@ -568,6 +673,14 @@ def _merge_record(target: AnalysisRecord, candidate: AnalysisRecord) -> None:
     target.focused = target.focused or candidate.focused
     target.notes = list(dict.fromkeys([*target.notes, *candidate.notes]))
     target.warnings = list(dict.fromkeys([*target.warnings, *candidate.warnings]))
+    target.classification = list(dict.fromkeys([*target.classification, *candidate.classification]))
+    target.exclusion_reasons = list(
+        dict.fromkeys([*target.exclusion_reasons, *candidate.exclusion_reasons])
+    )
+    target.excluded = target.excluded or candidate.excluded
+    for channel, ratio in candidate.channel_abnormal_ratio.items():
+        if channel not in target.channel_abnormal_ratio:
+            target.channel_abnormal_ratio[channel] = ratio
     if not target.figure and candidate.figure:
         target.figure = candidate.figure
     if not target.secondary_figure and candidate.secondary_figure:
@@ -603,6 +716,9 @@ def _copy_record(record: AnalysisRecord) -> AnalysisRecord:
     result.notes = list(record.notes)
     result.warnings = list(record.warnings)
     result.plot_data = dict(record.plot_data)
+    result.classification = list(record.classification)
+    result.channel_abnormal_ratio = dict(record.channel_abnormal_ratio)
+    result.exclusion_reasons = list(record.exclusion_reasons)
     return result
 
 
@@ -615,6 +731,119 @@ def _deduplicate_records(records: Iterable[AnalysisRecord]) -> List[AnalysisReco
             continue
         _merge_record(merged[key], record)
     return list(merged.values())
+
+
+def _accuracy_metrics_for_record(record: AnalysisRecord) -> Dict[str, Any]:
+    """Return the most useful accuracy comparison for record-level ordering."""
+    comparisons = record.metrics.get("comparisons")
+    if isinstance(comparisons, dict):
+        preferred = comparisons.get("online")
+        if not isinstance(preferred, dict):
+            preferred = next(
+                (value for value in comparisons.values() if isinstance(value, dict)), None
+            )
+        if isinstance(preferred, dict) and int(preferred.get("samples") or 0) > 0:
+            return preferred
+    for values in (record.metrics, record.psd, record.features):
+        if isinstance(values, dict) and int(values.get("samples") or 0) > 0:
+            return values
+    return record.metrics
+
+
+def _record_accuracy_value(record: AnalysisRecord) -> float:
+    metrics = _accuracy_metrics_for_record(record)
+    within_values: List[float] = []
+    for key, value in metrics.items():
+        if not str(key).startswith("within_"):
+            continue
+        try:
+            within_values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if within_values:
+        return min(within_values)
+    try:
+        return 100.0 - float(metrics.get("mae") or 0.0)
+    except (TypeError, ValueError):
+        return 100.0
+
+
+def _record_max_error(record: AnalysisRecord) -> float:
+    metrics = _accuracy_metrics_for_record(record)
+    try:
+        return float(metrics.get("max_error") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _is_low_accuracy(record: AnalysisRecord) -> bool:
+    """Identify normal records that have concrete accuracy-deviation evidence."""
+    for values in (record.metrics, record.psd, record.features):
+        if not isinstance(values, dict):
+            continue
+        if values.get("low_accuracy") or values.get("algorithm_low_accuracy"):
+            return True
+        if values.get("algorithm_abnormal"):
+            return True
+        try:
+            if float(values.get("error_ratio") or 0.0) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+        for key, value in values.items():
+            if not str(key).startswith("within_"):
+                continue
+            try:
+                if int(values.get("samples") or 0) > 0 and float(value) < 100.0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return (
+        bool(record.segments)
+        or bool(record.warnings)
+        or (record.abnormal and bool(record.figure))
+        or "algorithm_low_accuracy" in record.classification
+    )
+
+
+def _detail_records(
+    records: Iterable[AnalysisRecord],
+    *,
+    include_categories: Sequence[str] = (),
+    focus: Sequence[str] = (),
+) -> List[AnalysisRecord]:
+    """Select and order one evidence page per logical record.
+
+    Normal records are shown only when they contain low-accuracy evidence. Explicit
+    categories and file globs broaden the selection; the existing ``focused`` flag
+    remains an equivalent file-level override.
+    """
+    include = {str(category).strip() for category in include_categories if str(category).strip()}
+    normalized_focus = [str(pattern).replace("\\", "/") for pattern in focus]
+    selected: List[AnalysisRecord] = []
+    for record in records:
+        labels = set(record.classification) or {record.primary_classification}
+        category_match = bool(labels & include)
+        file_name = str(record.file).replace("\\", "/")
+        file_focus = record.focused or any(
+            fnmatch.fnmatchcase(file_name, pattern)
+            or fnmatch.fnmatchcase(Path(file_name).name, pattern)
+            for pattern in normalized_focus
+        )
+        category_focus = bool(labels & set(normalized_focus))
+        default_match = record.primary_classification == "normal" and _is_low_accuracy(record)
+        legacy_match = record.conclusion == "证据不足" and bool(record.figure)
+        if default_match or category_match or file_focus or category_focus or legacy_match:
+            selected.append(record)
+    return sorted(
+        selected,
+        key=lambda record: (
+            record.primary_classification,
+            _record_accuracy_value(record),
+            -_record_max_error(record),
+            _record_key(record),
+        ),
+    )
 
 
 def _populate_summary(slide, records: List[AnalysisRecord]) -> str:
@@ -812,6 +1041,9 @@ def write_ppt(
     output: Path,
     accuracy_thresholds: Optional[Sequence[float]] = None,
     accuracy_inclusive: bool = False,
+    fast_mode: bool = False,
+    include_categories: Sequence[str] = (),
+    focus: Sequence[str] = (),
 ) -> Path:
     try:
         from pptx import Presentation
@@ -838,6 +1070,46 @@ def write_ppt(
         counts[record.conclusion] = counts.get(record.conclusion, 0) + 1
     summary_text = "\n".join(f"{name}：{count} 个文件" for name, count in counts.items())
     from pptx.util import Inches
+
+    if fast_mode:
+        activity_names = {
+            "rest": "静息",
+            "walk": "步行",
+            "run": "跑步",
+            "cycle": "骑行",
+            "strength": "力量训练",
+            "interval": "间歇训练",
+            "recovery": "恢复阶段",
+            "other": "其他场景",
+        }
+        for record in records:
+            slide = _duplicate_slide(prs, content)
+            check_lines = []
+            check_metrics = record.features.get("check_channel_metrics", {})
+            if isinstance(check_metrics, dict):
+                for channel, metrics in check_metrics.items():
+                    if isinstance(metrics, dict) and metrics.get("abnormal_ratio") is not None:
+                        check_lines.append(
+                            f"{channel} 异常占比 {float(metrics['abnormal_ratio']):.1f}%"
+                        )
+            body = "\n".join(record.notes) or "未发现 check 异常"
+            _populate_content(
+                slide,
+                (
+                    activity_names.get(record.activity, record.activity)
+                    if record.activity and record.activity != "other"
+                    else (record.scene_label or record.scene)
+                ),
+                body,
+                record.figure or "",
+                subtitle_text=record.file,
+                secondary_figure=record.secondary_figure or "",
+                check_text="\n".join(check_lines),
+                warnings=record.warnings,
+            )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        prs.save(str(output))
+        return output
 
     thresholds = _accuracy_thresholds(accuracy_thresholds)
     rows = _accuracy_rows(source_records, thresholds)
@@ -868,14 +1140,31 @@ def write_ppt(
             page_index + 1,
             len(pages),
         )
-    detail_records = [
-        record
-        for record in records
-        if record.abnormal
-        or record.focused
-        or bool(record.warnings)
-        or (record.conclusion == "证据不足" and bool(record.figure))
-    ]
+    abnormal_rows = _abnormal_rows(source_records)
+    abnormal_slide = _add_slide_before_ending(prs, prs.slide_layouts[5])
+    abnormal_content = _placeholder(abnormal_slide, PP_PLACEHOLDER.OBJECT)
+    abnormal_row_height = Inches(0.38)
+    abnormal_per_page = (
+        min(max(int(abnormal_content.height // abnormal_row_height) - 1, 1), 10)
+        if abnormal_content
+        else 10
+    )
+    abnormal_pages = [
+        abnormal_rows[index : index + abnormal_per_page]
+        for index in range(0, len(abnormal_rows), abnormal_per_page)
+    ] or [[]]
+    for page_index, page_rows in enumerate(abnormal_pages):
+        slide = (
+            abnormal_slide
+            if page_index == 0
+            else _add_slide_before_ending(prs, prs.slide_layouts[5])
+        )
+        _populate_abnormal(slide, page_rows, page_index + 1, len(abnormal_pages))
+    detail_records = _detail_records(
+        records,
+        include_categories=include_categories,
+        focus=focus,
+    )
     activity_names = {
         "rest": "静息",
         "walk": "步行",
@@ -932,3 +1221,81 @@ def write_ppt(
     output.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(output))
     return output
+
+
+def _fast_report_records(
+    check_report: Path, figure_dirs: Sequence[Path], output_dir: Path
+) -> Tuple[List[AnalysisRecord], Path]:
+    """仅使用既有 check CSV/PNG 生成报告，不执行跑库、评估或绘图。"""
+    roots = [Path(item) for item in figure_dirs]
+    candidates = [path for root in roots for path in root.rglob("*.png") if path.is_file()]
+    prefix = re.compile(r"^\d+[_-]+")
+    by_name: Dict[str, List[Path]] = {}
+    for path in candidates:
+        normalized = prefix.sub("", path.name)
+        if normalized.lower().endswith(".png"):
+            normalized = normalized[:-4]
+        by_name.setdefault(normalized.lower(), []).append(path)
+    records: List[AnalysisRecord] = []
+    manifest_rows: List[Dict[str, str]] = []
+    with Path(check_report).open("r", newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            file_name = (
+                row.get("文件相对路径") or row.get("文件名") or row.get("file") or ""
+            ).strip()
+            if not file_name:
+                continue
+            base = Path(file_name).name
+            stem_keys = {
+                base.lower(),
+                file_name.replace("\\", "_").replace("/", "_").lower(),
+            }
+            stem_keys.update(f"{key}_time" for key in tuple(stem_keys))
+            matches: List[Path] = []
+            for key in stem_keys:
+                matches.extend(by_name.get(key, []))
+            unique_matches = list(dict.fromkeys(matches))
+            primary = [path for path in unique_matches if not path.stem.lower().endswith("_time")]
+            secondary = [path for path in unique_matches if path.stem.lower().endswith("_time")]
+            figure = str(primary[0]) if len(primary) == 1 else None
+            secondary_figure = str(secondary[0]) if len(secondary) == 1 else None
+            reason = "" if figure else ("图片未匹配" if not unique_matches else "图片匹配歧义")
+            record = AnalysisRecord(
+                file=file_name,
+                source=file_name,
+                analysis_type="hr",
+                conclusion="check 结果",
+                figure=figure,
+                secondary_figure=secondary_figure,
+                notes=[str(row.get("总异常(说明)", "") or row.get("result", "") or "")],
+                warnings=[str(row.get("结果", "") or row.get("result", "") or "")],
+            )
+            records.append(record)
+            manifest_rows.append(
+                {
+                    "file": file_name,
+                    "figure": figure or "",
+                    "secondary_figure": secondary_figure or "",
+                    "status": "ok" if figure else "skipped",
+                    "reason": reason,
+                }
+            )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = output_dir / "fast_report_manifest.csv"
+    with manifest.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["file", "figure", "secondary_figure", "status", "reason"],
+        )
+        writer.writeheader()
+        writer.writerows(manifest_rows)
+    return records, manifest
+
+
+def write_fast_ppt(
+    check_report: Path, figure_dirs: Sequence[Path], output: Path
+) -> Tuple[Path, Path]:
+    """仅使用既有 check CSV/PNG 生成报告，不执行跑库、评估或绘图。"""
+    records, manifest = _fast_report_records(check_report, figure_dirs, output.parent)
+    result = write_ppt(records, output, fast_mode=True)
+    return result, manifest

@@ -63,6 +63,8 @@ ANALYSIS_AUXILIARY_CSVS = {
 
 
 def _validate(request: AnalyzeRequest) -> None:
+    if request.fast_report and (request.check_report_path is None or not request.figure_paths):
+        raise RequestValidationError("--fast-report 必须同时提供 --check-report 和 --figure-dir")
     if request.analysis_type not in {"hr", "spo2", "other"}:
         raise RequestValidationError("analysis_type 仅支持 hr、spo2 或 other")
     if request.analysis_type == "other" and not request.rule_file:
@@ -87,6 +89,15 @@ def _validate(request: AnalyzeRequest) -> None:
         raise RequestValidationError("sample_rate 必须大于 0")
     if request.workers < 1:
         raise RequestValidationError("workers 必须大于 0")
+
+
+def _fast_report_records(
+    check_report: Path, figure_dirs: Sequence[Path], output_dir: Path
+) -> Tuple[List[AnalysisRecord], Path]:
+    """快速报告产物读取入口，委托给报告模块避免重复匹配逻辑。"""
+    from health_tools.core.analysis.reporting import _fast_report_records as read_records
+
+    return read_records(check_report, figure_dirs, output_dir)
 
 
 def _normalize_accuracy_request(request: AnalyzeRequest) -> AnalyzeRequest:
@@ -175,6 +186,7 @@ def _request_key(request: AnalyzeRequest, source: Path) -> Dict[str, object]:
         "activity": request.activity,
         "classify_rule": request.classify_rule or "",
         "classify": tuple(request.classify),
+        "include_categories": tuple(request.include_categories),
     }
 
 
@@ -866,12 +878,13 @@ def _raw_records(
             analyzed_files.append(path)
         except Exception as exc:
             skip_reason = reason if status == "SKIP" else ""
+            scene_info = infer_scene(path, root)
             record = AnalysisRecord(
                 file=name,
                 source=str(path),
                 analysis_type=request.analysis_type,
                 scene=(request.scene if request.scene in {"static", "dynamic"} else "unknown"),
-                scene_label=(infer_scene(path, root).label if infer_scene(path, root) else None),
+                scene_label=(scene_info.label if scene_info else None),
                 focused=name in focused,
                 conclusion="证据不足",
                 features=(
@@ -1482,6 +1495,35 @@ def run_analyze(
     _validate(request)
     request = _normalize_accuracy_request(request)
     ctx = _context(context)
+    if request.fast_report:
+        check_report = request.check_report_path
+        assert check_report is not None
+        from health_tools.core.analysis.reporting import (
+            _fast_report_records,
+        )
+        from health_tools.core.analysis.reporting import (
+            write_ppt as _write_ppt,
+        )
+
+        records, manifest = _fast_report_records(
+            check_report, request.figure_paths, request.output_path
+        )
+        report = _write_ppt(
+            records,
+            Path(request.output_path) / "analysis_report.pptx",
+            fast_mode=True,
+        )
+        items = tuple(
+            ItemResult(ItemStatus.WARN, record.source, record.figure or "", reason="快速报告")
+            for record in records
+        )
+        return AnalyzeResult(
+            batch=BatchResult("analyze", items, (report, manifest)),
+            output_dir=Path(request.output_path),
+            reports=(report,),
+            summary_path=manifest,
+            conclusion_counts={"快速报告": len(records)},
+        )
     source = _require_path(request.input_path)
     output = Path(request.output_path)
     core_outputs = [
@@ -1796,10 +1838,19 @@ def run_analyze(
                             output / "analysis_report.pptx",
                             request.accuracy_thresholds,
                             request.accuracy_inclusive,
+                            include_categories=request.include_categories,
+                            focus=request.focus,
                         )
                     )
                 else:
-                    reports.append(write_ppt(records, output / "analysis_report.pptx"))
+                    reports.append(
+                        write_ppt(
+                            records,
+                            output / "analysis_report.pptx",
+                            include_categories=request.include_categories,
+                            focus=request.focus,
+                        )
+                    )
         except Exception as exc:
             state.fail("report", exc)
             raise

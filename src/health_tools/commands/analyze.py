@@ -36,6 +36,9 @@ console = Console()
     "--classify-rule", type=click.Path(exists=True, path_type=Path), help="分类 YAML 规则"
 )
 @click.option("--classify", multiple=True, help="分类覆盖规则 name=regex，可重复")
+@click.option(
+    "--include-category", "include_categories", multiple=True, help="报告额外展示分类，可重复"
+)
 @click.option("--report", type=click.Choice(["markdown", "pptx", "all"]), default="all")
 @click.option("--offline-version", help="离线算法版本；默认使用已配置默认版本")
 @click.option("--no-offline", is_flag=True, help="禁止自动离线 PSD 升级")
@@ -54,6 +57,7 @@ console = Console()
 )
 @click.option("--resume/--no-resume", default=True, help="复用输出目录中已完成阶段")
 @click.option("--restart", is_flag=True, help="清理分析状态后重新开始")
+@click.option("--fast-report", is_flag=True, help="使用现有 check CSV/PNG 快速生成 PPT")
 @click.option("--workers", type=int, default=4, help="并行工作数（默认 4）")
 @click.option("-v", "--verbose", is_flag=True, help="显示文件级结果")
 def analyze_cmd(
@@ -71,6 +75,7 @@ def analyze_cmd(
     focus: Tuple[str, ...],
     classify_rule: Optional[Path],
     classify: Tuple[str, ...],
+    include_categories: Tuple[str, ...],
     report: str,
     offline_version: Optional[str],
     no_offline: bool,
@@ -79,6 +84,7 @@ def analyze_cmd(
     figure_dirs: Tuple[Path, ...],
     resume: bool,
     restart: bool,
+    fast_report: bool,
     workers: int,
     accuracy_thresholds: Optional[Tuple[float, ...]],
     accuracy_inclusive: bool,
@@ -87,6 +93,18 @@ def analyze_cmd(
     """自动分析原始数据或离线 PSD，并生成诊断报告。"""
     from health_tools.api import AnalyzeRequest, run_analyze
     from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
+
+    if fast_report:
+        if check_report is None or not figure_dirs:
+            raise click.UsageError("--fast-report 必须同时提供 --check-report 和 --figure-dir")
+        from health_tools.core.analysis.reporting import write_fast_ppt
+
+        ppt_path, manifest = write_fast_ppt(
+            check_report, figure_dirs, Path(output_path) / "analysis_report.pptx"
+        )
+        console.print(f"报告: {ppt_path}")
+        console.print(f"快速模式清单: {manifest}")
+        return
 
     with CliExecution(console) as context:
         result = invoke_api(
@@ -106,6 +124,8 @@ def analyze_cmd(
                     focus=focus,
                     classify_rule=str(classify_rule) if classify_rule else None,
                     classify=classify,
+                    include_categories=include_categories,
+                    fast_report=fast_report,
                     report=report,
                     offline_version=offline_version,
                     allow_offline=not no_offline,

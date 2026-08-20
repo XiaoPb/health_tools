@@ -22,12 +22,14 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 | `--focus` | 强制深度分析的带目录 glob，可重复；零匹配直接失败 |
 | `--classify-rule` | 分类 YAML 规则；`categories` 中可用正则、标签和优先级 |
 | `--classify` | 分类覆盖规则 `name=regex`，可重复，优先级高于 YAML |
+| `--include-category` | PPT 额外展示指定分类记录，可重复；默认只展示 normal 中低准确度记录 |
 | `--report` | `markdown`、`pptx` 或 `all`，默认 `all` |
 | `--offline-version` | 离线算法版本；未指定时使用芯片默认版本 |
 | `--no-offline` | 禁止自动离线 PSD 升级 |
 | `--check-report` | 复用已有详细 check CSV；可与输入数据目录分离 |
 | `--offline-result` | 复用已有离线跑库结果目录，不再次跑库 |
 | `--figure-dir` | 复用已有 PNG 目录，可重复指定 |
+| `--fast-report` | 仅用已有 `--check-report` 和 `--figure-dir` 快速生成 PPT；不执行分析主流程 |
 | `--resume/--no-resume` | 是否复用输出目录已完成阶段，默认启用 |
 | `--restart` | 清理分析状态和中间产物后重新开始，不删除外部输入 |
 | `--workers` | 数据检查工作数，默认 4 |
@@ -37,7 +39,7 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 
 ## 路径分工
 
-`--input` 只负责提供待分析源数据，可以是原始 CSV 目录，也可以是已有 offline 结果目录。`--check-report`、`--offline-result` 和 `--figure-dir` 都是独立输入，允许来自不同目录；其中 `--figure-dir` 可重复，便于拼接多批证据图。
+`--input` 只负责提供待分析源数据，可以是原始 CSV 目录，也可以是已有 offline 结果目录。`--check-report`、`--offline-result` 和 `--figure-dir` 都是独立输入，允许来自不同目录；其中 `--figure-dir` 可重复，便于拼接多批证据图。`--fast-report` 只读取 `--check-report` 和 `--figure-dir`，输出 `analysis_report.pptx` 与 `fast_report_manifest.csv`，不跑检查、评估、离线升级或 Markdown 报告。
 
 原始 CSV 目录支持从 root 下的相对目录识别场景标签：`root/<场景>/<人名>/<数据.csv>`、`root/<场景>/<数据.csv>` 和 `root/<人名>/<场景>/<数据.csv>`。目录名命中内置别名（如 `静息`、`静止`、`跑步`、`步行`、`骑行`、`恢复`、`static`、`dynamic`）时，标签写入报告的 `scene_label`，并转换为 `static` 或 `dynamic` 参与规则判断；人名或未知目录不会被误判为场景。场景优先级为显式 `--scene static|dynamic`、路径场景、离线/PSD 场景、原始特征推断；`--scene auto` 不覆盖路径场景。
 
@@ -56,7 +58,7 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 3. `plot` 生成报告证据图。报告正文主图固定优先使用跑库后的 PSD 时频图；找不到对应 PSD 图片时再复用已有 STFT/时频图，最后才现场生成 STFT。副图始终为当前记录单独调用 `plot --type time` 重新生成，不复用旧的 time 图片；副图可通过通道选择限制绘制内容，25 Hz 数据最多绘制 10 秒。
 4. 心率文件在结论为“证据不足”或无法确定关键图表时优先离线升级，并引用 `plot --type psd` 的 PNG。显式使用 `--no-offline` 时报告会记录未执行原因。
 
-报告只引用支撑当前原因的关键图。每个唯一逻辑数据文件最多生成一页明细 PPT，不因 Polar warning 或其他附加证据额外分页；同一记录的主图、副图、复审警告和检查/诊断文字合并在该页。逻辑文件按规范化后的相对路径识别，斜杠形式或冗余 `./` 不会造成重复页，但不同目录下的同名文件仍分别报告。重复记录的图片、警告、备注和更具体的异常结论会合并保留。封面、整体准确度分页和综合结论仍属于批次级页面。普通正常文件不额外生成图；异常文件、`--focus` 文件和已有 PSD 证据的“证据不足”文件才进入证据页。帧或时间戳异常无法由 `plot` 表达时，才单独生成采样间隔图。
+报告只引用支撑当前原因的关键图。标准 PPT 页序为：封面 -> 整体准确度 -> 异常数据统计 -> 逐文件明细 -> 综合结论 -> 结束页；快速模式只保留封面、逐文件明细和结束页。每个唯一逻辑数据文件最多生成一页明细 PPT，不因 Polar warning 或其他附加证据额外分页；同一记录的主图、副图、复审警告和检查/诊断文字合并在该页。逻辑文件按规范化后的相对路径识别，斜杠形式或冗余 `./` 不会造成重复页，但不同目录下的同名文件仍分别报告。重复记录的图片、警告、备注和更具体的异常结论会合并保留。普通正常文件不额外生成图；异常文件、`--focus` 文件和已有 PSD 证据的“证据不足”文件才进入证据页。帧或时间戳异常无法由 `plot` 表达时，才单独生成采样间隔图。
 
 ## 判断流程与依据
 
@@ -189,3 +191,5 @@ ghealth_tool analyze -i E:/data/fail_category -o E:/reports/analysis \
 `--resume` 会复用已完成阶段；需要完全重跑时使用 `--restart`。
 
 `--no-resume` 会拒绝复用已有状态，适合显式阻止断点续跑。`analysis_state.json` 记录 `discover`、`check`、`raw`、`evaluate`、`offline`、`plot`、`diagnose`、`report` 的阶段机状态，重载时运行中的阶段会回退为失败，以免把半成品当作已完成结果。
+
+`--fast-report` 的图片匹配规则是先去掉文件名前缀中的数字序号（如 `0001_`），再把 `文件相对路径` 或 `文件名` 里的 `/`、`\\` 统一替换成 `_` 进行匹配；不带 `_time` 的 PNG 视为主图，`*_time.png` 视为副图。主图或副图如果各自匹配到多张，会在清单里标记为歧义并跳过。
