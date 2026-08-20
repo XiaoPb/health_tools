@@ -19,7 +19,9 @@ def test_classification_manifest_copies_files_without_moving(tmp_path: Path):
         writer.writerow([normal.name, "PASS", "PASS", normal.name])
         writer.writerow([centered.name, "FAIL", "FAIL", centered.name])
 
-    manifest, manifest_json, copied = _build_classification_manifest(report, tmp_path / "out")
+    manifest, manifest_json, copied = _build_classification_manifest(
+        report, tmp_path / "out", source
+    )
 
     assert manifest.exists() and manifest_json.exists()
     assert normal.exists() and centered.exists()

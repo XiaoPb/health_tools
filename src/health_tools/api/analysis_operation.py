@@ -353,7 +353,7 @@ def _copy_files(files: Sequence[Path], root: Path, output: Path) -> Dict[str, Pa
 
 
 def _build_classification_manifest(
-    report_path: Path, output: Path
+    report_path: Path, output: Path, source_root: Optional[Path] = None
 ) -> Tuple[Path, Path, List[Path]]:
     """根据 check 报告复制分类数据，并写出可续跑的 manifest。"""
     from health_tools.api.check_operation import _sort_category
@@ -369,7 +369,9 @@ def _build_classification_manifest(
             relative = (row.get("文件相对路径") or row.get("文件名") or "").strip()
             if not relative:
                 continue
-            source = report_path.parent / Path(relative)
+            source = (Path(source_root) if source_root is not None else report_path.parent) / Path(
+                relative
+            )
             category = _sort_category(row)
             category = {"center": "centered"}.get(category, category)
             target = classify_root / category / Path(relative)
@@ -1590,7 +1592,7 @@ def run_analyze(
                 state.start("classify", classify_fingerprint)
                 try:
                     manifest, manifest_json, _ = _build_classification_manifest(
-                        Path(check_path), output
+                        Path(check_path), output, source
                     )
                 except Exception as exc:
                     state.fail("classify", exc)
