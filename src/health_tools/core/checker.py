@@ -41,6 +41,7 @@ class FileCheckReport:
 
     file_path: Path
     chip: str
+    scene: str = "default"
     results: List[CheckResult] = field(default_factory=list)
 
     @property

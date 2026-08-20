@@ -45,6 +45,12 @@ if TYPE_CHECKING:
     help="指定期望时间戳间隔基准 (毫秒)，偏差超过20%则FAIL",
 )
 @click.option(
+    "--scene-regex",
+    type=str,
+    default=None,
+    help="按文件相对路径提取场景的正则（需包含命名组 scene）",
+)
+@click.option(
     "-o",
     "--output",
     "output_path",
@@ -76,6 +82,7 @@ def check_cmd(
     timestamp_ms: Optional[float],
     timestamp_fail_ratio: float,
     timestamp_base_ms: Optional[float],
+    scene_regex: Optional[str],
     output_path: Optional[str],
     sort_report: bool,
     report_path: Optional[str],
@@ -107,6 +114,7 @@ def check_cmd(
                     timestamp_ms=timestamp_ms,
                     timestamp_fail_ratio=timestamp_fail_ratio,
                     timestamp_base_ms=timestamp_base_ms,
+                    scene_regex=scene_regex,
                     output_path=Path(output_path) if output_path else None,
                     sort_report=sort_report,
                     report_path=Path(report_path) if report_path else None,
@@ -400,7 +408,7 @@ def _save_report_csv(
                 ]
             )
 
-    header.append("文件相对路径")
+    header.extend(["场景分类", "文件相对路径"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -445,7 +453,12 @@ def _save_report_csv(
                     acc_column_count = 27 if include_acc_axis else 9
                     row.extend(["-"] * acc_column_count)
 
-            row.append(_relative_report_path(report.file_path, base_dir))
+            row.extend(
+                [
+                    getattr(report, "scene", "default"),
+                    _relative_report_path(report.file_path, base_dir),
+                ]
+            )
             writer.writerow(row)
 
     console.print(f"[green]检查报告已保存: {output_path}[/green]")

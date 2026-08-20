@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -60,6 +61,27 @@ def _relative_path(path: Path, base: Optional[Path]) -> str:
         return path.name
 
 
+def _compile_scene_regex(pattern: Optional[str]):
+    if not pattern:
+        return None
+    try:
+        compiled = re.compile(pattern)
+    except re.error as exc:
+        raise RequestValidationError(f"scene-regex 正则无效: {exc}") from exc
+    if "scene" not in compiled.groupindex:
+        raise RequestValidationError("scene-regex 必须包含命名捕获组 (?P<scene>...)")
+    return compiled
+
+
+def _scene_for_path(compiled, relative_path: str) -> str:
+    if compiled is None:
+        return "default"
+    match = compiled.search(relative_path)
+    if not match:
+        return "default"
+    return match.group("scene") or "default"
+
+
 def _anomaly_fields(anomaly) -> List[object]:
     if anomaly.count <= 0:
         return [0, "-", "-"]
@@ -99,7 +121,7 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
                     header.extend(
                         [f"ACC{kind}{axis}次数", f"ACC{kind}{axis}最长帧", f"ACC{kind}{axis}前10帧"]
                     )
-    header.append("文件相对路径")
+    header.extend(["场景分类", "文件相对路径"])
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
@@ -128,12 +150,13 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
                             row.extend(_anomaly_fields(getattr(acc, name)))
                 else:
                     row.extend(["-"] * (27 if include_axis else 9))
-            row.append(_relative_path(report.file_path, base))
+            row.extend([report.scene, _relative_path(report.file_path, base)])
             writer.writerow(row)
 
 
 COMPACT_HEADER = [
     "文件名",
+    "场景分类",
     "文件相对路径",
     "芯片",
     "检查项",
@@ -194,6 +217,7 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                     writer.writerow(
                         {
                             "文件名": report.file_path.name,
+                            "场景分类": report.scene,
                             "文件相对路径": _relative_path(report.file_path, base),
                             "芯片": report.chip,
                             "检查项": result.name,
@@ -221,7 +245,7 @@ def _write_sort_list(path: Path, rows: List[List[str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["文件名", "文件相对路径", "目标路径", "状态", "原因"])
+        writer.writerow(["文件名", "文件相对路径", "目标路径", "状态", "原因", "场景分类"])
         writer.writerows(rows)
 
 
@@ -242,24 +266,53 @@ def _sort_report(report: Path, output: Path) -> Dict[str, int]:
         file_name = row.get("文件名", "").strip()
         category = "normal" if status == "PASS" else "abnormal"
         if not relative_text:
-            records[category].append([file_name, "", "", "跳过", "文件相对路径为空"])
+            records[category].append(
+                [file_name, "", "", "跳过", "文件相对路径为空", row.get("场景分类", "default")]
+            )
             stats["skipped"] += 1
             continue
         relative = Path(relative_text)
         destination = output / category / relative
         if relative.is_absolute() or ".." in relative.parts:
-            records[category].append([file_name, relative_text, "", "跳过", "文件相对路径非法"])
+            records[category].append(
+                [
+                    file_name,
+                    relative_text,
+                    "",
+                    "跳过",
+                    "文件相对路径非法",
+                    row.get("场景分类", "default"),
+                ]
+            )
             stats["skipped"] += 1
             continue
         source = report.parent / relative
         if not source.exists() or destination.exists():
             reason = "源文件不存在" if not source.exists() else "目标文件已存在"
-            records[category].append([file_name, relative_text, str(destination), "跳过", reason])
+            records[category].append(
+                [
+                    file_name,
+                    relative_text,
+                    str(destination),
+                    "跳过",
+                    reason,
+                    row.get("场景分类", "default"),
+                ]
+            )
             stats["skipped"] += 1
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(destination))
-        records[category].append([file_name, relative_text, str(destination), "已移动", ""])
+        records[category].append(
+            [
+                file_name,
+                relative_text,
+                str(destination),
+                "已移动",
+                "",
+                row.get("场景分类", "default"),
+            ]
+        )
         stats[category] += 1
     _write_sort_list(output / "normal_files.csv", records["normal"])
     _write_sort_list(output / "abnormal_files.csv", records["abnormal"])
@@ -291,6 +344,8 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     if request.input_path is None:
         raise RequestValidationError("普通检查模式需要 input_path")
     target = _require_path(request.input_path)
+    scene_pattern = _compile_scene_regex(request.scene_regex)
+    base = target.parent if target.is_file() else target
     files = (
         [target]
         if target.is_file()
@@ -342,7 +397,12 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             )
             if mismatch:
                 return ItemResult(ItemStatus.SKIP, str(path), reason=mismatch), None, None, None
-            report = FileCheckReport(file_path=path, chip=chip)
+            relative_path = _relative_path(path, base)
+            report = FileCheckReport(
+                file_path=path,
+                chip=chip,
+                scene=_scene_for_path(scene_pattern, relative_path),
+            )
             if "range" in checks:
                 report.results.append(checker.check_data_range(frame, request.range_ratio))
             if "frame" in checks:
@@ -424,7 +484,6 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     report_path = request.output_path or (
         target.parent / "check_report.csv" if target.is_file() else target / "check_report.csv"
     )
-    base = target.parent if target.is_file() else target
     _save_report(reports, acc_reports, report_path, base, request.acc_axis)
     compact_report_path = report_path.parent / "check_report_compact.csv"
     _save_compact_report(reports, compact_report_path, base)

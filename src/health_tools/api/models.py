@@ -506,6 +506,7 @@ class CheckRequest:
     timestamp_ms: Optional[float] = None
     timestamp_fail_ratio: float = 1.0
     timestamp_base_ms: Optional[float] = None
+    scene_regex: Optional[str] = None
     output_path: Optional[Path] = None
     sort_report: bool = False
     report_path: Optional[Path] = None

@@ -30,6 +30,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--timestamp-ms` | 时间戳间隔固定毫秒容差 |
 | `--timestamp-fail-ratio` | 时间戳异常间隔允许比例，默认 1% |
 | `--timestamp-base-ms` | 指定期望相邻时间戳间隔（毫秒）；统计基准相对它偏差超过 20% 时为 FAIL |
+| `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，未匹配时为 `default` |
 | `-o/--output` | 检查报告 CSV 输出路径，默认 `<path>/check_report.csv` |
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
 | `--report` | 分拣使用的检查报告路径 |
@@ -44,6 +45,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - `-v/--verbose` 会显示跳过文件明细和每个检查项的详情。
 - 有可检查文件时生成 `check_report.csv`；如果启用 ACC 且存在 Ipd FAIL，会额外生成 `ipd_detail_<文件名>.csv`。
 - 同目录固定生成 `check_report_compact.csv`，仅保留 `WARNING`/`FAIL` 检查项的通道长表，便于后续分析程序直接读取。所有占比统一按百分比显示并保留两位小数（如 `16.00%`）；ACC 行同时包含异常帧数和总帧数。AGC 证据同时包含变化次数、有效相邻对数和变化占比，避免用 PPG 通道样本数误算调光比例。
+- `check_report.csv`、`check_report_compact.csv` 以及分拣清单均包含 `场景分类` 列；未指定正则或未匹配时显示 `default`。
 
 数据居中统计先计算 `Rawdata - adc_offset`。低于居中下限或高于居中上限分别统计偏低/偏高占比；其中不高于
 `0.05 * adc_full_scale` 记为接近 0，不低于 `0.95 * adc_full_scale` 记为接近满量程。
@@ -86,6 +88,9 @@ ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-ratio 20 --t
 
 # 指定期望时间基准；实际间隔中位数偏离 40ms 超过20%时 FAIL
 ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-base-ms 40
+
+# 从相对路径提取场景
+ghealth_tool check -i data/ --scene-regex "subject\\d+_(?P<scene>rest|motion)_"
 
 # 把 ACC 单轴异常也计入结果
 ghealth_tool check -i data/ --checks acc --acc-axis

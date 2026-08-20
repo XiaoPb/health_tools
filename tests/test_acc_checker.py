@@ -7,7 +7,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from health_tools.api.check_operation import _save_compact_report
+from health_tools.api.check_operation import (
+    _compile_scene_regex,
+    _save_compact_report,
+    _scene_for_path,
+)
 from health_tools.commands.check import _save_report_csv
 from health_tools.core.checker import CheckResult, DataChecker, FileCheckReport
 from health_tools.models.rules import ChipRule
@@ -642,6 +646,17 @@ class TestCheckResultStatus:
         assert rows[0]["总数"] == "100"
         assert rows[0]["异常占比"] == "16.00%"
 
+    def test_scene_regex_uses_named_group_and_defaults(self):
+        pattern = _compile_scene_regex(r"subject\d+_(?P<scene>rest|motion)_")
+
+        assert _scene_for_path(pattern, "subject01_rest_sample.csv") == "rest"
+        assert _scene_for_path(pattern, "other/sample.csv") == "default"
+        assert _scene_for_path(None, "subject01_rest/sample.csv") == "default"
+
+    def test_scene_regex_requires_named_scene_group(self):
+        with pytest.raises(Exception, match="命名捕获组"):
+            _compile_scene_regex(r"subject\d+_(rest|motion)_")
+
     def test_frame_ratio_boundary_is_warning(self, checker):
         df = pd.DataFrame({"FRAME_ID": list(range(50)) + list(range(51, 100))})
         result = checker.check_frame_completeness(df, threshold_ratio=1)
@@ -675,7 +690,7 @@ class TestCheckResultStatus:
         assert result.abnormal_ratio == pytest.approx(10 / 14 * 100)
 
     def test_csv_report_writes_total_and_three_state_status(self, tmp_path):
-        report = FileCheckReport(file_path=tmp_path / "data.csv", chip="gh3220")
+        report = FileCheckReport(file_path=tmp_path / "data.csv", chip="gh3220", scene="rest")
         result = DataChecker._build_result(
             name="帧完整性",
             abnormal_count=1,
@@ -696,6 +711,8 @@ class TestCheckResultStatus:
         assert rows[1][:5] == ["data.csv", "gh3220", "PASS", "WARNING", "丢包 1 帧"]
         assert rows[0][-1] == "文件相对路径"
         assert rows[1][-1] == "data.csv"
+        assert "场景分类" in rows[0]
+        assert rows[1][rows[0].index("场景分类")] == "rest"
 
 
 class TestTimestampInterval:
