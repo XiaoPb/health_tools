@@ -65,11 +65,20 @@ class ArtifactIndex:
             elif root.is_dir():
                 figure_files.extend(sorted(root.rglob("*.png")))
         figure_files = sorted(set(figure_files), key=lambda path: path.as_posix().lower())
+        stem_counts: Dict[str, int] = {}
+        for csv_file in csv_files:
+            stem_counts[csv_file.stem] = stem_counts.get(csv_file.stem, 0) + 1
         if report_entries:
             items: Dict[str, ArtifactItem] = {}
             for entry in report_entries:
                 figures = (
-                    _match_figures(entry.relative_path, entry.csv_path, figure_files, roots)
+                    _match_figures(
+                        entry.relative_path,
+                        entry.csv_path,
+                        figure_files,
+                        roots,
+                        stem_counts.get(entry.csv_path.stem, 0) == 1,
+                    )
                     if entry.status == "OK"
                     else ()
                 )
@@ -85,7 +94,13 @@ class ArtifactIndex:
         for csv_file in csv_files:
             root = _common_root(csv_file, csv_files)
             relative = _relative(csv_file, root)
-            selected = _match_figures(relative, csv_file, figure_files, roots)
+            selected = _match_figures(
+                relative,
+                csv_file,
+                figure_files,
+                roots,
+                stem_counts.get(csv_file.stem, 0) == 1,
+            )
             figures_by_csv[relative] = selected
         items = {
             _relative(path, _common_root(path, csv_files)): ArtifactItem(
@@ -155,7 +170,11 @@ def _relative(path: Path, root: Path) -> str:
 
 
 def _match_figures(
-    relative: str, csv_file: Path, figures: Sequence[Path], roots: Sequence[Path]
+    relative: str,
+    csv_file: Path,
+    figures: Sequence[Path],
+    roots: Sequence[Path],
+    stem_is_unique: bool,
 ) -> Tuple[Path, ...]:
     rel = relative.replace("\\", "/")
     rel_stem = Path(rel).with_suffix("").as_posix()
@@ -170,22 +189,57 @@ def _match_figures(
                 if Path(candidate).with_suffix("").as_posix() == rel_stem:
                     same_relative.append(figure)
     candidates = same_relative
+    scoped_figures = _figures_in_relative_dir(relative, figures, roots)
     if not candidates:
-        candidates = [figure for figure in figures if figure.name == f"{csv_file.stem}.png"]
-        if len(candidates) > 1:
-            raise ArtifactAmbiguityError(f"图片文件名匹配存在歧义: {csv_file}")
-    if not candidates:
-        by_stem = [
-            figure
-            for figure in figures
-            if figure.stem == csv_file.stem or figure.stem.startswith(f"{csv_file.stem}_")
-        ]
-        exact = [figure for figure in by_stem if figure.stem == csv_file.stem]
-        if len(exact) > 1:
-            raise ArtifactAmbiguityError(f"图片匹配存在歧义: {csv_file}")
-        if by_stem:
-            candidates = by_stem
+        candidates = _fallback_figure_candidates(csv_file, scoped_figures)
+    if not candidates and stem_is_unique and Path(rel).parent.as_posix() == ".":
+        inferred_relative = f"{csv_file.parent.name}/{csv_file.name}"
+        inferred_figures = _figures_in_relative_dir(inferred_relative, figures, roots)
+        candidates = _fallback_figure_candidates(csv_file, inferred_figures)
+    if not candidates and stem_is_unique:
+        candidates = _fallback_figure_candidates(csv_file, figures)
     return tuple(sorted(candidates, key=lambda path: (_figure_rank(path), path.as_posix().lower())))
+
+
+def _fallback_figure_candidates(csv_file: Path, figures: Sequence[Path]) -> List[Path]:
+    candidates = [figure for figure in figures if figure.name == f"{csv_file.stem}.png"]
+    if len(candidates) > 1:
+        raise ArtifactAmbiguityError(f"图片文件名匹配存在歧义: {csv_file}")
+    if candidates:
+        return candidates
+    by_stem = [
+        figure
+        for figure in figures
+        if figure.stem == csv_file.stem or figure.stem.startswith(f"{csv_file.stem}_")
+    ]
+    exact = [figure for figure in by_stem if figure.stem == csv_file.stem]
+    if len(exact) > 1:
+        raise ArtifactAmbiguityError(f"图片匹配存在歧义: {csv_file}")
+    return by_stem
+
+
+def _figures_in_relative_dir(
+    relative: str, figures: Sequence[Path], roots: Sequence[Path]
+) -> List[Path]:
+    parent = Path(relative.replace("\\", "/")).parent.as_posix()
+    if parent == ".":
+        parent = ""
+    scoped: List[Path] = []
+    for figure in figures:
+        for root in roots:
+            if not root.is_dir():
+                continue
+            try:
+                candidate = figure.relative_to(root)
+            except ValueError:
+                continue
+            candidate_parent = candidate.parent.as_posix()
+            if candidate_parent == ".":
+                candidate_parent = ""
+            if candidate_parent == parent:
+                scoped.append(figure)
+                break
+    return scoped
 
 
 def _figure_rank(path: Path) -> int:
@@ -220,12 +274,12 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
         value = _first_non_empty(row.get(column) for column in columns)
         if value is None:
             continue
-        relative_path = value.replace("\\", "/")
-        candidate = Path(value)
-        if candidate.is_file():
+        candidate = Path(value.replace("\\", "/"))
+        relative_path = (
+            candidate.as_posix() if not candidate.is_absolute() else value.replace("\\", "/")
+        )
+        if candidate.is_absolute():
             csv_path = candidate
-        elif not candidate.is_absolute() and (report.parent / candidate).is_file():
-            csv_path = report.parent / candidate
         elif relative_path in by_relative:
             csv_path = by_relative[relative_path]
         elif candidate.name in by_name and candidate.name not in by_unique_name:
@@ -236,6 +290,10 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
             raise ArtifactAmbiguityError(f"CSV stem 匹配存在歧义: {value}")
         elif candidate.stem in by_unique_stem:
             csv_path = by_unique_stem[candidate.stem]
+        elif (report.parent / candidate).is_file():
+            csv_path = report.parent / candidate
+        elif candidate.is_file():
+            csv_path = candidate
         else:
             csv_path = report.parent / candidate
         if csv_path.exists():

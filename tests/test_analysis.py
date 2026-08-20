@@ -22,7 +22,7 @@ from health_tools.api.analysis_operation import (
     _run_supporting_stages,
 )
 from health_tools.api.context import ExecutionContext
-from health_tools.api.models import BatchResult, ItemResult, ItemStatus, OfflineResult
+from health_tools.api.models import BatchResult, CheckResult, ItemResult, ItemStatus, OfflineResult
 from health_tools.core.analysis.conditions import matches
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord
@@ -237,6 +237,189 @@ def test_run_analyze_raw_stage_reuses_discovered_files_when_output_is_nested(
     assert records[0]["source"] == str(sample)
 
 
+def test_run_analyze_ignores_nested_output_vshb_during_source_detection(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "data"
+    source.mkdir()
+    sample = source / "sample.csv"
+    _write_csv(sample)
+    output = source / "analysis_out"
+    stale_vshb = output / "stages" / "offline" / "old_result.vshb"
+    stale_vshb.parent.mkdir(parents=True)
+    stale_vshb.write_bytes(b"stale")
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.detect_chip", lambda _path: None)
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._run_supporting_stages",
+        lambda *_, **__: ([], None, None),
+    )
+    monkeypatch.setattr("health_tools.api.analysis_operation._escalate", lambda *_, **__: [])
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_psd_plots", lambda *_, **__: None
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_raw_plots", lambda *_, **__: None
+    )
+
+    result = run_analyze(
+        AnalyzeRequest(
+            source,
+            output,
+            analysis_type="other",
+            rule_file=str(rule),
+            allow_offline=True,
+            report="markdown",
+        )
+    )
+
+    records = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert [record["file"] for record in records] == ["sample.csv"]
+    assert records[0]["source"] == str(sample)
+
+
+def test_run_analyze_offline_source_excludes_nested_output_vshb(tmp_path: Path, monkeypatch):
+    source = tmp_path / "offline"
+    source.mkdir()
+    real_vshb = source / "real_result.vshb"
+    real_vshb.write_text("second,polar,algo_hr,comp_hr,fw_hr\n1,80,80,0,80\n", encoding="utf-8")
+    output = source / "analysis_out"
+    stale_vshb = output / "stages" / "offline" / "stale_result.vshb"
+    stale_vshb.parent.mkdir(parents=True)
+    stale_vshb.write_text("second,polar,algo_hr,comp_hr,fw_hr\n1,90,90,0,90\n", encoding="utf-8")
+    plotted_vshb = []
+
+    def fake_run_plot(request, *, context=None):
+        plotted_vshb.extend(path.name for path in request.input_path.rglob("*_result.vshb"))
+        return BatchResult("plot")
+
+    monkeypatch.setattr("health_tools.api.file_operations.run_plot", fake_run_plot)
+
+    result = run_analyze(AnalyzeRequest(source, output, report="markdown", allow_offline=False))
+
+    records = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert [record["file"] for record in records] == ["real.csv"]
+    assert records[0]["source"] == str(real_vshb)
+    assert plotted_vshb == ["real_result.vshb"]
+
+
+def test_run_analyze_offline_source_with_parent_output_keeps_source_vshb(
+    tmp_path: Path, monkeypatch
+):
+    source = tmp_path / "offline"
+    source.mkdir()
+    real_vshb = source / "real_result.vshb"
+    real_vshb.write_text("second,polar,algo_hr,comp_hr,fw_hr\n1,80,80,0,80\n", encoding="utf-8")
+    plotted_vshb = []
+
+    def fake_run_plot(request, *, context=None):
+        plotted_vshb.extend(path.name for path in request.input_path.rglob("*_result.vshb"))
+        return BatchResult("plot")
+
+    monkeypatch.setattr("health_tools.api.file_operations.run_plot", fake_run_plot)
+
+    result = run_analyze(AnalyzeRequest(source, tmp_path, report="markdown", allow_offline=False))
+
+    records = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert [record["file"] for record in records] == ["real.csv"]
+    assert records[0]["source"] == str(real_vshb)
+    assert plotted_vshb == ["real_result.vshb"]
+
+
+def test_run_analyze_check_stage_uses_only_discovered_raw_files(tmp_path: Path, monkeypatch):
+    source = tmp_path / "data"
+    source.mkdir()
+    sample = source / "sample.csv"
+    _write_csv(sample)
+    output = source / "analysis_out"
+    for stale in (
+        output / "stages" / "evaluate_input" / "evaluate.csv",
+        output / "stages" / "offline" / "offline.csv",
+    ):
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        _write_csv(stale)
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    checked_files = []
+
+    def fake_run_check(request, *, context=None):
+        assert request.input_path is not None
+        checked_files.extend(
+            path.relative_to(request.input_path).as_posix()
+            for path in sorted(request.input_path.rglob("*.csv"))
+        )
+        assert request.output_path is not None
+        request.output_path.parent.mkdir(parents=True, exist_ok=True)
+        request.output_path.write_text(
+            "文件相对路径,总异常(结果)\nsample.csv,PASS\n", encoding="utf-8-sig"
+        )
+        return CheckResult(BatchResult("check"), report_path=request.output_path)
+
+    monkeypatch.setattr("health_tools.api.check_operation.run_check", fake_run_check)
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._run_supporting_stages",
+        lambda *_, **__: ([], None, None),
+    )
+    monkeypatch.setattr("health_tools.api.analysis_operation._escalate", lambda *_, **__: [])
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_psd_plots", lambda *_, **__: None
+    )
+    monkeypatch.setattr(
+        "health_tools.api.analysis_operation._generate_raw_plots", lambda *_, **__: None
+    )
+
+    run_analyze(
+        AnalyzeRequest(
+            source,
+            output,
+            analysis_type="other",
+            rule_file=str(rule),
+            chip_name="gh3036",
+            allow_offline=False,
+            report="markdown",
+        )
+    )
+
+    assert checked_files == ["sample.csv"]
+
+
+def test_run_analyze_does_not_swallow_check_stage_internal_type_error(tmp_path: Path, monkeypatch):
+    source = tmp_path / "input.csv"
+    _write_csv(source)
+    output = tmp_path / "out"
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+    calls = Counter()
+
+    def failing_check_stage(request, source_path, chip, stages, context, root, files):
+        calls["check"] += 1
+        assert root == source.parent
+        assert list(files) == [source]
+        raise TypeError("check 阶段内部错误")
+
+    monkeypatch.setattr("health_tools.api.analysis_operation.run_check_stage", failing_check_stage)
+
+    with pytest.raises(TypeError, match="check 阶段内部错误"):
+        run_analyze(
+            AnalyzeRequest(
+                source,
+                output,
+                analysis_type="other",
+                rule_file=str(rule),
+                chip_name="gh3036",
+                allow_offline=False,
+                report="markdown",
+            )
+        )
+
+    assert calls["check"] == 1
+
+
 def test_run_analyze_supports_legacy_four_argument_raw_stage_override(tmp_path: Path, monkeypatch):
     source = tmp_path / "input.csv"
     _write_csv(source)
@@ -369,6 +552,30 @@ def test_run_analyze_rejects_no_resume_over_existing_state_without_restart(tmp_p
 
     with pytest.raises(RequestValidationError, match="--restart"):
         run_analyze(replace(request, resume=False))
+
+
+@pytest.mark.parametrize("artifact_name", ["file_diagnosis.csv", "segment_diagnosis.csv"])
+def test_run_analyze_rejects_diagnosis_outputs_without_state(artifact_name: str, tmp_path: Path):
+    source = tmp_path / "input.csv"
+    _write_csv(source)
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / artifact_name).write_text("old", encoding="utf-8")
+    rule = tmp_path / "analysis" / "custom.yaml"
+    rule.parent.mkdir()
+    rule.write_text(CUSTOM_RULE, encoding="utf-8")
+
+    with pytest.raises(RequestValidationError, match="分析产物"):
+        run_analyze(
+            AnalyzeRequest(
+                source,
+                output,
+                analysis_type="other",
+                rule_file=str(rule),
+                allow_offline=False,
+                resume=False,
+            )
+        )
 
 
 def test_run_analyze_restart_removes_only_owned_output_artifacts(tmp_path: Path, monkeypatch):
