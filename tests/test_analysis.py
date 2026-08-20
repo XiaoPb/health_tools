@@ -130,6 +130,33 @@ def test_analysis_record_scene_label_is_optional():
     assert record.scene_label == "跑步"
 
 
+def test_analysis_record_preserves_existing_positional_arguments():
+    plot_data = {"columns": ["CH0", "CH1"]}
+    record = AnalysisRecord(
+        "a.csv",
+        "a.csv",
+        "hr",
+        "dynamic",
+        "run",
+        True,
+        {"raw_valid": True},
+        {"mae": 1.0},
+        [],
+        {"peak": 1.2},
+        {"id": "algorithm"},
+        "疑似算法问题",
+        0.8,
+        ["note"],
+        ["warning"],
+        "main.png",
+        "secondary.png",
+        plot_data,
+    )
+
+    assert record.plot_data is plot_data
+    assert record.scene_label is None
+
+
 def _write_csv(path: Path, error: float = 0.0) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 100
