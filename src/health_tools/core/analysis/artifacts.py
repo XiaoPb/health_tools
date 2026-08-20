@@ -171,7 +171,10 @@ def _match_figures(
                     same_relative.append(figure)
     candidates = same_relative
     scoped_figures = _figures_in_relative_dir(relative, figures, roots)
-    fallback_figures = scoped_figures if Path(rel).parent.as_posix() != "." else list(figures)
+    fallback_figures = scoped_figures
+    if not fallback_figures and Path(rel).parent.as_posix() == ".":
+        inferred_relative = f"{csv_file.parent.name}/{csv_file.name}"
+        fallback_figures = _figures_in_relative_dir(inferred_relative, figures, roots)
     if not candidates:
         candidates = [
             figure for figure in fallback_figures if figure.name == f"{csv_file.stem}.png"
@@ -207,7 +210,10 @@ def _figures_in_relative_dir(
                 candidate = figure.relative_to(root)
             except ValueError:
                 continue
-            if candidate.parent.as_posix() == parent:
+            candidate_parent = candidate.parent.as_posix()
+            if candidate_parent == ".":
+                candidate_parent = ""
+            if candidate_parent == parent:
                 scoped.append(figure)
                 break
     return scoped

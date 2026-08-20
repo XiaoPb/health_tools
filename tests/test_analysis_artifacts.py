@@ -39,6 +39,27 @@ def test_fallback_png_matching_preserves_relative_directory_for_duplicate_stems(
     assert index.figures_for("b/same.csv") == (second_png,)
 
 
+def test_fallback_png_matching_keeps_root_csv_scoped_to_root_figures(tmp_path: Path):
+    source = tmp_path / "data"
+    root_csv = source / "same.csv"
+    nested_csv = source / "a" / "same.csv"
+    nested_csv.parent.mkdir(parents=True)
+    root_csv.write_text("A\n1\n", encoding="utf-8")
+    nested_csv.write_text("A\n2\n", encoding="utf-8")
+
+    figures = tmp_path / "figures"
+    root_png = figures / "same_time.png"
+    nested_png = figures / "a" / "same_time.png"
+    nested_png.parent.mkdir(parents=True)
+    root_png.write_bytes(b"png")
+    nested_png.write_bytes(b"png")
+
+    index = ArtifactIndex.build([root_csv, nested_csv], [figures])
+
+    assert index.figures_for("same.csv") == (root_png,)
+    assert index.figures_for("a/same.csv") == (nested_png,)
+
+
 def test_index_ranks_time_before_psd_and_keeps_secondary(tmp_path: Path):
     csv_file = tmp_path / "sample.csv"
     csv_file.write_text("A\n1\n", encoding="utf-8")
