@@ -60,6 +60,41 @@ def test_fallback_png_matching_keeps_root_csv_scoped_to_root_figures(tmp_path: P
     assert index.figures_for("a/same.csv") == (nested_png,)
 
 
+def test_parent_directory_fallback_requires_unique_csv_stem(tmp_path: Path):
+    source = tmp_path / "data"
+    root_csv = source / "same.csv"
+    nested_csv = source / "data" / "same.csv"
+    nested_csv.parent.mkdir(parents=True)
+    root_csv.write_text("A\n1\n", encoding="utf-8")
+    nested_csv.write_text("A\n2\n", encoding="utf-8")
+
+    figures = tmp_path / "figures"
+    nested_png = figures / "data" / "same_time.png"
+    nested_png.parent.mkdir(parents=True)
+    nested_png.write_bytes(b"png")
+
+    index = ArtifactIndex.build([root_csv, nested_csv], [figures])
+
+    assert index.figures_for("same.csv") == ()
+    assert index.figures_for("data/same.csv") == (nested_png,)
+
+
+def test_unique_csv_stem_uses_parent_fallback_when_root_has_unrelated_png(tmp_path: Path):
+    csv_file = tmp_path / "input" / "dynamic" / "sample.csv"
+    csv_file.parent.mkdir(parents=True)
+    csv_file.write_text("A\n1\n", encoding="utf-8")
+
+    figures = tmp_path / "figures"
+    png_file = figures / "dynamic" / "sample_time.png"
+    png_file.parent.mkdir(parents=True)
+    png_file.write_bytes(b"png")
+    (figures / "other_time.png").write_bytes(b"png")
+
+    index = ArtifactIndex.build([csv_file], [figures])
+
+    assert index.figures_for("sample.csv") == (png_file,)
+
+
 def test_index_ranks_time_before_psd_and_keeps_secondary(tmp_path: Path):
     csv_file = tmp_path / "sample.csv"
     csv_file.write_text("A\n1\n", encoding="utf-8")
