@@ -274,7 +274,7 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
         value = _first_non_empty(row.get(column) for column in columns)
         if value is None:
             continue
-        candidate = Path(value)
+        candidate = Path(value.replace("\\", "/"))
         relative_path = (
             candidate.as_posix() if not candidate.is_absolute() else value.replace("\\", "/")
         )

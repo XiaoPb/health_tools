@@ -214,6 +214,31 @@ def test_report_relative_path_normalizes_dot_prefix_before_input_lookup(tmp_path
     assert index.items["b/same.csv"].csv_path == second
 
 
+def test_report_relative_path_normalizes_windows_separator_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from pathlib import PurePosixPath
+
+    import pandas as pd
+
+    import health_tools.core.analysis.artifacts as artifacts
+
+    source = tmp_path / "data"
+    input_csv = source / "a" / "same.csv"
+    input_csv.parent.mkdir(parents=True)
+    input_csv.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+    report = tmp_path / "reports" / "check_report.csv"
+    report.parent.mkdir(parents=True)
+    pd.DataFrame({"文件相对路径": [r"a\same.csv"], "总异常(结果)": ["FAIL"]}).to_csv(
+        report, index=False, encoding="utf-8-sig"
+    )
+
+    monkeypatch.setattr(artifacts, "Path", PurePosixPath)
+    entries = artifacts._csvs_from_report(report, [input_csv])
+
+    assert entries[0].csv_path == input_csv
+
+
 def test_report_relative_csv_path_prefers_input_file_over_same_cwd_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
