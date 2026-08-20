@@ -60,6 +60,22 @@ def test_fallback_png_matching_keeps_root_csv_scoped_to_root_figures(tmp_path: P
     assert index.figures_for("a/same.csv") == (nested_png,)
 
 
+def test_fallback_png_matching_ignores_numeric_filename_prefix(tmp_path: Path):
+    source = tmp_path / "HIIT"
+    csv_file = source / "蔡小雪_HIIT_左手_santosHIIT.csv"
+    source.mkdir(parents=True)
+    csv_file.write_text("A\n1\n", encoding="utf-8")
+
+    figures = tmp_path / "figures"
+    png_file = figures / "HIIT" / "00004_蔡小雪_HIIT_左手_santosHIIT.png"
+    png_file.parent.mkdir(parents=True)
+    png_file.write_bytes(b"png")
+
+    index = ArtifactIndex.build([csv_file], [figures])
+
+    assert index.figures_for("蔡小雪_HIIT_左手_santosHIIT.csv") == (png_file,)
+
+
 def test_parent_directory_fallback_requires_unique_csv_stem(tmp_path: Path):
     source = tmp_path / "data"
     root_csv = source / "same.csv"

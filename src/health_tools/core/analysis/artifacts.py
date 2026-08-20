@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -202,7 +203,9 @@ def _match_figures(
 
 
 def _fallback_figure_candidates(csv_file: Path, figures: Sequence[Path]) -> List[Path]:
-    candidates = [figure for figure in figures if figure.name == f"{csv_file.stem}.png"]
+    candidates = [
+        figure for figure in figures if _normalize_figure_stem(figure.stem) == csv_file.stem
+    ]
     if len(candidates) > 1:
         raise ArtifactAmbiguityError(f"图片文件名匹配存在歧义: {csv_file}")
     if candidates:
@@ -210,12 +213,19 @@ def _fallback_figure_candidates(csv_file: Path, figures: Sequence[Path]) -> List
     by_stem = [
         figure
         for figure in figures
-        if figure.stem == csv_file.stem or figure.stem.startswith(f"{csv_file.stem}_")
+        if (
+            _normalize_figure_stem(figure.stem) == csv_file.stem
+            or _normalize_figure_stem(figure.stem).startswith(f"{csv_file.stem}_")
+        )
     ]
-    exact = [figure for figure in by_stem if figure.stem == csv_file.stem]
+    exact = [figure for figure in by_stem if _normalize_figure_stem(figure.stem) == csv_file.stem]
     if len(exact) > 1:
         raise ArtifactAmbiguityError(f"图片匹配存在歧义: {csv_file}")
     return by_stem
+
+
+def _normalize_figure_stem(stem: str) -> str:
+    return re.sub(r"^\d+_", "", stem)
 
 
 def _figures_in_relative_dir(
