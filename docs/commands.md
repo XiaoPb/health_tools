@@ -49,7 +49,7 @@ ghealth_tool --help
 | [`evaluate`](cmd_evaluate.md) | `eval` | 结果目录 | 明细、异常和准确度汇总 |
 | [`offline`](cmd_offline.md) | 无 | 芯片 CSV 目录 | 版本目录、PSD、准确度报告 |
 | [`check`](cmd_check.md) | `chk` | CSV 或检查报告 | `check_report.csv`、`check_report_compact.csv` 或分拣目录 |
-| [`analyze`](cmd_analyze.md) | `ana` | CSV/数据目录，可分离 check、跑库、PNG 目录 | JSON/CSV、证据图、Markdown/PPT |
+| [`analyze`](cmd_analyze.md) | `ana` | CSV/数据目录，可分离 check、跑库、PNG 目录；支持 `--fast-report` 仅用既有 check/PNG 生成 PPT | JSON/CSV、证据图、Markdown/PPT |
 
 ## 批量命令约定
 
@@ -58,7 +58,8 @@ ghealth_tool --help
 - `--filter` 按文件名包含关系筛选，不是正则表达式。
 - 批处理前先用一个小文件确认规则、列名、输出目录和覆盖行为。
 - `analyze` 原始数据目录可按 `root/<场景>/<人名>/<数据.csv>`、`root/<场景>/<数据.csv>` 或 `root/<人名>/<场景>/<数据.csv>` 组织；命中内置场景别名后会输出 `scene_label`。
-- `analyze` 的 PPT 每个唯一逻辑数据文件最多生成一页明细；主图、副图、Polar 复审警告和检查结论在同页展示，不同目录下的同名文件不会被合并。
+- `analyze` 的 PPT 页序为封面 -> 整体准确度 -> 异常数据统计 -> 逐文件明细 -> 综合结论 -> 结束页；快速模式只保留封面、逐文件明细和结束页。
+- `analyze` 的明细页筛选规则是：异常文件、`--focus` 文件、有警告的文件，以及“证据不足”但已有 PSD 证据的文件；主图、副图、Polar 复审警告和检查结论在同页展示，不同目录下的同名文件不会被合并。
 
 ## 规则与配置
 

@@ -89,61 +89,6 @@ def _validate(request: AnalyzeRequest) -> None:
         raise RequestValidationError("sample_rate 必须大于 0")
     if request.workers < 1:
         raise RequestValidationError("workers 必须大于 0")
-    if request.fast_report and (request.check_report_path is None or not request.figure_paths):
-        raise RequestValidationError("fast-report 必须同时提供 check-report 和 figure-dir")
-
-
-def _fast_report_records(
-    check_report: Path, figure_dirs: Sequence[Path], output: Path
-) -> Tuple[List[AnalysisRecord], Path]:
-    prefix = re.compile(r"^\d+[_-]+")
-    by_name: Dict[str, List[Path]] = {}
-    for root in figure_dirs:
-        for path in Path(root).rglob("*.png"):
-            normalized = prefix.sub("", path.name).lower()
-            by_name.setdefault(normalized, []).append(path)
-    records: List[AnalysisRecord] = []
-    rows: List[Dict[str, str]] = []
-    with Path(check_report).open("r", newline="", encoding="utf-8-sig") as handle:
-        for row in csv.DictReader(handle):
-            name = (row.get("文件相对路径") or row.get("文件名") or row.get("file") or "").strip()
-            if not name:
-                continue
-            matches = by_name.get(Path(name).name.lower(), [])
-            primary = [item for item in matches if not item.stem.lower().endswith("_time")]
-            secondary = [item for item in matches if item.stem.lower().endswith("_time")]
-            figure = primary[0] if len(primary) == 1 else None
-            secondary_figure = secondary[0] if len(secondary) == 1 else None
-            ambiguous = len(primary) > 1 or len(secondary) > 1
-            reason = "图片匹配歧义" if ambiguous else ("图片未匹配" if not figure else "")
-            records.append(
-                AnalysisRecord(
-                    name,
-                    name,
-                    "hr",
-                    figure=str(figure) if figure else None,
-                    secondary_figure=str(secondary_figure) if secondary_figure else None,
-                    warnings=[str(row.get("结果") or row.get("总异常(说明)") or "")],
-                )
-            )
-            rows.append(
-                {
-                    "file": name,
-                    "figure": str(figure or ""),
-                    "secondary_figure": str(secondary_figure or ""),
-                    "status": "skipped" if reason else "ok",
-                    "reason": reason,
-                }
-            )
-    manifest = Path(output) / "fast_report_manifest.csv"
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    with manifest.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle, fieldnames=["file", "figure", "secondary_figure", "status", "reason"]
-        )
-        writer.writeheader()
-        writer.writerows(rows)
-    return records, manifest
 
 
 def _fast_report_records(
@@ -932,12 +877,13 @@ def _raw_records(
             analyzed_files.append(path)
         except Exception as exc:
             skip_reason = reason if status == "SKIP" else ""
+            scene_info = infer_scene(path, root)
             record = AnalysisRecord(
                 file=name,
                 source=str(path),
                 analysis_type=request.analysis_type,
                 scene=(request.scene if request.scene in {"static", "dynamic"} else "unknown"),
-                scene_label=(infer_scene(path, root).label if infer_scene(path, root) else None),
+                scene_label=(scene_info.label if scene_info else None),
                 focused=name in focused,
                 conclusion="证据不足",
                 features=(
@@ -1549,6 +1495,8 @@ def run_analyze(
     request = _normalize_accuracy_request(request)
     ctx = _context(context)
     if request.fast_report:
+        check_report = request.check_report_path
+        assert check_report is not None
         from health_tools.core.analysis.reporting import (
             _fast_report_records,
         )
@@ -1557,7 +1505,7 @@ def run_analyze(
         )
 
         records, manifest = _fast_report_records(
-            Path(request.check_report_path), request.figure_paths, Path(request.output_path)
+            check_report, request.figure_paths, request.output_path
         )
         report = _write_ppt(
             records,
