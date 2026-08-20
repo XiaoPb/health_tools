@@ -2540,6 +2540,47 @@ def test_report_time_plot_clears_stale_secondary_on_source_failure(tmp_path):
     assert record.secondary_figure is None
 
 
+def test_existing_frequency_figure_overrides_raw_figure(tmp_path: Path):
+    from health_tools.api.analysis_operation import _select_report_primary_figure
+
+    raw = tmp_path / "sample_time.png"
+    stft = tmp_path / "sample_stft.png"
+    psd = tmp_path / "sample_psd.png"
+    record = AnalysisRecord("sample.csv", "sample.csv", "hr", figure=str(raw))
+
+    selected = _select_report_primary_figure(record, (raw, stft, psd))
+
+    assert selected == psd
+
+
+def test_report_time_plot_handles_malformed_sample_rate_and_segment(monkeypatch, tmp_path: Path):
+    from health_tools.api.analysis_operation import _generate_report_time_plots
+    from health_tools.core.analysis.models import AnalysisSegment
+
+    source = tmp_path / "sample.csv"
+    source.write_text("CH0,REF_RESULT0,ALGO_RESULT0\n1,60,62\n2,61,60\n", encoding="utf-8")
+    calls = []
+
+    class FakePlotter:
+        def plot_time(self, frame, target, channels=None, **kwargs):
+            calls.append(kwargs)
+            Path(target).write_bytes(b"png")
+
+    monkeypatch.setattr("health_tools.core.plotter.DataPlotter", FakePlotter)
+    record = AnalysisRecord(
+        "sample.csv",
+        str(source),
+        "hr",
+        segments=[AnalysisSegment("bad", "also-bad", 1, max_error=float("nan"))],
+        features={"sample_rate": "not-a-number", "ppg_columns": ["CH0"]},
+    )
+
+    _generate_report_time_plots([record], tmp_path / "figures" / "time")
+
+    assert record.secondary_figure is not None
+    assert calls[0]["time_range"] == (0.0, 10.0)
+
+
 @pytest.mark.parametrize(
     ("path", "explicit", "expected"),
     [("run/a.csv", "auto", "run"), ("cycle/a.csv", "auto", "cycle"), ("x.csv", "rest", "rest")],

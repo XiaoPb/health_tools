@@ -1122,13 +1122,30 @@ def _report_time_interval(
     unusable inputs fall back to a deterministic ten-second window; the
     plotter clips it to the actual file when rendering.
     """
-    if len(frame) > 1 and record.segments:
-        segment = max(record.segments, key=lambda item: (item.max_error, item.samples))
-        start, end = float(segment.start_s), float(segment.end_s)
-        if end > start:
-            from health_tools.core.plotter import limit_report_time_range
+    import math
 
-            return limit_report_time_range((start, end), sample_rate)
+    valid_segments = []
+    for segment in record.segments:
+        try:
+            start = float(segment.start_s)
+            end = float(segment.end_s)
+            max_error = float(segment.max_error)
+            samples = int(segment.samples)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if (
+            math.isfinite(start)
+            and math.isfinite(end)
+            and math.isfinite(max_error)
+            and end > start
+            and samples >= 0
+        ):
+            valid_segments.append((max_error, samples, start, end))
+    if len(frame) > 1 and valid_segments:
+        _, _, start, end = max(valid_segments, key=lambda item: (item[0], item[1]))
+        from health_tools.core.plotter import limit_report_time_range
+
+        return limit_report_time_range((start, end), sample_rate)
     duration = max(float(len(frame)) / sample_rate, 10.0)
     from health_tools.core.plotter import limit_report_time_range
 
@@ -1163,6 +1180,8 @@ def _generate_report_time_plots(
     records: Sequence[AnalysisRecord], output: Path, channels: Optional[Sequence[str]] = None
 ) -> None:
     """Generate a fresh, per-record time evidence image for the report."""
+    import math
+
     import pandas as pd
 
     from health_tools.core.plotter import DataPlotter, limit_report_time_range
@@ -1179,7 +1198,12 @@ def _generate_report_time_plots(
         except Exception as exc:
             record.notes.append(f"报告副图读取失败: {exc}")
             continue
-        sample_rate = float(record.features.get("sample_rate") or 25)
+        try:
+            sample_rate = float(record.features.get("sample_rate") or 25)
+        except (TypeError, ValueError, OverflowError):
+            sample_rate = 25.0
+        if not math.isfinite(sample_rate) or sample_rate <= 0:
+            sample_rate = 25.0
         selected = [str(item) for item in (channels or _report_time_channels(record, frame))]
         selected = [
             channel
@@ -1212,6 +1236,20 @@ def _generate_report_time_plots(
             continue
         if target.exists():
             record.secondary_figure = str(target)
+
+
+def _select_report_primary_figure(
+    record: AnalysisRecord, candidates: Sequence[Path]
+) -> Optional[Path]:
+    """Prefer frequency/time-frequency evidence over raw time plots."""
+    priority = {"psd": 0, "stft": 1, "spectrogram": 2, "时频": 3}
+    ranked = sorted(
+        (path for path in candidates if any(token in path.stem.lower() for token in priority)),
+        key=lambda path: min(priority[token] for token in priority if token in path.stem.lower()),
+    )
+    if ranked:
+        return ranked[0]
+    return Path(record.figure) if record.figure else (candidates[0] if candidates else None)
 
 
 def _offline_records(
@@ -1511,16 +1549,9 @@ def run_analyze(
                     item = artifact_index.item_for(record.file)
                     if item and item.primary_figure:
                         candidates = item.figures
-                        frequency = [
-                            path
-                            for path in candidates
-                            if any(
-                                token in path.stem.lower()
-                                for token in ("psd", "stft", "spectrogram", "时频")
-                            )
-                        ]
-                        if not record.figure:
-                            record.figure = str(frequency[0] if frequency else candidates[0])
+                        selected_primary = _select_report_primary_figure(record, candidates)
+                        if selected_primary is not None:
+                            record.figure = str(selected_primary)
                         if item.secondary_figures:
                             record.notes.append(
                                 "已发现现有副图: "
@@ -1538,6 +1569,17 @@ def run_analyze(
         state.complete("plot", plot_artifacts, fingerprint=plot_fingerprint)
     # 副图属于本次报告证据，每次分析都重新生成；即使复用 PSD/诊断阶段也不能复用旧 time 图。
     _generate_report_time_plots(records, figures / "time")
+    plot_stage = state.state.stages["plot"]
+    if plot_stage.status == "completed":
+        prior_artifacts = [Path(item.path) for item in plot_stage.artifacts]
+        time_artifacts = [
+            Path(record.secondary_figure) for record in records if record.secondary_figure
+        ]
+        state.complete(
+            "plot",
+            [*prior_artifacts, *time_artifacts],
+            fingerprint=plot_stage.fingerprint,
+        )
     if not diagnosis_reused:
         for index, record in enumerate(records):
             if (
