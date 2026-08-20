@@ -2525,6 +2525,21 @@ def test_report_time_plot_is_generated_separately_and_keeps_psd_primary(monkeypa
     assert calls[0][3]["time_range"] == (0.0, 10.0)
 
 
+def test_report_time_plot_clears_stale_secondary_on_source_failure(tmp_path):
+    from health_tools.api.analysis_operation import _generate_report_time_plots
+
+    record = AnalysisRecord(
+        file="missing.csv",
+        source=str(tmp_path / "missing.csv"),
+        analysis_type="hr",
+        secondary_figure=str(tmp_path / "old_time.png"),
+    )
+
+    _generate_report_time_plots([record], tmp_path / "figures" / "time", None)
+
+    assert record.secondary_figure is None
+
+
 @pytest.mark.parametrize(
     ("path", "explicit", "expected"),
     [("run/a.csv", "auto", "run"), ("cycle/a.csv", "auto", "cycle"), ("x.csv", "rest", "rest")],

@@ -1169,6 +1169,8 @@ def _generate_report_time_plots(
 
     output.mkdir(parents=True, exist_ok=True)
     for index, record in enumerate(records):
+        # 每次报告都重新生成副图，任何失败路径都不能复用上次的图片。
+        record.secondary_figure = None
         source = Path(record.source)
         if not source.is_file():
             continue
