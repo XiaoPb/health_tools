@@ -459,6 +459,7 @@ class AnalyzeRequest:
     activity: str = "auto"
     classify_rule: Optional[str] = None
     classify: Tuple[str, ...] = ()
+    fast_report: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_path", Path(self.input_path))
