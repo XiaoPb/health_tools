@@ -37,6 +37,8 @@ ghealth_tool analyze -i <输入CSV或结果目录> -o <输出目录> [options]
 
 `--input` 只负责提供待分析源数据，可以是原始 CSV 目录，也可以是已有 offline 结果目录。`--check-report`、`--offline-result` 和 `--figure-dir` 都是独立输入，允许来自不同目录；其中 `--figure-dir` 可重复，便于拼接多批证据图。
 
+原始 CSV 目录支持从 root 下的相对目录识别场景标签：`root/<场景>/<人名>/<数据.csv>`、`root/<场景>/<数据.csv>` 和 `root/<人名>/<场景>/<数据.csv>`。目录名命中内置别名（如 `静息`、`静止`、`跑步`、`步行`、`骑行`、`恢复`、`static`、`dynamic`）时，标签写入报告的 `scene_label`，并转换为 `static` 或 `dynamic` 参与规则判断；人名或未知目录不会被误判为场景。场景优先级为显式 `--scene static|dynamic`、路径场景、离线/PSD 场景、原始特征推断；`--scene auto` 不覆盖路径场景。
+
 输出目录与输入目录可以不同，也可以嵌套，但分析会自动排除输出目录及其子树，不把既有分析产物再次当作原始 CSV。原始文件不会被移动、改名或覆盖。
 
 ## 处理阶段

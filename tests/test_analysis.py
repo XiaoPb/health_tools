@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import health_tools.api.analysis_operation as analysis_operation
 import health_tools.core.analysis.raw as raw_analysis
 import health_tools.core.analysis.reporting as analysis_reporting
 from health_tools.api import AnalyzeRequest, RequestValidationError, run_analyze
@@ -19,6 +20,8 @@ from health_tools.api.analysis_operation import (
     _generate_raw_plots,
     _offline_records,
     _raw_files,
+    _raw_records,
+    _records_from_payload,
     _run_supporting_stages,
 )
 from health_tools.api.context import ExecutionContext
@@ -155,6 +158,102 @@ def test_analysis_record_preserves_existing_positional_arguments():
 
     assert record.plot_data is plot_data
     assert record.scene_label is None
+
+
+def test_raw_records_prefers_explicit_scene_then_path_scene(tmp_path: Path, monkeypatch):
+    root = tmp_path / "root"
+    csv_path = root / "跑步" / "张三" / "a.csv"
+    _write_csv(csv_path)
+
+    def fake_analyze(*args, **kwargs):
+        return (
+            {
+                "features": {"scene": "static", "activity": "rest"},
+                "metrics": {},
+                "segments": [],
+            },
+            pd.DataFrame({"time": [0.0], "PPG": [1.0]}),
+            None,
+        )
+
+    monkeypatch.setattr(analysis_operation, "analyze_raw_file", fake_analyze)
+    monkeypatch.setattr(analysis_operation, "_plot_data", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        analysis_operation,
+        "diagnose",
+        lambda features, rule: {
+            "cause": None,
+            "conclusion": "未发现异常",
+            "confidence": 1.0,
+            "evidence": "ok",
+        },
+    )
+    request = AnalyzeRequest(
+        input_path=root, output_path=tmp_path / "out", scene="auto", report="markdown"
+    )
+    context = ExecutionContext()
+    rule = type("Rule", (), {"columns": {}})()
+    records, *_ = _raw_records(request, root, rule, context, root=root, files=[csv_path])
+    assert records[0].scene == "dynamic"
+    assert records[0].scene_label == "跑步"
+
+    request = replace(request, scene="static")
+    records, *_ = _raw_records(request, root, rule, context, root=root, files=[csv_path])
+    assert records[0].scene == "static"
+    assert records[0].scene_label == "跑步"
+
+
+def test_payload_scene_label_round_trip_and_legacy_fallback():
+    records = _records_from_payload(
+        [
+            {"file": "run/a.csv", "source": "a.csv", "scene": "dynamic", "scene_label": "跑步"},
+            {"file": "rest/a.csv", "source": "a.csv", "scene": "static"},
+        ]
+    )
+    assert records[0].scene_label == "跑步"
+    assert records[1].scene_label is None
+
+
+def test_structured_and_markdown_include_scene_label(tmp_path: Path):
+    record = AnalysisRecord(
+        "跑步/a.csv",
+        "a.csv",
+        "hr",
+        scene="dynamic",
+        scene_label="跑步",
+        conclusion="未发现异常",
+    )
+    summary, detail, _ = write_structured([record], tmp_path / "structured")
+    payload = json.loads(summary.read_text(encoding="utf-8"))
+    assert payload[0]["scene_label"] == "跑步"
+    assert "scene_label" in detail.read_text(encoding="utf-8-sig").splitlines()[0]
+    markdown = write_markdown([record], tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "- 场景：跑步" in markdown
+
+
+def test_ppt_detail_title_prefers_scene_label(tmp_path: Path):
+    pytest.importorskip("pptx")
+    from pptx import Presentation
+
+    output = write_ppt(
+        [
+            AnalysisRecord(
+                "跑步/a.csv",
+                "a.csv",
+                "hr",
+                scene="dynamic",
+                scene_label="跑步",
+                activity="other",
+                focused=True,
+                conclusion="未发现异常",
+            )
+        ],
+        tmp_path / "report.pptx",
+    )
+    deck = Presentation(str(output))
+    assert any(
+        any(getattr(shape, "text", "") == "跑步" for shape in slide.shapes) for slide in deck.slides
+    )
 
 
 def _write_csv(path: Path, error: float = 0.0) -> None:

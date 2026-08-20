@@ -117,6 +117,7 @@ def _plain(record: AnalysisRecord) -> Dict[str, Any]:
         "source": record.source,
         "analysis_type": record.analysis_type,
         "scene": record.scene,
+        "scene_label": record.scene_label,
         "activity": record.activity,
         "focused": record.focused,
         "features": record.features,
@@ -174,6 +175,7 @@ def write_structured(
             fieldnames=[
                 "file",
                 "scene",
+                "scene_label",
                 "focused",
                 "conclusion",
                 "confidence",
@@ -194,6 +196,7 @@ def write_structured(
                 {
                     "file": record.file,
                     "scene": record.scene,
+                    "scene_label": record.scene_label or record.scene,
                     "focused": record.focused,
                     "conclusion": record.conclusion,
                     "confidence": round(record.confidence, 3),
@@ -291,7 +294,7 @@ def write_markdown(
             [
                 f"## {record.file}",
                 "",
-                f"- 场景：{record.scene}",
+                f"- 场景：{record.scene_label or record.scene}",
                 f"- 结论：{record.conclusion}",
                 f"- 置信度：{record.confidence:.0%}",
             ]
@@ -846,7 +849,7 @@ def write_ppt(
             (
                 activity_names.get(record.activity, record.activity)
                 if record.activity and record.activity != "other"
-                else record.scene
+                else (record.scene_label or record.scene)
             ),
             "\n".join(body_lines),
             record.figure or "",
