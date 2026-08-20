@@ -196,6 +196,8 @@ def _match_figures(
         inferred_relative = f"{csv_file.parent.name}/{csv_file.name}"
         inferred_figures = _figures_in_relative_dir(inferred_relative, figures, roots)
         candidates = _fallback_figure_candidates(csv_file, inferred_figures)
+    if not candidates and stem_is_unique:
+        candidates = _fallback_figure_candidates(csv_file, figures)
     return tuple(sorted(candidates, key=lambda path: (_figure_rank(path), path.as_posix().lower())))
 
 
@@ -276,8 +278,6 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
         candidate = Path(value)
         if candidate.is_absolute():
             csv_path = candidate
-        elif not candidate.is_absolute() and (report.parent / candidate).is_file():
-            csv_path = report.parent / candidate
         elif relative_path in by_relative:
             csv_path = by_relative[relative_path]
         elif candidate.name in by_name and candidate.name not in by_unique_name:
@@ -288,10 +288,12 @@ def _csvs_from_report(report: Path, available: Sequence[Path]) -> List[_ReportCs
             raise ArtifactAmbiguityError(f"CSV stem 匹配存在歧义: {value}")
         elif candidate.stem in by_unique_stem:
             csv_path = by_unique_stem[candidate.stem]
+        elif (report.parent / candidate).is_file():
+            csv_path = report.parent / candidate
         elif candidate.is_file():
             csv_path = candidate
         else:
-            csv_path = candidate if candidate.is_absolute() else report.parent / candidate
+            csv_path = report.parent / candidate
         if csv_path.exists():
             result.append(_ReportCsvEntry(relative_path=relative_path, csv_path=csv_path))
         else:

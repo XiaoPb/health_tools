@@ -95,6 +95,43 @@ def test_unique_csv_stem_uses_parent_fallback_when_root_has_unrelated_png(tmp_pa
     assert index.figures_for("sample.csv") == (png_file,)
 
 
+def test_unique_csv_stems_use_flat_global_figure_fallback(tmp_path: Path):
+    source = tmp_path / "data"
+    first_csv = source / "a" / "one.csv"
+    second_csv = source / "b" / "two.csv"
+    first_csv.parent.mkdir(parents=True)
+    second_csv.parent.mkdir(parents=True)
+    first_csv.write_text("A\n1\n", encoding="utf-8")
+    second_csv.write_text("A\n2\n", encoding="utf-8")
+
+    figures = tmp_path / "figures"
+    figures.mkdir()
+    first_png = figures / "one_time.png"
+    second_png = figures / "two_time.png"
+    first_png.write_bytes(b"png")
+    second_png.write_bytes(b"png")
+
+    index = ArtifactIndex.build([first_csv, second_csv], [figures])
+
+    assert index.figures_for("a/one.csv") == (first_png,)
+    assert index.figures_for("b/two.csv") == (second_png,)
+
+
+def test_unique_csv_stem_uses_global_fallback_for_deeper_figure_path(tmp_path: Path):
+    csv_file = tmp_path / "outer" / "inner" / "one.csv"
+    csv_file.parent.mkdir(parents=True)
+    csv_file.write_text("A\n1\n", encoding="utf-8")
+
+    figures = tmp_path / "figures"
+    png_file = figures / "outer" / "inner" / "one_time.png"
+    png_file.parent.mkdir(parents=True)
+    png_file.write_bytes(b"png")
+
+    index = ArtifactIndex.build([csv_file], [figures])
+
+    assert index.figures_for("one.csv") == (png_file,)
+
+
 def test_index_ranks_time_before_psd_and_keeps_secondary(tmp_path: Path):
     csv_file = tmp_path / "sample.csv"
     csv_file.write_text("A\n1\n", encoding="utf-8")
@@ -172,6 +209,27 @@ def test_report_relative_csv_path_prefers_input_file_over_same_cwd_name(
         report, index=False, encoding="utf-8-sig"
     )
     monkeypatch.chdir(tmp_path)
+
+    index = ArtifactIndex.build([input_csv], check_report=report)
+
+    assert index.items["same.csv"].csv_path == input_csv
+
+
+def test_report_relative_csv_path_prefers_input_over_same_report_directory_name(
+    tmp_path: Path,
+):
+    input_csv = tmp_path / "input" / "same.csv"
+    input_csv.parent.mkdir()
+    input_csv.write_text("Ipd0,Ipd1\n1,2\n", encoding="utf-8")
+    report = tmp_path / "reports" / "check_report.csv"
+    report.parent.mkdir()
+    report_csv = report.parent / "same.csv"
+    report_csv.write_text("Ipd0,Ipd1\n9,9\n", encoding="utf-8")
+    import pandas as pd
+
+    pd.DataFrame({"文件相对路径": ["same.csv"], "总异常(结果)": ["FAIL"]}).to_csv(
+        report, index=False, encoding="utf-8-sig"
+    )
 
     index = ArtifactIndex.build([input_csv], check_report=report)
 
