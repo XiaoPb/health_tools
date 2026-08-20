@@ -32,6 +32,7 @@ class AnalysisRecord:
     warnings: List[str] = field(default_factory=list)
     figure: Optional[str] = None
     secondary_figure: Optional[str] = None
+    scene_label: Optional[str] = None
     plot_data: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property

@@ -27,7 +27,12 @@ from health_tools.core.analysis.conditions import matches
 from health_tools.core.analysis.diagnosis import diagnose
 from health_tools.core.analysis.models import AnalysisRecord
 from health_tools.core.analysis.psd import analyze_psd_directory
-from health_tools.core.analysis.raw import analyze_raw_file, infer_activity
+from health_tools.core.analysis.raw import (
+    ScenePathInfo,
+    analyze_raw_file,
+    infer_activity,
+    infer_scene,
+)
 from health_tools.core.analysis.reference import analyze_reference
 from health_tools.core.analysis.reporting import (
     _accuracy_rows,
@@ -71,6 +76,58 @@ causes:
     priority: 50
     when: {feature: algorithm_abnormal, op: eq, value: true}
 """
+
+
+@pytest.mark.parametrize(
+    ("relative", "expected_label", "expected_mode"),
+    [
+        ("静息/张三/a.csv", "静息", "static"),
+        ("跑步/a.csv", "跑步", "dynamic"),
+        ("张三/恢复/a.csv", "恢复", "dynamic"),
+    ],
+)
+def test_infer_scene_from_supported_directory_layouts(
+    tmp_path: Path, relative: str, expected_label: str, expected_mode: str
+):
+    root = tmp_path / "root"
+    source = root.joinpath(*relative.split("/"))
+
+    result = infer_scene(source, root)
+
+    assert result == ScenePathInfo(label=expected_label, mode=expected_mode)
+
+
+def test_infer_scene_uses_nearest_scene_directory_and_does_not_guess_person(tmp_path: Path):
+    root = tmp_path / "root"
+    source = root / "静息" / "跑步" / "张三" / "a.csv"
+
+    result = infer_scene(source, root)
+
+    assert result == ScenePathInfo(label="跑步", mode="dynamic")
+    assert infer_scene(root / "张三" / "unknown" / "a.csv", root) is None
+
+
+def test_infer_scene_handles_root_file_and_unrelated_root(tmp_path: Path):
+    root = tmp_path / "root"
+
+    assert infer_scene(root / "a.csv", root) is None
+    assert infer_scene(tmp_path / "other" / "a.csv", root) is None
+
+
+def test_infer_scene_normalizes_windows_separators(tmp_path: Path):
+    root = tmp_path / "root"
+    source = root / "跑步" / "a.csv"
+
+    result = infer_scene(Path(str(source).replace("/", "\\")), Path(str(root).replace("/", "\\")))
+
+    assert result == ScenePathInfo(label="跑步", mode="dynamic")
+
+
+def test_analysis_record_scene_label_is_optional():
+    record = AnalysisRecord("a.csv", "a.csv", "hr", scene="dynamic", scene_label="跑步")
+
+    assert record.scene == "dynamic"
+    assert record.scene_label == "跑步"
 
 
 def _write_csv(path: Path, error: float = 0.0) -> None:
