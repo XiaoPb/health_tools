@@ -306,8 +306,12 @@ def write_markdown(
         if actions:
             lines.append(f"- 原始数据措施：{'；'.join(actions)}")
         if record.figure:
-            rel = Path(record.figure).relative_to(output.parent).as_posix()
-            lines.extend(["", f"![证据图]({rel})"])
+            figure_path = Path(record.figure)
+            try:
+                image_ref = figure_path.relative_to(output.parent).as_posix()
+            except ValueError:
+                image_ref = figure_path.resolve().as_uri()
+            lines.extend(["", f"![证据图]({image_ref})"])
         lines.append("")
     output.write_text("\n".join(lines), encoding="utf-8")
     return output

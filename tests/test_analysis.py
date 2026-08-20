@@ -1073,6 +1073,23 @@ def test_accuracy_report_preserves_threshold_input_order(tmp_path: Path):
     assert header.index("±15 bpm") < header.index("±5 bpm") < header.index("±10 bpm")
 
 
+def test_markdown_report_accepts_external_figure_path(tmp_path: Path):
+    external_figure = tmp_path / "input" / "figures" / "sample.png"
+    external_figure.parent.mkdir(parents=True)
+    external_figure.write_bytes(b"png")
+    output = tmp_path / "report" / "report.md"
+    record = AnalysisRecord(
+        file="sample.csv",
+        source="sample.csv",
+        analysis_type="hr",
+        figure=str(external_figure),
+    )
+
+    report = write_markdown([record], output, (2.0, 7.5)).read_text(encoding="utf-8")
+
+    assert external_figure.resolve().as_uri() in report
+
+
 def test_accuracy_report_files_exclude_zero_sample_comparisons():
     records = [
         AnalysisRecord(
