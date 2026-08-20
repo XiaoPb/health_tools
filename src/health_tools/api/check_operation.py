@@ -21,6 +21,42 @@ from health_tools.api.models import (
 from health_tools.api.operations import _batch, _context, _load_rule, _require_path
 from health_tools.utils.errors import REASON_PROCESS_FAILED, classify_exception
 
+SORT_CATEGORIES = (
+    "frame",
+    "range",
+    "acc_fail",
+    "acc_warning",
+    "timestamp",
+    "center",
+    "other",
+    "normal",
+)
+
+
+def _sort_category(row: Dict[str, str]) -> str:
+    """按异常优先级为单个报告行选择唯一分拣目录。"""
+    status = row.get("总异常(结果)", "").strip().upper()
+    checks = {
+        "frame": row.get("帧完整性(结果)", "").strip().upper(),
+        "range": row.get("数据范围(结果)", "").strip().upper(),
+        "acc": row.get("ACC异常(结果)", "").strip().upper(),
+        "timestamp": row.get("时间戳间隔(结果)", "").strip().upper(),
+        "center": row.get("数据居中(结果)", "").strip().upper(),
+    }
+    if checks["frame"] == "FAIL":
+        return "frame"
+    if checks["range"] == "FAIL":
+        return "range"
+    if checks["acc"] == "FAIL":
+        return "acc_fail"
+    if checks["acc"] == "WARNING":
+        return "acc_warning"
+    if checks["timestamp"] == "FAIL":
+        return "timestamp"
+    if checks["center"] == "FAIL":
+        return "center"
+    return "other" if status == "FAIL" else "normal"
+
 
 def _detect_chip(csv_file: Path) -> Optional[str]:
     try:
@@ -258,13 +294,12 @@ def _sort_report(report: Path, output: Path) -> Dict[str, int]:
     missing = required - set(rows[0])
     if missing:
         raise RequestValidationError(f"检查报告缺少必要列: {', '.join(sorted(missing))}")
-    records: Dict[str, List[List[str]]] = {"normal": [], "abnormal": []}
-    stats = {"normal": 0, "abnormal": 0, "skipped": 0}
+    records: Dict[str, List[List[str]]] = {category: [] for category in SORT_CATEGORIES}
+    stats: Dict[str, int] = {"skipped": 0}
     for row in rows:
-        status = row.get("总异常(结果)", "").strip().upper()
         relative_text = row.get("文件相对路径", "").strip()
         file_name = row.get("文件名", "").strip()
-        category = "normal" if status == "PASS" else "abnormal"
+        category = _sort_category(row)
         if not relative_text:
             records[category].append(
                 [file_name, "", "", "跳过", "文件相对路径为空", row.get("场景分类", "default")]
@@ -272,7 +307,10 @@ def _sort_report(report: Path, output: Path) -> Dict[str, int]:
             stats["skipped"] += 1
             continue
         relative = Path(relative_text)
-        destination = output / category / relative
+        destination_root = (
+            output / "normal" if category == "normal" else output / "abnormal" / category
+        )
+        destination = destination_root / relative
         if relative.is_absolute() or ".." in relative.parts:
             records[category].append(
                 [
@@ -313,9 +351,9 @@ def _sort_report(report: Path, output: Path) -> Dict[str, int]:
                 row.get("场景分类", "default"),
             ]
         )
-        stats[category] += 1
-    _write_sort_list(output / "normal_files.csv", records["normal"])
-    _write_sort_list(output / "abnormal_files.csv", records["abnormal"])
+        stats[category] = stats.get(category, 0) + 1
+    for category in SORT_CATEGORIES:
+        _write_sort_list(output / f"{category}_files.csv", records[category])
     return stats
 
 
@@ -334,9 +372,8 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
         ctx.check_cancelled("sort")
         ctx.emit(ProgressEvent("check", "sort", 0, 1, "分拣文件", str(sort_report_path)))
         counts = _sort_report(sort_report_path, request.sort_output)
-        sort_artifacts = (
-            request.sort_output / "normal_files.csv",
-            request.sort_output / "abnormal_files.csv",
+        sort_artifacts = tuple(
+            request.sort_output / f"{category}_files.csv" for category in SORT_CATEGORIES
         )
         result = CheckResult(BatchResult("check", artifacts=sort_artifacts), sort_counts=counts)
         ctx.emit(ProgressEvent("check", "sort", 1, 1, "完成", str(sort_report_path)))

@@ -121,13 +121,33 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 
 ## 分拣报告
 
-`--sort` 模式读取 `check_report.csv`，根据 `总异常(结果)` 将源文件移动到：
+`--sort` 模式读取 `check_report.csv`，按异常优先级为每个文件选择**唯一**分类；文件命中一个分类后只移动一次，并保留原始 `文件相对路径`：
 
-- `normal/`：总结果为 `PASS`
-- `abnormal/`：总结果为 `FAIL`
+1. `帧完整性(结果)=FAIL` → `abnormal/frame/`
+2. `数据范围(结果)=FAIL` → `abnormal/range/`
+3. `ACC异常(结果)=FAIL` → `abnormal/acc_fail/`
+4. `ACC异常(结果)=WARNING` → `abnormal/acc_warning/`
+5. `时间戳间隔(结果)=FAIL` → `abnormal/timestamp/`
+6. `数据居中(结果)=FAIL` → `abnormal/center/`
+7. 其他 `总异常(结果)=FAIL`（例如 Ipd 转换失败）→ `abnormal/other/`
+8. 其余文件（包括只有 WARNING 的非 ACC 检查项）→ `normal/`
 
-报告必须包含 `文件相对路径` 列；分拣不会覆盖目标同名文件，并会输出
-`normal_files.csv` 和 `abnormal_files.csv` 记录每个文件的处理状态。
+例如 `sub/a.csv` 被判定为帧不完整时，目标路径为 `abnormal/frame/sub/a.csv`。如果同一文件同时有多项异常，只按上面的第一项分类；因此帧不完整会优先于数据范围，数据范围优先于 ACC。
+
+报告必须包含 `文件相对路径` 列；旧报告缺少具体检查项列时，会按可识别的列和 `总异常(结果)` 回退到 `abnormal/other/` 或 `normal/`。分拣不会覆盖目标同名文件，源文件不存在、路径非法或目标已存在时记录为跳过。
+
+每个分类都会生成一个清单 CSV，列出文件名、相对路径、目标路径、移动状态、原因和场景分类：
+
+```text
+frame_files.csv
+range_files.csv
+acc_fail_files.csv
+acc_warning_files.csv
+timestamp_files.csv
+center_files.csv
+other_files.csv
+normal_files.csv
+```
 
 ## 示例
 
@@ -155,4 +175,5 @@ ghealth_tool check -i data/ --checks acc --acc-axis
 
 # 按检查报告分拣
 ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/
+# 输出示例：sorted/abnormal/frame/<原相对路径>
 ```

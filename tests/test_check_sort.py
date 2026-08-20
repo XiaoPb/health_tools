@@ -5,6 +5,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from health_tools.api.check_operation import _sort_report
 from health_tools.commands.check import _sort_report_files
 
 
@@ -38,18 +39,147 @@ def test_sort_report_moves_files_and_keeps_relative_paths(tmp_path):
     output = tmp_path / "sorted"
     stats = _sort_report_files(report, output)
 
-    assert stats == {"normal": 1, "abnormal": 1, "skipped": 0}
+    assert stats == {"normal": 1, "other": 1, "skipped": 0}
     assert (output / "normal" / "ok.csv").read_text(encoding="utf-8") == "ok"
-    assert (output / "abnormal" / "sub" / "bad.csv").read_text(encoding="utf-8") == "bad"
+    assert (output / "abnormal" / "other" / "sub" / "bad.csv").read_text(encoding="utf-8") == "bad"
     assert not (src / "ok.csv").exists()
     assert not (src / "sub" / "bad.csv").exists()
 
     normal_rows = _read_csv(output / "normal_files.csv")
-    abnormal_rows = _read_csv(output / "abnormal_files.csv")
+    abnormal_rows = _read_csv(output / "other_files.csv")
     assert normal_rows[1][0:2] == ["ok.csv", "ok.csv"]
     assert normal_rows[1][3] == "已移动"
     assert abnormal_rows[1][0:2] == ["bad.csv", "sub/bad.csv"]
     assert abnormal_rows[1][3] == "已移动"
+
+
+def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
+    src = tmp_path / "src"
+    paths = [
+        "scene/frame.csv",
+        "scene/range.csv",
+        "scene/acc_fail.csv",
+        "scene/acc_warning.csv",
+        "scene/timestamp.csv",
+        "scene/center.csv",
+        "scene/other.csv",
+        "scene/normal.csv",
+    ]
+    for relative in paths:
+        path = src / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(relative, encoding="utf-8")
+    report = src / "check_report.csv"
+    header = [
+        "文件名",
+        "总异常(结果)",
+        "帧完整性(结果)",
+        "数据范围(结果)",
+        "ACC异常(结果)",
+        "时间戳间隔(结果)",
+        "数据居中(结果)",
+        "Ipd转换(结果)",
+        "场景分类",
+        "文件相对路径",
+    ]
+    rows = [
+        ["frame.csv", "FAIL", "FAIL", "FAIL", "FAIL", "FAIL", "FAIL", "PASS", "scene", paths[0]],
+        ["range.csv", "FAIL", "PASS", "FAIL", "FAIL", "FAIL", "FAIL", "PASS", "scene", paths[1]],
+        ["acc_fail.csv", "FAIL", "PASS", "PASS", "FAIL", "FAIL", "FAIL", "PASS", "scene", paths[2]],
+        [
+            "acc_warning.csv",
+            "PASS",
+            "PASS",
+            "PASS",
+            "WARNING",
+            "PASS",
+            "WARNING",
+            "PASS",
+            "scene",
+            paths[3],
+        ],
+        [
+            "timestamp.csv",
+            "FAIL",
+            "PASS",
+            "PASS",
+            "PASS",
+            "FAIL",
+            "FAIL",
+            "PASS",
+            "scene",
+            paths[4],
+        ],
+        ["center.csv", "FAIL", "PASS", "PASS", "PASS", "PASS", "FAIL", "PASS", "scene", paths[5]],
+        ["other.csv", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS", "FAIL", "scene", paths[6]],
+        [
+            "normal.csv",
+            "PASS",
+            "WARNING",
+            "WARNING",
+            "PASS",
+            "WARNING",
+            "WARNING",
+            "PASS",
+            "scene",
+            paths[7],
+        ],
+    ]
+    _write_report(report, [header, *rows])
+
+    stats = _sort_report_files(report, tmp_path / "sorted")
+
+    assert stats == {
+        "frame": 1,
+        "range": 1,
+        "acc_fail": 1,
+        "acc_warning": 1,
+        "timestamp": 1,
+        "center": 1,
+        "other": 1,
+        "normal": 1,
+        "skipped": 0,
+    }
+    expected = {
+        "frame": paths[0],
+        "range": paths[1],
+        "acc_fail": paths[2],
+        "acc_warning": paths[3],
+        "timestamp": paths[4],
+        "center": paths[5],
+        "other": paths[6],
+    }
+    for category, relative in expected.items():
+        assert (tmp_path / "sorted" / "abnormal" / category / relative).exists()
+        assert (tmp_path / "sorted" / f"{category}_files.csv").exists()
+    assert (tmp_path / "sorted" / "normal" / paths[7]).exists()
+    assert (tmp_path / "sorted" / "normal_files.csv").exists()
+
+
+def test_api_sort_report_uses_same_priority_rules(tmp_path):
+    src = tmp_path / "src"
+    source = src / "nested" / "sample.csv"
+    source.parent.mkdir(parents=True)
+    source.write_text("data", encoding="utf-8")
+    report = src / "check_report.csv"
+    _write_report(
+        report,
+        [
+            [
+                "文件名",
+                "总异常(结果)",
+                "帧完整性(结果)",
+                "数据范围(结果)",
+                "文件相对路径",
+            ],
+            ["sample.csv", "FAIL", "FAIL", "FAIL", "nested/sample.csv"],
+        ],
+    )
+
+    stats = _sort_report(report, tmp_path / "sorted")
+
+    assert stats == {"frame": 1, "skipped": 0}
+    assert (tmp_path / "sorted/abnormal/frame/nested/sample.csv").exists()
 
 
 def test_sort_report_skips_existing_target(tmp_path):
@@ -70,7 +200,7 @@ def test_sort_report_skips_existing_target(tmp_path):
 
     stats = _sort_report_files(report, output)
 
-    assert stats == {"normal": 0, "abnormal": 0, "skipped": 1}
+    assert stats == {"skipped": 1}
     assert (src / "ok.csv").read_text(encoding="utf-8") == "new"
     assert (output / "normal" / "ok.csv").read_text(encoding="utf-8") == "old"
     rows = _read_csv(output / "normal_files.csv")
