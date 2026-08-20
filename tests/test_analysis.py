@@ -2581,6 +2581,24 @@ def test_report_time_plot_handles_malformed_sample_rate_and_segment(monkeypatch,
     assert calls[0]["time_range"] == (0.0, 10.0)
 
 
+def test_current_plot_artifacts_filters_stale_paths(tmp_path: Path):
+    from health_tools.api.analysis_operation import _current_plot_artifacts
+
+    current = tmp_path / "figures" / "time.png"
+    current.parent.mkdir(parents=True)
+    current.write_bytes(b"png")
+    stale = tmp_path / "old" / "time.png"
+    record = AnalysisRecord(
+        "sample.csv",
+        "sample.csv",
+        "hr",
+        figure=str(current),
+        secondary_figure=str(stale),
+    )
+
+    assert _current_plot_artifacts([record], tmp_path) == [current.resolve()]
+
+
 @pytest.mark.parametrize(
     ("path", "explicit", "expected"),
     [("run/a.csv", "auto", "run"), ("cycle/a.csv", "auto", "cycle"), ("x.csv", "rest", "rest")],

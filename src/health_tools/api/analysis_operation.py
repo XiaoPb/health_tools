@@ -1252,6 +1252,32 @@ def _select_report_primary_figure(
     return Path(record.figure) if record.figure else (candidates[0] if candidates else None)
 
 
+def _current_plot_artifacts(records: Sequence[AnalysisRecord], output: Path) -> List[Path]:
+    """Return existing plot files currently referenced by valid records."""
+    output_root = output.resolve()
+    result: List[Path] = []
+    seen: Set[str] = set()
+    for record in records:
+        for value in (record.figure, record.secondary_figure):
+            if not value:
+                continue
+            path = Path(value)
+            try:
+                resolved = path.resolve()
+            except (OSError, ValueError):
+                continue
+            if value != record.figure:
+                try:
+                    resolved.relative_to(output_root)
+                except ValueError:
+                    continue
+            if not resolved.is_file() or str(resolved).casefold() in seen:
+                continue
+            seen.add(str(resolved).casefold())
+            result.append(resolved)
+    return result
+
+
 def _offline_records(
     request: AnalyzeRequest,
     source: Path,
@@ -1571,13 +1597,9 @@ def run_analyze(
     _generate_report_time_plots(records, figures / "time")
     plot_stage = state.state.stages["plot"]
     if plot_stage.status == "completed":
-        prior_artifacts = [Path(item.path) for item in plot_stage.artifacts]
-        time_artifacts = [
-            Path(record.secondary_figure) for record in records if record.secondary_figure
-        ]
         state.complete(
             "plot",
-            [*prior_artifacts, *time_artifacts],
+            _current_plot_artifacts(records, output),
             fingerprint=plot_stage.fingerprint,
         )
     if not diagnosis_reused:
