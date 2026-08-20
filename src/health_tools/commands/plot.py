@@ -31,6 +31,12 @@ console = Console()
 @click.option("--baseline-method", default="mean", help="基线去除方法: mean|median（默认: mean）")
 @click.option("--freq-bpm", is_flag=True, default=True, help="Y轴显示BPM（默认: 是）")
 @click.option("--freq-range", default="30-240", help="频率范围（BPM，默认: 30-240）")
+@click.option(
+    "--time-range",
+    type=str,
+    help="绘制时间范围（秒，格式 START-END；短于类型最小宽度时自动扩展）",
+)
+@click.option("--height", "fig_height", type=float, help="单图高度（英寸）")
 @click.option("--ref-column", help="参考曲线列名")
 @click.option(
     "--r-column",
@@ -71,6 +77,8 @@ def plot_cmd(
     baseline_method: str,
     freq_bpm: bool,
     freq_range: str,
+    time_range: Optional[str],
+    fig_height: Optional[float],
     ref_column: Optional[str],
     r_column: Optional[str],
     psd_acc: str,
@@ -84,6 +92,8 @@ def plot_cmd(
     """绘制PPG数据的时域、频域、AC/PI、FFT和时频图"""
     from health_tools.api import PlotRequest, run_plot
     from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
+
+    parsed_time_range = _parse_time_range(time_range)
 
     with CliExecution(console) as context:
         result = invoke_api(
@@ -105,6 +115,8 @@ def plot_cmd(
                     baseline_method=baseline_method,
                     freq_bpm=freq_bpm,
                     freq_range=freq_range,
+                    time_range=parsed_time_range,
+                    fig_height=fig_height,
                     ref_column=ref_column,
                     r_column=r_column,
                     psd_acc=psd_acc,
@@ -119,6 +131,21 @@ def plot_cmd(
         )
     print_batch("绘图结果", result, console, verbose)
     return
+
+
+def _parse_time_range(value: Optional[str]):
+    if value is None:
+        return None
+    try:
+        parts = value.split("-")
+        if len(parts) != 2:
+            raise ValueError
+        start, end = (float(part.strip()) for part in parts)
+        if start < 0 or end <= start:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise click.BadParameter("时间范围必须使用 START-END，且满足 0 <= START < END") from None
+    return (start, end)
 
 
 def _plot_psd_dir(
@@ -182,6 +209,8 @@ def _plot_file(
     r_column: Optional[str],
     no_show: bool,
     verbose: bool,
+    time_range=None,
+    fig_height: Optional[float] = None,
     chip_rule=None,
     ac_channel_groups: Optional[List[List[str]]] = None,
 ) -> FileResult:
@@ -193,28 +222,57 @@ def _plot_file(
 
         if plot_type in ("time", "both"):
             output_file = output_dir / f"{input_file.stem}_time.{plotter.fmt}"
-            plotter.plot_time(df, output_file, channels)
+            plotter.plot_time(
+                df,
+                output_file,
+                channels,
+                file_name=input_file.name,
+                fig_height=fig_height,
+                time_range=time_range,
+            )
             output_files.append(str(output_file))
             if verbose:
                 console.print(f"[green]OK[/green] 时域图: {output_file}")
 
         if plot_type in ("freq", "both"):
             output_file = output_dir / f"{input_file.stem}_freq.{plotter.fmt}"
-            plotter.plot_freq(df, output_file, channels)
+            plotter.plot_freq(
+                df,
+                output_file,
+                channels,
+                file_name=input_file.name,
+                fig_height=fig_height,
+                time_range=time_range,
+            )
             output_files.append(str(output_file))
             if verbose:
                 console.print(f"[green]OK[/green] 频域图: {output_file}")
 
         if plot_type in ("stft", "both"):
             if chip_rule and not channels:
-                out_files = plotter.plot_chip_stft(df, output_dir, input_file.stem)
+                out_files = plotter.plot_chip_stft(
+                    df,
+                    output_dir,
+                    input_file.stem,
+                    file_name=input_file.name,
+                    fig_height=fig_height,
+                    time_range=time_range,
+                )
                 output_files.extend(str(f) for f in out_files)
                 if verbose:
                     for f in out_files:
                         console.print(f"[green]OK[/green] 时频图: {f}")
             else:
                 output_file = output_dir / f"{input_file.stem}_stft.{plotter.fmt}"
-                plotter.plot_stft(df, output_file, channels, ref_column)
+                plotter.plot_stft(
+                    df,
+                    output_file,
+                    channels,
+                    ref_column,
+                    file_name=input_file.name,
+                    fig_height=fig_height,
+                    time_range=time_range,
+                )
                 output_files.append(str(output_file))
                 if verbose:
                     console.print(f"[green]OK[/green] 时频图: {output_file}")
@@ -246,7 +304,16 @@ def _plot_file(
             for group in groups or []:
                 suffix = "" if automatic else f"_{_safe_channel_suffix(group)}"
                 output_file = output_dir / f"{input_file.stem}_ac{suffix}.{plotter.fmt}"
-                plotter.plot_ac(df, output_file, group, acc_columns, r_column=r_column)
+                plotter.plot_ac(
+                    df,
+                    output_file,
+                    group,
+                    acc_columns,
+                    r_column=r_column,
+                    file_name=input_file.name,
+                    fig_height=fig_height,
+                    time_range=time_range,
+                )
                 output_files.append(str(output_file))
                 if verbose:
                     console.print(f"[green]OK[/green] AC/PI图: {output_file}")
@@ -261,7 +328,14 @@ def _plot_file(
             for channel in fft_channels:
                 suffix = _safe_channel_suffix([channel])
                 output_file = output_dir / f"{input_file.stem}_fft_{suffix}.{plotter.fmt}"
-                plotter.plot_fft(df, output_file, channel)
+                plotter.plot_fft(
+                    df,
+                    output_file,
+                    channel,
+                    file_name=input_file.name,
+                    fig_height=fig_height,
+                    time_range=time_range,
+                )
                 output_files.append(str(output_file))
                 if verbose:
                     console.print(f"[green]OK[/green] FFT图: {output_file}")

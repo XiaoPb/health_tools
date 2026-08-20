@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from matplotlib.figure import Figure
 
-from health_tools.core.plotter import DataPlotter
+from health_tools.core.plotter import DataPlotter, crop_time_range
 from health_tools.core.ppg_analysis import SignalAnalysisError
 
 
@@ -71,9 +71,9 @@ def test_plot_ac_uses_symmetric_limits_from_dominant_peak_distribution(monkeypat
 
     df = pd.DataFrame(
         {
-            "ACCX": np.zeros(9),
-            "ACCY": np.zeros(9),
-            "ACCZ": np.zeros(9),
+            "ACCX": np.arange(9, dtype=float),
+            "ACCY": np.arange(9, dtype=float),
+            "ACCZ": np.arange(9, dtype=float),
             "CH0": np.full(9, 100.0),
             "CH1": np.full(9, 200.0),
         }
@@ -85,6 +85,54 @@ def test_plot_ac_uses_symmetric_limits_from_dominant_peak_distribution(monkeypat
     lower, upper = saved[0].axes[1].get_ylim()
     assert lower == pytest.approx(-upper)
     assert upper < 20
+
+
+def test_plot_ac_rejects_all_invalid_acc_columns(tmp_path: Path):
+    df = _analysis_df()
+    df[["ACCX", "ACCY", "ACCZ"]] = 0.0
+    with pytest.raises(SignalAnalysisError, match="没有有效的 ACC"):
+        DataPlotter(sample_rate=10).plot_ac(
+            df, tmp_path / "ac.png", ["CH0", "CH1"], ["ACCX", "ACCY", "ACCZ"]
+        )
+
+
+def test_plot_ac_skips_invalid_explicit_r_column(tmp_path: Path, monkeypatch):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = _analysis_df()
+    df["R_VALUE"] = 0.0
+    DataPlotter(sample_rate=10).plot_ac(
+        df,
+        tmp_path / "ac.png",
+        ["CH0", "CH1"],
+        ["ACCX", "ACCY", "ACCZ"],
+        r_column="R_VALUE",
+    )
+    assert all(axis.get_ylabel() != "R" for axis in saved[0].axes)
+
+
+def test_fig_height_is_protected_by_plot_type_minimum(tmp_path: Path, monkeypatch):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    DataPlotter(sample_rate=10).plot_freq(
+        _analysis_df(), tmp_path / "freq.png", ["CH0"], fig_height=1.0
+    )
+    assert saved[0].get_figheight() >= 3.0
+
+
+def test_plot_time_preserves_non_string_column_names_and_rejects_all_invalid(
+    tmp_path: Path, monkeypatch
+):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = pd.DataFrame({1: np.arange(20, dtype=float), "ZERO": 0.0})
+    DataPlotter(sample_rate=10).plot_time(df, tmp_path / "time.png")
+    assert saved[0].axes[0].get_ylabel() == "1"
+
+    with pytest.raises(SignalAnalysisError, match="没有有效的绘图列"):
+        DataPlotter(sample_rate=10).plot_time(
+            pd.DataFrame({"ZERO": np.zeros(20)}), tmp_path / "invalid.png"
+        )
 
 
 def test_plot_ac_reads_explicit_r_column(tmp_path: Path, monkeypatch):
@@ -220,3 +268,74 @@ def test_plot_time_generates_png_in_worker_threads_without_pyplot_backend(
     for output in outputs:
         assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
         assert output.stat().st_size > 0
+
+
+def test_plot_time_filters_zero_columns_and_adds_filename_title(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = _analysis_df()
+    df["ZERO"] = 0.0
+    df["timestamp"] = np.arange(len(df)) / 10
+
+    DataPlotter(sample_rate=10).plot_time(
+        df, tmp_path / "time.png", file_name="sample.csv", fig_height=6.0
+    )
+
+    figure = saved[0]
+    assert figure._suptitle.get_text() == "sample.csv"
+    assert figure.get_figheight() >= 6.0
+    assert all("ZERO" not in axis.get_ylabel() for axis in figure.axes)
+
+
+def test_plot_chip_stft_separates_file_and_base_titles(monkeypatch, tmp_path: Path):
+    saved = []
+    original_savefig = Figure.savefig
+
+    def capture_savefig(figure, *args, **kwargs):
+        saved.append(figure)
+        return original_savefig(figure, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", capture_savefig)
+    sample_rate = 25
+    time = np.arange(sample_rate * 30) / sample_rate
+    df = pd.DataFrame(
+        {
+            "Ipd0": 100 + 3 * np.sin(2 * np.pi * 1.2 * time),
+            "ACCX": np.sin(time),
+            "ACCY": np.cos(time),
+            "ACCZ": np.sin(time * 2),
+        }
+    )
+    output_dir = tmp_path / "chip"
+    output_dir.mkdir()
+
+    DataPlotter(sample_rate=sample_rate).plot_chip_stft(
+        df, output_dir, "Ipd0", file_name="sample.csv"
+    )
+
+    figure = saved[0]
+    base_title = next(text for text in figure.texts if text.get_text() == "Ipd0")
+    assert figure._suptitle.get_text() == "sample.csv"
+    assert base_title.get_position()[1] < figure._suptitle.get_position()[1]
+    assert figure.subplotpars.top <= 0.85
+
+
+def test_crop_time_range_expands_short_request_to_minimum_duration():
+    df = pd.DataFrame({"CH0": np.arange(100, dtype=float)})
+    cropped = crop_time_range(df, sample_rate=10, time_range=(4.0, 5.0), min_duration=4.0)
+
+    assert len(cropped) == 40
+    assert cropped["CH0"].iloc[0] == 20.0
+    assert cropped["CH0"].iloc[-1] == 59.0
+
+
+def test_plot_time_uses_requested_range(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = _analysis_df(seconds=20)
+
+    DataPlotter(sample_rate=10).plot_time(
+        df, tmp_path / "time.png", file_name="sample.csv", time_range=(5.0, 9.0)
+    )
+
+    assert len(saved[0].axes[0].lines[0].get_ydata()) == 100

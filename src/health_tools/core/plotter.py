@@ -19,6 +19,14 @@ from health_tools.core.ppg_analysis import (
 from health_tools.core.stft import STFTPlotter
 
 MAX_PLOT_POINTS = 50000
+MIN_PLOT_DURATIONS = {
+    "time": 10.0,
+    "freq": 5.0,
+    "ac": 10.0,
+    "fft": 5.0,
+    "spectrogram": 10.0,
+    "stft": 25.0,
+}
 
 
 def _new_figure(figsize: Tuple[float, float]) -> Figure:
@@ -42,6 +50,62 @@ def _downsample(data: np.ndarray, max_points: int = MAX_PLOT_POINTS) -> np.ndarr
         return data
     step = len(data) // max_points
     return data[::step]
+
+
+def _fig_size(
+    width: float,
+    default_height: float,
+    fig_height: Optional[float],
+    min_height: Optional[float] = None,
+) -> Tuple[float, float]:
+    if fig_height is None:
+        return width, default_height
+    if fig_height <= 0:
+        raise SignalAnalysisError("图像高度必须大于 0")
+    return width, max(float(fig_height), min_height or 0.0)
+
+
+def _set_title(fig: Figure, file_name: Optional[str]) -> None:
+    if file_name:
+        fig.suptitle(str(file_name))
+
+
+def _has_nonzero_numeric(values: object) -> bool:
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
+    return bool(np.isfinite(numeric).any() and np.any(np.isfinite(numeric) & (numeric != 0)))
+
+
+def _valid_columns(df: pd.DataFrame, channels: Optional[List[str]] = None) -> List[str]:
+    candidates = channels if channels is not None else list(df.columns)
+    return [
+        channel
+        for channel in candidates
+        if channel in df.columns and channel != "timestamp" and _has_nonzero_numeric(df[channel])
+    ]
+
+
+def crop_time_range(
+    df: pd.DataFrame,
+    sample_rate: float,
+    time_range: Optional[Tuple[float, float]],
+    min_duration: float,
+) -> pd.DataFrame:
+    if time_range is None or df.empty:
+        return df
+    start, end = time_range
+    if sample_rate <= 0 or start < 0 or end <= start:
+        raise SignalAnalysisError("时间范围必须满足 0 <= start < end，且采样率大于 0")
+    total_duration = len(df) / sample_rate
+    requested_duration = end - start
+    duration = max(requested_duration, min_duration)
+    if duration >= total_duration:
+        return df.copy()
+    # 向请求区间前方扩展，保留用户指定的起止范围并增加上下文。
+    padding = float(np.ceil((duration - requested_duration) / 2.0))
+    start = max(0.0, min(start - padding, total_duration - duration))
+    start_index = int(round(start * sample_rate))
+    end_index = min(len(df), start_index + max(1, int(round(duration * sample_rate))))
+    return df.iloc[start_index:end_index].copy()
 
 
 def _peak_symmetric_limit(signals: List[np.ndarray]) -> float:
@@ -120,13 +184,18 @@ class DataPlotter:
         df: pd.DataFrame,
         output_file: Path,
         channels: Optional[List[str]] = None,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
+        time_range: Optional[Tuple[float, float]] = None,
     ) -> None:
-        if channels is None:
-            channels = [col for col in df.columns if col != "timestamp"]
+        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["time"])
+        channels = _valid_columns(df, channels)
         if not channels:
-            return
+            raise SignalAnalysisError("没有有效的绘图列")
 
-        fig = _new_figure((12, 3 * len(channels)))
+        default_height = 3 * len(channels)
+        fig = _new_figure(_fig_size(12, default_height, fig_height, default_height))
+        _set_title(fig, file_name)
         axes = np.atleast_1d(fig.subplots(len(channels), 1, sharex=True))
 
         for ax, channel in zip(axes, channels):
@@ -137,7 +206,7 @@ class DataPlotter:
                 ax.grid(True, alpha=0.3)
 
         axes[-1].set_xlabel("Sample")
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 1, 0.96) if file_name else None)
         fig.savefig(output_file, dpi=self.dpi)
 
     def plot_freq(
@@ -145,15 +214,20 @@ class DataPlotter:
         df: pd.DataFrame,
         output_file: Path,
         channels: Optional[List[str]] = None,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
+        time_range: Optional[Tuple[float, float]] = None,
     ) -> None:
-        if channels is None:
-            channels = [col for col in df.columns if col != "timestamp"]
+        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["freq"])
+        channels = _valid_columns(df, channels)
         if not channels:
-            return
+            raise SignalAnalysisError("没有有效的绘图列")
 
         sample_rate = self.sample_rate
 
-        fig = _new_figure((12, 3 * len(channels)))
+        default_height = 3 * len(channels)
+        fig = _new_figure(_fig_size(12, default_height, fig_height, default_height))
+        _set_title(fig, file_name)
         axes = np.atleast_1d(fig.subplots(len(channels), 1, sharex=True))
 
         for ax, channel in zip(axes, channels):
@@ -167,7 +241,7 @@ class DataPlotter:
                     ax.grid(True, alpha=0.3)
 
         axes[-1].set_xlabel("Frequency (Hz)")
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 1, 0.96) if file_name else None)
         fig.savefig(output_file, dpi=self.dpi)
 
     def plot_ac(
@@ -177,6 +251,9 @@ class DataPlotter:
         channels: List[str],
         acc_columns: List[str],
         r_column: Optional[str] = None,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
+        time_range: Optional[Tuple[float, float]] = None,
     ) -> None:
         """绘制三轴 ACC、滤波后 PPG、PI；必要时叠加 R。"""
         if not channels:
@@ -191,15 +268,31 @@ class DataPlotter:
         if len(acc_columns) != 3:
             raise SignalAnalysisError("AC 绘图需要完整的 ACC X/Y/Z 三轴")
 
+        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["ac"])
+        channels = _valid_columns(df, channels)
+        if not channels:
+            raise SignalAnalysisError("AC 绘图没有有效的 PPG 通道")
+        valid_acc = [column for column in acc_columns if _has_nonzero_numeric(df[column])]
+        if not valid_acc:
+            raise SignalAnalysisError("AC 绘图没有有效的 ACC 通道")
         time = np.arange(len(df), dtype=float) / self.sample_rate
-        fig = _new_figure((14, 10))
+        fig = _new_figure(_fig_size(14, 10, fig_height))
+        _set_title(fig, file_name)
         base_axes = np.atleast_1d(fig.subplots(3, 1, sharex=True))
-        acc_axes = [base_axes[0], base_axes[0].twinx(), base_axes[0].twinx()]
-        acc_axes[2].spines["right"].set_position(("axes", 1.12))
-        r_axis = base_axes[2].twinx() if r_column or len(channels) == 2 else None
+        acc_axes = [base_axes[0]]
+        for _ in valid_acc[1:]:
+            acc_axes.append(base_axes[0].twinx())
+        if len(acc_axes) > 2:
+            acc_axes[2].spines["right"].set_position(("axes", 1.12))
+        explicit_r_valid = bool(r_column and _has_nonzero_numeric(df[r_column]))
+        r_axis = (
+            base_axes[2].twinx()
+            if explicit_r_valid or (r_column is None and len(channels) == 2)
+            else None
+        )
         colors = rcParams["axes.prop_cycle"].by_key()["color"]
 
-        for axis, column in zip(acc_axes, acc_columns):
+        for axis, column in zip(acc_axes, valid_acc):
             acc = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
             axis.plot(time, acc, linewidth=0.6, label=column)
             axis.set_ylabel(column)
@@ -227,9 +320,9 @@ class DataPlotter:
 
         limit = _peak_symmetric_limit(filtered_signals)
         base_axes[1].set_ylim(-limit, limit)
-        if r_column:
+        if explicit_r_valid:
             r_values = pd.to_numeric(df[r_column], errors="coerce").to_numpy(dtype=float)
-        elif len(channels) == 2:
+        elif r_column is None and len(channels) == 2:
             numerator = pi_values[channels[0]].to_numpy(dtype=float)
             denominator = pi_values[channels[1]].to_numpy(dtype=float)
             r_values = (
@@ -253,13 +346,24 @@ class DataPlotter:
         for ax in base_axes[1:]:
             ax.legend(loc="upper right")
             ax.grid(True, alpha=0.3)
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 1, 0.96) if file_name else None)
         fig.savefig(output_file, dpi=self.dpi)
 
-    def plot_fft(self, df: pd.DataFrame, output_file: Path, channel: str) -> None:
+    def plot_fft(
+        self,
+        df: pd.DataFrame,
+        output_file: Path,
+        channel: str,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
+        time_range: Optional[Tuple[float, float]] = None,
+    ) -> None:
         """使用独立 Y 轴叠加原始与带通后 PPG 的单边 FFT。"""
         if channel not in df.columns:
             raise SignalAnalysisError(f"输入缺少 PPG 通道: {channel}")
+        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["fft"])
+        if not _has_nonzero_numeric(df[channel]):
+            raise SignalAnalysisError(f"绘图通道无有效数据: {channel}")
         raw = prepare_signal(df[channel])
         filtered = bandpass_signal(
             raw,
@@ -272,7 +376,8 @@ class DataPlotter:
         raw_freqs, raw_amplitude = compute_single_sided_fft(raw, self.sample_rate)
         filtered_freqs, filtered_amplitude = compute_single_sided_fft(filtered, self.sample_rate)
 
-        fig = _new_figure((12, 5))
+        fig = _new_figure(_fig_size(12, 5, fig_height, 5))
+        _set_title(fig, file_name)
         raw_axis = fig.subplots()
         filtered_axis = raw_axis.twinx()
         raw_line = raw_axis.plot(
@@ -292,7 +397,7 @@ class DataPlotter:
         raw_axis.grid(True, alpha=0.3)
         raw_axis.set_title(f"FFT - {channel}")
         raw_axis.legend([raw_line, filtered_line], ["Raw FFT", "Filtered FFT"], loc="upper right")
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 1, 0.96) if file_name else None)
         fig.savefig(output_file, dpi=self.dpi)
 
     def plot_spectrogram(
@@ -300,15 +405,22 @@ class DataPlotter:
         df: pd.DataFrame,
         output_file: Path,
         channel: str,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
+        time_range: Optional[Tuple[float, float]] = None,
     ) -> None:
         if channel not in df.columns:
             return
 
+        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["spectrogram"])
+        if not _has_nonzero_numeric(df[channel]):
+            raise SignalAnalysisError(f"绘图通道无有效数据: {channel}")
         data = pd.to_numeric(df[channel], errors="coerce").dropna().values
         if len(data) < 16:
             return
 
-        fig = _new_figure((12, 6))
+        fig = _new_figure(_fig_size(12, 6, fig_height, 6))
+        _set_title(fig, file_name)
         ax = fig.subplots()
         nperseg = min(256, len(data) // 4)
         nperseg = max(nperseg, 16)
@@ -318,7 +430,7 @@ class DataPlotter:
         ax.set_ylabel("Frequency (Hz)")
         ax.set_xlabel("Time (s)")
         fig.colorbar(im, ax=ax, label="Power (dB)")
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0, 1, 0.96) if file_name else None)
         fig.savefig(output_file, dpi=self.dpi)
 
     def plot_stft(
@@ -327,11 +439,14 @@ class DataPlotter:
         output_file: Path,
         channels: Optional[List[str]] = None,
         ref_column: Optional[str] = None,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
+        time_range: Optional[Tuple[float, float]] = None,
     ) -> None:
-        if channels is None:
-            channels = [col for col in df.columns if col != "timestamp"]
+        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["stft"])
+        channels = _valid_columns(df, channels)
         if not channels:
-            return
+            raise SignalAnalysisError("STFT 没有有效绘图通道")
 
         plotter = STFTPlotter(
             fs=self.sample_rate,
@@ -343,7 +458,6 @@ class DataPlotter:
             freq_bpm=self.freq_bpm,
             freq_range=self.freq_range,
         )
-
         ref_data = None
         if ref_column and ref_column in df.columns:
             ref_data = pd.to_numeric(df[ref_column], errors="coerce").fillna(0).values
@@ -356,6 +470,8 @@ class DataPlotter:
                 title=f"STFT - {channels[0]}",
                 ref_data=ref_data,
                 ref_label=ref_column or "Reference",
+                file_name=file_name,
+                fig_height=fig_height,
             )
         else:
             data_dict = {}
@@ -370,6 +486,8 @@ class DataPlotter:
                     title="Multi-Channel STFT",
                     ref_data=ref_data,
                     ref_label=ref_column or "Reference",
+                    file_name=file_name,
+                    fig_height=fig_height,
                 )
 
     def plot_chip_stft(
@@ -377,7 +495,11 @@ class DataPlotter:
         df: pd.DataFrame,
         output_dir: Path,
         stem: str,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
+        time_range: Optional[Tuple[float, float]] = None,
     ) -> List[str]:
+        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["stft"])
         plotter = STFTPlotter(
             fs=self.sample_rate,
             window_sec=self.window,
@@ -399,7 +521,13 @@ class DataPlotter:
         output_files = []
         for channel in nonzero_ipd:
             out_file = output_dir / f"{stem}_stft_{channel}.png"
-            plotter.plot_chip_stft(df, str(out_file), channel)
+            plotter.plot_chip_stft(
+                df,
+                str(out_file),
+                channel,
+                file_name=file_name,
+                fig_height=fig_height,
+            )
             output_files.append(str(out_file))
 
         return output_files

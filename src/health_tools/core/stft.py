@@ -220,8 +220,8 @@ class STFTPlotter:
     def process_data(self, data: np.ndarray) -> np.ndarray:
         """预处理：去基线 + 带通滤波"""
         data = np.asarray(data, dtype=float)
-        data = data[~np.isnan(data)]
-        if len(data) == 0:
+        data = data[np.isfinite(data)]
+        if len(data) == 0 or not np.any(data != 0):
             return data
         if self.remove_baseline_method:
             data = remove_baseline(data, method=self.remove_baseline_method)
@@ -279,6 +279,8 @@ class STFTPlotter:
         channel: str,
         ref_columns=None,
         dpi: int = 300,
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
     ) -> None:
         """模式A：chip自动模式，5子图（channel + ACCXYZ + CH-ACC）"""
         import pandas as pd
@@ -286,19 +288,19 @@ class STFTPlotter:
         if ref_columns is None:
             ref_columns = ["REF_RESULT0", "ALGO_RESULT0"]
 
-        ch_data = pd.to_numeric(df[channel], errors="coerce").fillna(0).values
+        ch_data = pd.to_numeric(df[channel], errors="coerce").values
         acc_cols = ["ACCX", "ACCY", "ACCZ"]
         acc_data = {}
         for col in acc_cols:
             if col in df.columns:
-                acc_data[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).values
+                acc_data[col] = pd.to_numeric(df[col], errors="coerce").values
 
         ref_data = None
         if ref_columns[0] in df.columns:
-            ref_data = pd.to_numeric(df[ref_columns[0]], errors="coerce").fillna(0).values
+            ref_data = pd.to_numeric(df[ref_columns[0]], errors="coerce").values
         algo_data = None
         if len(ref_columns) > 1 and ref_columns[1] in df.columns:
-            algo_data = pd.to_numeric(df[ref_columns[1]], errors="coerce").fillna(0).values
+            algo_data = pd.to_numeric(df[ref_columns[1]], errors="coerce").values
 
         results = {}
         freqs_out, times_out = None, None
@@ -331,8 +333,12 @@ class STFTPlotter:
         freqs_bpm = freqs_out * 60 if self.freq_bpm else freqs_out
         titles = [channel] + acc_cols + [f"{channel} - ACC"]
         n_plots = len([t for t in titles if t in results])
+        if n_plots == 0:
+            return
 
-        fig = _new_figure((18, 4.4 * n_plots))
+        min_height = 4.4 * n_plots
+        height = max(float(fig_height), min_height) if fig_height is not None else min_height
+        fig = _new_figure((18, height))
         axes = np.atleast_1d(fig.subplots(n_plots, 1))
 
         idx = 0
@@ -351,7 +357,21 @@ class STFTPlotter:
             idx += 1
 
         axes[-1].set_xlabel("Time (s)")
-        fig.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
+        if file_name:
+            fig.suptitle(file_name, y=0.995)
+            fig.text(
+                0.5,
+                0.955,
+                channel,
+                ha="center",
+                va="top",
+                fontsize=12,
+                fontweight="bold",
+            )
+            top_margin = 0.84
+        else:
+            top_margin = 0.93
+        fig.subplots_adjust(left=0.08, right=0.94, top=top_margin, bottom=0.06, hspace=0.4)
         fig.savefig(output_file, dpi=dpi)
 
     def plot_stft(
@@ -364,6 +384,8 @@ class STFTPlotter:
         dpi: int = 300,
         ref_data: Optional[np.ndarray] = None,
         ref_label: str = "Reference",
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
     ) -> Optional[Figure]:
         """单通道 STFT（模式B单通道）"""
         freqs, times, zxx_norm = self._compute_normalized_stft(data)
@@ -372,13 +394,19 @@ class STFTPlotter:
 
         freqs_bpm = freqs * 60 if self.freq_bpm else freqs
 
-        fig = _new_figure(figsize)
+        width, default_height = figsize
+        height = max(float(fig_height), 4.0) if fig_height is not None else max(default_height, 4.0)
+        fig = _new_figure((width, height))
         ax = fig.subplots()
         self._plot_subplot(
             ax, times, freqs_bpm, zxx_norm, title, ref_data=ref_data, ref_label=ref_label, cmap=cmap
         )
         ax.set_xlabel("Time (s)")
-        fig.tight_layout()
+        if file_name:
+            fig.suptitle(file_name)
+            fig.tight_layout(rect=(0, 0, 1, 0.95))
+        else:
+            fig.tight_layout()
 
         if output_file:
             fig.savefig(output_file, dpi=dpi)
@@ -395,16 +423,32 @@ class STFTPlotter:
         dpi: int = 300,
         ref_data: Optional[np.ndarray] = None,
         ref_label: str = "Reference",
+        file_name: Optional[str] = None,
+        fig_height: Optional[float] = None,
     ) -> Optional[Figure]:
         """多通道 STFT（模式B多通道）"""
-        n_channels = len(data_dict)
+        valid_data = {
+            name: data
+            for name, data in data_dict.items()
+            if np.any(np.isfinite(np.asarray(data, dtype=float)))
+            and np.any(
+                np.asarray(data, dtype=float)[np.isfinite(np.asarray(data, dtype=float))] != 0
+            )
+        }
+        n_channels = len(valid_data)
         if n_channels == 0:
             return None
 
-        fig = _new_figure((figsize[0], 4.4 * n_channels))
+        min_height = 4.4 * n_channels
+        height = (
+            max(float(fig_height), min_height)
+            if fig_height is not None
+            else max(figsize[1], min_height)
+        )
+        fig = _new_figure((figsize[0], height))
         axes = np.atleast_1d(fig.subplots(n_channels, 1, sharex=True))
 
-        for ax, (channel_name, data) in zip(axes, data_dict.items()):
+        for ax, (channel_name, data) in zip(axes, valid_data.items()):
             freqs, times, zxx_norm = self._compute_normalized_stft(data)
             if freqs is None:
                 continue
@@ -421,8 +465,8 @@ class STFTPlotter:
             )
 
         axes[-1].set_xlabel("Time (s)")
-        fig.suptitle(title)
-        fig.subplots_adjust(left=0.08, right=0.94, top=0.96, bottom=0.06, hspace=0.4)
+        fig.suptitle(file_name or title)
+        fig.subplots_adjust(left=0.08, right=0.94, top=0.93, bottom=0.06, hspace=0.4)
 
         if output_file:
             fig.savefig(output_file, dpi=dpi)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import math
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -835,6 +837,19 @@ def _build_plotter(request: PlotRequest):
     )
 
 
+def _call_plotter(method, *args, **kwargs):
+    """调用绘图方法并过滤旧版/测试 fake 不支持的关键字参数。"""
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return method(*args, **kwargs)
+    parameters = signature.parameters.values()
+    if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return method(*args, **kwargs)
+    accepted = {parameter.name for parameter in parameters}
+    return method(*args, **{key: value for key, value in kwargs.items() if key in accepted})
+
+
 def _planned_plot_outputs(path, request, chip_rule, channels, groups) -> Tuple[Path, ...]:
     """返回无需读取 CSV 即可确定的输出路径，用于并发写入冲突预检。"""
     output = Path(request.output_path)
@@ -886,18 +901,53 @@ def _plot_one(path, output, request, chip_rule, channels, groups) -> ItemResult:
         warning = ""
         if request.plot_type in {"time", "both"}:
             target = output / f"{path.stem}_time.{plotter.fmt}"
-            plotter.plot_time(frame, target, channels)
+            _call_plotter(
+                plotter.plot_time,
+                frame,
+                target,
+                channels,
+                file_name=path.name,
+                fig_height=request.fig_height,
+                time_range=request.time_range,
+            )
             outputs.append(target)
         if request.plot_type in {"freq", "both"}:
             target = output / f"{path.stem}_freq.{plotter.fmt}"
-            plotter.plot_freq(frame, target, channels)
+            _call_plotter(
+                plotter.plot_freq,
+                frame,
+                target,
+                channels,
+                file_name=path.name,
+                fig_height=request.fig_height,
+                time_range=request.time_range,
+            )
             outputs.append(target)
         if request.plot_type in {"stft", "both"}:
             if chip_rule and not channels:
-                outputs.extend(plotter.plot_chip_stft(frame, output, path.stem))
+                result = _call_plotter(
+                    plotter.plot_chip_stft,
+                    frame,
+                    output,
+                    path.stem,
+                    file_name=path.name,
+                    fig_height=request.fig_height,
+                    time_range=request.time_range,
+                )
+                if result:
+                    outputs.extend(result)
             else:
                 target = output / f"{path.stem}_stft.{plotter.fmt}"
-                plotter.plot_stft(frame, target, channels, request.ref_column)
+                _call_plotter(
+                    plotter.plot_stft,
+                    frame,
+                    target,
+                    channels,
+                    request.ref_column,
+                    file_name=path.name,
+                    fig_height=request.fig_height,
+                    time_range=request.time_range,
+                )
                 outputs.append(target)
         if request.plot_type == "ac":
             from health_tools.core.ppg_analysis import resolve_acc_columns, resolve_ppg_channels
@@ -916,9 +966,28 @@ def _plot_one(path, output, request, chip_rule, channels, groups) -> ItemResult:
                 suffix = "" if automatic else f"_{_safe_suffix(group)}"
                 target = output / f"{path.stem}_ac{suffix}.{plotter.fmt}"
                 if request.r_column is None:
-                    plotter.plot_ac(frame, target, group, acc)
+                    _call_plotter(
+                        plotter.plot_ac,
+                        frame,
+                        target,
+                        group,
+                        acc,
+                        file_name=path.name,
+                        fig_height=request.fig_height,
+                        time_range=request.time_range,
+                    )
                 else:
-                    plotter.plot_ac(frame, target, group, acc, r_column=request.r_column)
+                    _call_plotter(
+                        plotter.plot_ac,
+                        frame,
+                        target,
+                        group,
+                        acc,
+                        r_column=request.r_column,
+                        file_name=path.name,
+                        fig_height=request.fig_height,
+                        time_range=request.time_range,
+                    )
                 outputs.append(target)
         if request.plot_type == "fft":
             from health_tools.core.ppg_analysis import resolve_ppg_channels
@@ -926,7 +995,15 @@ def _plot_one(path, output, request, chip_rule, channels, groups) -> ItemResult:
             actual = channels or resolve_ppg_channels(frame, chip_rule.chip if chip_rule else "")
             for channel in actual:
                 target = output / f"{path.stem}_fft_{_safe_suffix([channel])}.{plotter.fmt}"
-                plotter.plot_fft(frame, target, channel)
+                _call_plotter(
+                    plotter.plot_fft,
+                    frame,
+                    target,
+                    channel,
+                    file_name=path.name,
+                    fig_height=request.fig_height,
+                    time_range=request.time_range,
+                )
                 outputs.append(target)
         return ItemResult(
             ItemStatus.WARN if warning else ItemStatus.OK,
@@ -961,6 +1038,20 @@ def run_plot(request: PlotRequest, *, context: Optional[ExecutionContext] = None
     valid = {"time", "freq", "stft", "psd", "ac", "fft", "both"}
     if request.plot_type not in valid:
         raise RequestValidationError(f"不支持的图表类型: {request.plot_type}")
+    if request.fig_height is not None:
+        if isinstance(request.fig_height, bool) or not isinstance(request.fig_height, (int, float)):
+            raise RequestValidationError("图像高度必须是正数")
+        if not math.isfinite(float(request.fig_height)) or request.fig_height <= 0:
+            raise RequestValidationError("图像高度必须大于 0")
+    if request.time_range is not None:
+        try:
+            start, end = request.time_range
+            if not math.isfinite(float(start)) or not math.isfinite(float(end)):
+                raise ValueError
+            if start < 0 or end <= start:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise RequestValidationError("时间范围必须满足 0 <= start < end") from None
     if request.channels and request.plot_type != "ac" and ";" in request.channels:
         raise RequestValidationError("分号通道分组仅支持 AC")
     try:

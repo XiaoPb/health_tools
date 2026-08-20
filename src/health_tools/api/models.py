@@ -259,6 +259,8 @@ class PlotRequest:
     accuracy_thresholds: Optional[Tuple[float, ...]] = None
     accuracy_inclusive: bool = False
     workers: int = 8
+    time_range: Optional[Tuple[float, float]] = None
+    fig_height: Optional[float] = None
 
 
 @dataclass(frozen=True)

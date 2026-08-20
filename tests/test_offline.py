@@ -1660,6 +1660,25 @@ def test_psd_metric_text_preserves_high_precision_threshold_names():
     assert "±1.0000002bpm=" in rows[0]
 
 
+@pytest.mark.parametrize("psd_values", [None, 0.0, np.nan], ids=["missing", "zero", "nonfinite"])
+def test_psd_plotter_skips_invalid_groups(tmp_path: Path, psd_values):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    vshb_path = result_dir / "sample_result.vshb"
+    vshb_path.write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n1,100,100,100,100\n", encoding="utf-8"
+    )
+
+    if psd_values is not None:
+        matrix = np.full((4, 8), psd_values, dtype=float)
+        for suffix in ("0.prepsd", ".accxpsd", ".accypsd", ".acczpsd"):
+            np.savetxt(result_dir / f"sample{suffix}", matrix, delimiter=",")
+
+    result = psd_plotter.PsdPlotter().plot(result_dir, save_dir=tmp_path / "out")
+
+    assert result == PsdPlotResult((), ())
+
+
 def test_offline_accuracy_uses_global_boundary_and_per_comparison_samples(tmp_path):
     result_dir = tmp_path / "result"
     result_dir.mkdir()

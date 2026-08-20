@@ -22,6 +22,8 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 | `--sample-rate` | 采样率 Hz（默认: 25） |
 | `--window` | STFT 窗口大小秒（默认: 25） |
 | `--overlap` | 窗口重叠率 0-1（默认: 0.96） |
+| `--time-range` | 按秒指定绘图范围，格式 `START-END`；短于图类型最小宽度时自动扩展 |
+| `--height` | 指定单图总高度，单位为英寸；过小值按图类型最小布局高度保护 |
 | `--format` | 图片格式: png\|svg\|pdf（默认: png） |
 | `--dpi` | 图片 DPI（默认: 150） |
 | `--bandpass` | 带通滤波范围 Hz（默认: 0.5-4.0） |
@@ -47,7 +49,11 @@ ghealth_tool plot -i <input.csv> -o <output_dir> [options]
 2. 去基线并经过 `--bandpass` 带通滤波后的 PPG；Y 轴上下限根据峰值数量最多通道的峰高分布同步确定；
 3. 各 PPG 通道的 PI 百分比。显式使用 `--r-column` 时始终叠加该列的 R 曲线；未指定时只有选中通道数量恰好为 2 才按所选顺序计算 `第一通道 PI/第二通道 PI*10000`。选中 1、3 或 4 个通道时正常绘制 AC/PI，不创建 R 轴，也不会因缺少 CH0/CH1 报错。
 
-  第一个 ACC 子图仍叠加 ACCX、ACCY、ACCZ，但三轴分别使用独立的 Y 轴刻度。
+第一个 ACC 子图仍叠加 ACCX、ACCY、ACCZ，但三轴分别使用独立的 Y 轴刻度。
+
+所有普通绘图的顶部显示输入文件名。`--time-range` 使用左闭右开秒级范围；未指定时使用全部数据，短范围会按图类型扩展到可见的最小宽度。`--height` 控制整张图片高度，适合嵌入 PPT，不改变输出文件名、采样数据或 DPI。
+
+自动绘图会跳过全零、全 NaN、全 Inf 和非数值列；`time` 模式不再无条件绘制除 `timestamp` 外的所有列。显式指定的无效列会跳过并给出提示。PSD 输入为离线结果目录，时间范围和 CSV 列过滤不作用于 PSD 文件。
 
 同一通道在 PPG 和 PI 子图中使用相同颜色。每组最多包含 4 个 PPG 通道，PI 使用居中的
 完整 5 秒滑动窗口计算：

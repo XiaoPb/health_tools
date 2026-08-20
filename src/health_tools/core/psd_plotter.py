@@ -134,8 +134,14 @@ def _has_valid_ref(ref: np.ndarray) -> bool:
 
 def _imagesc_exact(ax, psd: np.ndarray, title: str) -> None:
     """像素级对齐渲染PSD矩阵"""
-    vmin = np.nanmin(psd)
-    vmax = np.nanmax(psd)
+    finite = np.asarray(psd, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return
+    vmin = np.min(finite)
+    vmax = np.max(finite)
+    if vmax <= vmin:
+        vmax = vmin + 1e-12
     ax.imshow(
         psd,
         cmap="viridis",
@@ -268,7 +274,7 @@ class PsdPlotter:
         saved: List[Optional[Path]] = [None] * len(groups)
         failures: List[Optional[Tuple[Path, str]]] = [None] * len(groups)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures: Dict[Future[Path], PsdGroup] = {
+            futures: Dict[Future[Optional[Path]], PsdGroup] = {
                 executor.submit(
                     self._render_group,
                     group,
@@ -335,7 +341,7 @@ class PsdPlotter:
         subplot_titles: Sequence[str],
         accuracy_thresholds: Optional[Sequence[float]],
         accuracy_inclusive: bool,
-    ) -> Path:
+    ) -> Optional[Path]:
         console.print(f"  [dim]PSD {group.base_name}[/dim]")
         overlay = _load_vshb_overlay(group.vshb_path)
         second = overlay["time"]
@@ -361,19 +367,25 @@ class PsdPlotter:
         for extension in psd_extensions:
             psd_path = group.vshb_path.parent / (group.base_name + extension)
             if psd_path.exists():
-                psd_all.append(_load_csv_like_matlab(psd_path))
+                loaded = _load_csv_like_matlab(psd_path)
+                psd_all.append(loaded if self._has_valid_psd(loaded) else None)
             else:
-                psd_all.append(np.zeros((128, max(len(second), 1))))
+                psd_all.append(None)
+
+        active = [(title, psd) for title, psd in zip(subplot_titles, psd_all) if psd is not None]
+        if not active:
+            console.print(f"  [yellow]WARN[/yellow] {group.base_name} 不包含有效PSD数据，已跳过")
+            return None
 
         fig: Optional[Figure] = None
         try:
-            fig = Figure(figsize=(19.2, 2.7 * len(subplot_titles)), dpi=100)
+            fig = Figure(figsize=(19.2, 2.7 * len(active)), dpi=100)
             FigureCanvasAgg(fig)
-            axes = np.atleast_1d(fig.subplots(len(subplot_titles), 1))
+            axes = np.atleast_1d(fig.subplots(len(active), 1))
             for index, ax in enumerate(axes.flat):
-                psd = psd_all[index]
+                title, psd = active[index]
                 psd = psd[:, :128].T if psd.shape[1] >= 128 else psd.T
-                _imagesc_exact(ax, psd, subplot_titles[index])
+                _imagesc_exact(ax, psd, title)
                 if index == 0 and has_overlay:
                     _plot_hr_overlays(ax, second, hba_out, mcu_hr, polar_hr, comp_hr)
 
@@ -381,7 +393,7 @@ class PsdPlotter:
                 left=0.03,
                 right=0.995,
                 bottom=0.05,
-                top=_subplot_top(len(subplot_titles), has_overlay, len(metric_rows)),
+                top=_subplot_top(len(active), has_overlay, len(metric_rows)),
                 wspace=0.08,
                 hspace=0.25,
             )
@@ -414,3 +426,9 @@ class PsdPlotter:
         finally:
             if fig is not None:
                 plt.close(fig)
+
+    @staticmethod
+    def _has_valid_psd(psd: np.ndarray) -> bool:
+        """判断PSD矩阵是否包含可绘制的有限非零数据。"""
+        values = np.asarray(psd, dtype=float)
+        return bool(np.any(np.isfinite(values) & (values != 0)))
