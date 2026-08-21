@@ -6,6 +6,7 @@ from health_tools.models.rules import (
     CheckRule,
 )
 from health_tools.rules.loader import RuleLoader
+from health_tools.rules.validator import RuleValidator
 
 
 def test_load_check_rule_keeps_all_supported_parameters():
@@ -68,3 +69,40 @@ def test_check_rule_models_keep_immutable_accuracy_mark_configuration():
     assert rule.accuracy.marks == (mark,)
     assert rule.accuracy.methods == ("mae", "within_5")
     assert rule.values["checks"] == ["frame"]
+
+
+def test_check_rule_rejects_runtime_paths_and_controls():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "input": "data",
+            "output": "report.csv",
+            "sort": True,
+            "workers": 8,
+            "accuracy": {"enabled": False},
+        },
+        "check",
+    )
+
+    message = " ".join(errors)
+    assert "input" in message
+    assert "output" in message
+    assert "sort" in message
+    assert "workers" in message
+
+
+def test_validate_check_rule_rejects_invalid_accuracy_mark():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "accuracy": {
+                "enabled": True,
+                "ref_column": "REF_RESULT0",
+                "online_column": "ALGO_RESULT0",
+                "marks": [{"id": "bad", "comparison": "online", "metric": "within_5"}],
+            },
+        },
+        "check",
+    )
+
+    assert "marks[0]" in " ".join(errors)

@@ -5,7 +5,10 @@ import yaml
 
 from health_tools.config import get_user_rules_dir
 from health_tools.models.rules import (
+    AccuracyMarkRule,
     AnalysisRule,
+    CheckAccuracyRule,
+    CheckRule,
     ChipRule,
     ClassifyRule,
     ConvertRule,
@@ -260,4 +263,65 @@ class RuleLoader:
             sampling=data.get("sampling", {}),
             offline=data.get("offline", {}),
             description=data.get("description", ""),
+        )
+
+    @classmethod
+    def load_check_rule(cls, rule_file: str) -> CheckRule:
+        """加载并规范化 check 规则。"""
+        rule_path = cls._resolve_rule_path(rule_file, "check")
+        data = cls._load_yaml(rule_path)
+
+        from health_tools.rules.validator import RuleValidator
+
+        errors = RuleValidator.validate(data, "check")
+        if errors:
+            raise ValueError("check 规则无效: " + "；".join(errors))
+
+        values = {
+            key: value
+            for key, value in data.items()
+            if key not in {"version", "description", "chip", "accuracy"}
+        }
+        accuracy_data = data.get("accuracy") or {}
+        marks = tuple(
+            AccuracyMarkRule(
+                id=str(mark["id"]),
+                comparison=str(mark["comparison"]),
+                metric=str(mark["metric"]),
+                category=str(mark["category"]),
+                label=str(mark["label"]),
+                min=float(mark["min"]) if "min" in mark else None,
+                min_gap=float(mark["min_gap"]) if "min_gap" in mark else None,
+            )
+            for mark in accuracy_data.get("marks", [])
+        )
+        accuracy = CheckAccuracyRule(
+            enabled=bool(accuracy_data.get("enabled", False)),
+            ref_column=str(accuracy_data.get("ref_column", "REF_RESULT0")),
+            online_column=str(accuracy_data.get("online_column", "ALGO_RESULT0")),
+            comp_column=accuracy_data.get("comp_column", "COMP_RESULT0"),
+            methods=tuple(
+                str(method)
+                for method in accuracy_data.get(
+                    "methods",
+                    (
+                        "mae",
+                        "within_5",
+                        "within_10",
+                        "within_15",
+                        "rmse",
+                        "correlation",
+                    ),
+                )
+            ),
+            thresholds=tuple(dict(threshold) for threshold in accuracy_data.get("thresholds", [])),
+            inclusive=bool(accuracy_data.get("inclusive", False)),
+            marks=marks,
+        )
+        return CheckRule(
+            version=str(data.get("version", "1.0")),
+            description=str(data.get("description", "")),
+            chip=data.get("chip"),
+            values=values,
+            accuracy=accuracy,
         )

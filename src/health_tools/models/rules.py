@@ -302,7 +302,7 @@ class CheckRule:
     def checks(self) -> Tuple[str, ...]:
         configured = self.values.get(
             "checks",
-            ("range", "ipd", "frame", "center", "acc", "agc", "ref", "accuracy"),
+            ("range", "ipd", "frame", "center", "acc", "agc", "ref"),
         )
         return tuple(str(value) for value in configured)
 

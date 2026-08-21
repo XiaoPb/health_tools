@@ -41,6 +41,7 @@ class RuleType(str, Enum):
     CONVERT = "convert"
     EVALUATE = "evaluate"
     ANALYSIS = "analysis"
+    CHECK = "check"
 
 
 class RuleSource(str, Enum):

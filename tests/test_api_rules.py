@@ -84,6 +84,12 @@ causes:
     origin: raw
     when: {feature: data_complete, op: eq, value: false}
 """,
+    RuleType.CHECK: """version: '1.0'
+chip: gh3036
+checks: [frame]
+accuracy:
+  enabled: false
+""",
 }
 
 

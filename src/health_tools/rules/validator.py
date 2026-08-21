@@ -1,3 +1,4 @@
+import math
 import re
 from pathlib import Path
 from typing import List
@@ -41,6 +42,8 @@ class RuleValidator:
             errors.extend(RuleValidator._validate_evaluate_rule(rule, strict))
         elif rule_type == "analysis":
             errors.extend(RuleValidator._validate_analysis_rule(rule, strict))
+        elif rule_type == "check":
+            errors.extend(RuleValidator._validate_check_rule(rule, strict))
         else:
             errors.append("无法识别的规则类型")
 
@@ -64,6 +67,8 @@ class RuleValidator:
             return RuleValidator._validate_evaluate_rule(rule, strict)
         elif rule_type == "analysis":
             return RuleValidator._validate_analysis_rule(rule, strict)
+        elif rule_type == "check":
+            return RuleValidator._validate_check_rule(rule, strict)
         return ["无法识别的规则类型"]
 
     @staticmethod
@@ -81,7 +86,236 @@ class RuleValidator:
             return "evaluate"
         elif "analysis" in parts:
             return "analysis"
+        elif "check" in parts:
+            return "check"
         return "unknown"
+
+    @staticmethod
+    def _validate_check_rule(rule: dict, strict: bool) -> List[str]:
+        errors = []
+        allowed = {
+            "version",
+            "description",
+            "chip",
+            "checks",
+            "tolerance",
+            "static_min",
+            "ratios",
+            "acc_axis",
+            "timestamp",
+            "reference",
+            "scene_regex",
+            "accuracy",
+        }
+        unknown = set(rule) - allowed
+        if unknown:
+            errors.extend(f"check 规则包含未知字段: {key}" for key in sorted(unknown))
+
+        if "version" not in rule:
+            errors.append("缺少 'version' 字段")
+        if "chip" in rule and (not isinstance(rule["chip"], str) or not rule["chip"].strip()):
+            errors.append("check 规则 'chip' 必须是非空字符串")
+
+        checks = rule.get("checks")
+        supported_checks = {"range", "ipd", "frame", "center", "acc", "agc", "ref"}
+        if checks is not None:
+            if not isinstance(checks, list) or not checks:
+                errors.append("check 规则 'checks' 必须是非空列表")
+            else:
+                unknown_checks = set(checks) - supported_checks
+                if unknown_checks:
+                    errors.append(
+                        "check 规则包含未知检查项: " + ", ".join(sorted(map(str, unknown_checks)))
+                    )
+
+        for field in ("tolerance", "static_min"):
+            if field in rule and (
+                not isinstance(rule[field], (int, float))
+                or isinstance(rule[field], bool)
+                or rule[field] < 0
+            ):
+                errors.append(f"check 规则 '{field}' 必须是非负数")
+
+        ratios = rule.get("ratios")
+        if ratios is not None:
+            if not isinstance(ratios, dict):
+                errors.append("check 规则 'ratios' 必须是映射")
+            else:
+                for name, value in ratios.items():
+                    if name not in {"range", "frame", "center", "ipd", "acc"}:
+                        errors.append(f"ratios 包含未知字段: {name}")
+                    elif (
+                        not isinstance(value, (int, float))
+                        or isinstance(value, bool)
+                        or not math.isfinite(float(value))
+                        or value < 0
+                    ):
+                        errors.append(f"ratios.{name} 必须是非负有限数")
+
+        timestamp = rule.get("timestamp")
+        if timestamp is not None:
+            if not isinstance(timestamp, dict):
+                errors.append("check 规则 'timestamp' 必须是映射")
+            else:
+                errors.extend(
+                    RuleValidator._validate_non_negative_number(
+                        timestamp, "ratio", "timestamp.ratio"
+                    )
+                )
+                errors.extend(
+                    RuleValidator._validate_non_negative_number(timestamp, "ms", "timestamp.ms")
+                )
+                errors.extend(
+                    RuleValidator._validate_non_negative_number(
+                        timestamp, "fail_ratio", "timestamp.fail_ratio"
+                    )
+                )
+                errors.extend(
+                    RuleValidator._validate_non_negative_number(
+                        timestamp, "base_ms", "timestamp.base_ms"
+                    )
+                )
+                if (
+                    "column" in timestamp
+                    and timestamp["column"] is not None
+                    and (
+                        not isinstance(timestamp["column"], str) or not timestamp["column"].strip()
+                    )
+                ):
+                    errors.append("timestamp.column 必须是非空字符串或 null")
+
+        reference = rule.get("reference")
+        if reference is not None:
+            if not isinstance(reference, dict):
+                errors.append("check 规则 'reference' 必须是映射")
+            else:
+                for name in ("sample_rate", "stale_seconds", "step_threshold"):
+                    errors.extend(
+                        RuleValidator._validate_non_negative_number(
+                            reference, name, f"reference.{name}"
+                        )
+                    )
+                for name in ("hr_column", "spo2_column"):
+                    if (
+                        name in reference
+                        and reference[name] is not None
+                        and (not isinstance(reference[name], str) or not reference[name].strip())
+                    ):
+                        errors.append(f"reference.{name} 必须是非空字符串或 null")
+
+        accuracy = rule.get("accuracy")
+        if accuracy is not None:
+            errors.extend(RuleValidator._validate_check_accuracy(accuracy))
+        return errors
+
+    @staticmethod
+    def _validate_non_negative_number(config: dict, key: str, label: str) -> List[str]:
+        if key not in config or config[key] is None:
+            return []
+        value = config[key]
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or value < 0
+        ):
+            return [f"{label} 必须是非负有限数或 null"]
+        return []
+
+    @staticmethod
+    def _validate_check_accuracy(config: object) -> List[str]:
+        if not isinstance(config, dict):
+            return ["check 规则 'accuracy' 必须是映射"]
+        errors = []
+        for key in ("ref_column", "online_column"):
+            if key in config and (not isinstance(config[key], str) or not config[key].strip()):
+                errors.append(f"accuracy.{key} 必须是非空字符串")
+        if (
+            "comp_column" in config
+            and config["comp_column"] is not None
+            and (not isinstance(config["comp_column"], str) or not config["comp_column"].strip())
+        ):
+            errors.append("accuracy.comp_column 必须是非空字符串或 null")
+        methods = config.get("methods")
+        known_methods = {
+            "std",
+            "rmse",
+            "mae",
+            "mape",
+            "bias",
+            "within_5",
+            "within_10",
+            "within_15",
+            "correlation",
+            "r2",
+        }
+        if methods is not None:
+            if not isinstance(methods, list):
+                errors.append("accuracy.methods 必须是列表")
+            else:
+                for method in methods:
+                    if not isinstance(method, str) or (
+                        method not in known_methods
+                        and not re.fullmatch(r"within_\d+(?:\.\d+)?", method)
+                    ):
+                        errors.append(f"accuracy.methods 包含未知方法: {method}")
+
+        marks = config.get("marks", [])
+        if not isinstance(marks, list):
+            errors.append("accuracy.marks 必须是列表")
+            return errors
+        ids = set()
+        categories = set()
+        safe_category = re.compile(r"^[A-Za-z0-9_-]+$")
+        for index, mark in enumerate(marks):
+            prefix = f"marks[{index}]"
+            if not isinstance(mark, dict):
+                errors.append(f"{prefix} 必须是映射")
+                continue
+            for field in ("id", "comparison", "metric", "category", "label"):
+                if not isinstance(mark.get(field), str) or not mark[field].strip():
+                    errors.append(f"{prefix} 缺少有效的 '{field}'")
+            mark_id = mark.get("id")
+            category = mark.get("category")
+            if mark_id in ids:
+                errors.append(f"{prefix}.id 重复: {mark_id}")
+            if category in categories:
+                errors.append(f"{prefix}.category 重复: {category}")
+            if mark_id:
+                ids.add(mark_id)
+            if category:
+                categories.add(category)
+                if not safe_category.fullmatch(category):
+                    errors.append(f"{prefix}.category 必须是安全的单段目录名")
+            comparison = mark.get("comparison")
+            if comparison in {"online", "comp"}:
+                if "min" not in mark or "min_gap" in mark:
+                    errors.append(f"{prefix} comparison={comparison} 需要 min 且不能有 min_gap")
+                elif not RuleValidator._is_percent(mark["min"]):
+                    errors.append(f"{prefix}.min 必须是 0 到 100 的有限数")
+            elif comparison == "online_below_comp":
+                if "min_gap" not in mark or "min" in mark:
+                    errors.append(
+                        f"{prefix} comparison=online_below_comp 需要 min_gap 且不能有 min"
+                    )
+                elif not RuleValidator._is_non_negative_finite(mark["min_gap"]):
+                    errors.append(f"{prefix}.min_gap 必须是非负有限数")
+            elif comparison:
+                errors.append(f"{prefix}.comparison 仅支持 online、comp、online_below_comp")
+        return errors
+
+    @staticmethod
+    def _is_non_negative_finite(value: object) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and value >= 0
+        )
+
+    @staticmethod
+    def _is_percent(value: object) -> bool:
+        return RuleValidator._is_non_negative_finite(value) and float(value) <= 100
 
     @staticmethod
     def _validate_chip_rule(rule: dict, strict: bool) -> List[str]:
