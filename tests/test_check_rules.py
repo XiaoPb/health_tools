@@ -1,5 +1,7 @@
 """check 规则模型与内置声明测试。"""
 
+import pytest
+
 from health_tools.models.rules import (
     AccuracyMarkRule,
     CheckAccuracyRule,
@@ -144,3 +146,44 @@ def test_check_rule_rejects_unsafe_accuracy_mark_id():
     )
 
     assert "id" in " ".join(errors)
+
+
+def test_check_rule_rejects_non_boolean_flags_and_non_integer_counts():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "tolerance": 1.5,
+            "static_min": float("nan"),
+            "acc_axis": "false",
+            "accuracy": {"enabled": "false", "inclusive": 0},
+        },
+        "check",
+    )
+
+    message = " ".join(errors)
+    assert "tolerance" in message
+    assert "static_min" in message
+    assert "acc_axis" in message
+    assert "accuracy.enabled" in message
+    assert "accuracy.inclusive" in message
+
+
+@pytest.mark.parametrize(
+    "thresholds",
+    [
+        {"name": "within_5", "value": 5},
+        [{"name": "within_5"}],
+        [{"name": "within_5", "value": 5, "percent": 10}],
+        [{"name": "within_5", "value": -1}],
+        [{"name": "within_5", "value": "5"}],
+        [{"name": "within_5", "percent": float("inf")}],
+        [{"name": 1, "value": 5}],
+    ],
+)
+def test_check_rule_rejects_malformed_accuracy_thresholds(thresholds):
+    errors = RuleValidator.validate(
+        {"version": "1.0", "accuracy": {"thresholds": thresholds}},
+        "check",
+    )
+
+    assert "accuracy.thresholds" in " ".join(errors)

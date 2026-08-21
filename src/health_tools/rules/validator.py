@@ -133,12 +133,10 @@ class RuleValidator:
                     errors.append("check 规则包含未知检查项: " + ", ".join(sorted(unknown_checks)))
 
         for field in ("tolerance", "static_min"):
-            if field in rule and (
-                not isinstance(rule[field], (int, float))
-                or isinstance(rule[field], bool)
-                or rule[field] < 0
-            ):
-                errors.append(f"check 规则 '{field}' 必须是非负数")
+            if field in rule and not RuleValidator._is_non_negative_integer(rule[field]):
+                errors.append(f"check 规则 '{field}' 必须是非负整数")
+        if "acc_axis" in rule and not isinstance(rule["acc_axis"], bool):
+            errors.append("check 规则 'acc_axis' 必须是布尔值")
 
         ratios = rule.get("ratios")
         if ratios is not None:
@@ -213,6 +211,16 @@ class RuleValidator:
         return errors
 
     @staticmethod
+    def _is_non_negative_integer(value: object) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value).is_integer()
+            and value >= 0
+        )
+
+    @staticmethod
     def _validate_non_negative_number(config: dict, key: str, label: str) -> List[str]:
         if key not in config or config[key] is None:
             return []
@@ -231,6 +239,9 @@ class RuleValidator:
         if not isinstance(config, dict):
             return ["check 规则 'accuracy' 必须是映射"]
         errors = []
+        for key in ("enabled", "inclusive"):
+            if key in config and not isinstance(config[key], bool):
+                errors.append(f"accuracy.{key} 必须是布尔值")
         for key in ("ref_column", "online_column"):
             if key in config and (not isinstance(config[key], str) or not config[key].strip()):
                 errors.append(f"accuracy.{key} 必须是非空字符串")
@@ -263,6 +274,28 @@ class RuleValidator:
                         and not re.fullmatch(r"within_\d+(?:\.\d+)?", method)
                     ):
                         errors.append(f"accuracy.methods 包含未知方法: {method}")
+
+        thresholds = config.get("thresholds", [])
+        if not isinstance(thresholds, list):
+            errors.append("accuracy.thresholds 必须是列表")
+        else:
+            for index, threshold in enumerate(thresholds):
+                prefix = f"accuracy.thresholds[{index}]"
+                if not isinstance(threshold, dict):
+                    errors.append(f"{prefix} 必须是映射")
+                    continue
+                if set(threshold) - {"name", "value", "percent"}:
+                    errors.append(f"{prefix} 包含未知字段")
+                name = threshold.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    errors.append(f"{prefix}.name 必须是非空字符串")
+                has_value = "value" in threshold
+                has_percent = "percent" in threshold
+                if has_value == has_percent:
+                    errors.append(f"{prefix} 必须且只能提供 value 或 percent")
+                key = "value" if has_value else "percent"
+                if key in threshold and not RuleValidator._is_positive_finite(threshold[key]):
+                    errors.append(f"{prefix}.{key} 必须是有限正数")
 
         marks = config.get("marks", [])
         if not isinstance(marks, list):
@@ -322,6 +355,15 @@ class RuleValidator:
     @staticmethod
     def _is_percent(value: object) -> bool:
         return RuleValidator._is_non_negative_finite(value) and float(value) <= 100
+
+    @staticmethod
+    def _is_positive_finite(value: object) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and value > 0
+        )
 
     @staticmethod
     def _validate_chip_rule(rule: dict, strict: bool) -> List[str]:
