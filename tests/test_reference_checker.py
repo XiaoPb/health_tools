@@ -57,6 +57,18 @@ def test_reference_step_threshold_is_configurable():
     assert result.status == "PASS"
 
 
+def test_reference_static_duration_prefers_timestamp_span():
+    frame = pd.DataFrame(
+        {
+            "time": [0, 250, 500, 750, 1000, 1250],
+            "REF_HR": [80, 80, 80, 80, 80, 81],
+        }
+    )
+    result = _checker().check_reference_data(frame, "REF_HR", "hr", sample_rate=1, stale_seconds=2)
+    assert result.status == "PASS"
+    assert result.channel_metrics["REF_HR"]["longest_static_seconds"] == 1.0
+
+
 def test_compact_report_contains_reference_metrics(tmp_path):
     result = _checker().check_reference_data(
         pd.DataFrame({"REF_HR": [80] * 126 + [90]}),

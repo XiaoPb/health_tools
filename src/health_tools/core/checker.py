@@ -520,7 +520,25 @@ class DataChecker:
         run_lengths = valid_values.notna().groupby(groups).sum()
         longest_run = int(run_lengths.max()) if not run_lengths.empty else 0
         stale_limit = sample_rate * stale_seconds
-        stale = longest_run > stale_limit
+        longest_static_seconds = longest_run / sample_rate
+        # 采样点间隔可能与配置采样率不一致（例如原始时间戳为 100 Hz、按 25 帧抽样），
+        # 此时优先按同一行的 TimeStamp 真实跨度判断，避免把采样点数误标成秒数。
+        timestamp = None
+        if "time" in df.columns:
+            timestamp = pd.to_numeric(df["time"], errors="coerce")
+        if timestamp is not None:
+            durations = []
+            for _, run in valid_values.notna().groupby(groups):
+                indices = run.index[run.to_numpy()]
+                if len(indices) < 2:
+                    continue
+                start, end = indices[0], indices[-1]
+                start_time, end_time = timestamp.loc[start], timestamp.loc[end]
+                if pd.notna(start_time) and pd.notna(end_time) and end_time >= start_time:
+                    durations.append(float(end_time - start_time) / 1000.0)
+            if durations:
+                longest_static_seconds = max(durations)
+        stale = longest_static_seconds > stale_seconds
 
         metrics = {
             column: {
@@ -532,7 +550,7 @@ class DataChecker:
                 "step_threshold": float(step_threshold),
                 "longest_static_frames": float(longest_run),
                 "static_frame_threshold": float(stale_limit),
-                "longest_static_seconds": float(longest_run / sample_rate),
+                "longest_static_seconds": float(longest_static_seconds),
                 "static_second_threshold": float(stale_seconds),
             }
         }
@@ -544,7 +562,7 @@ class DataChecker:
         if step_count:
             reasons.append(f"发现 {step_count} 次阶跃（阈值>{step_threshold:g}）")
         if stale:
-            reasons.append(f"最长静止 {longest_run / sample_rate:g} 秒，超过 {stale_seconds:g} 秒")
+            reasons.append(f"最长静止 {longest_static_seconds:g} 秒，超过 {stale_seconds:g} 秒")
         summary = "；".join(reasons) if reasons else "金标数据正常"
         return CheckResult(
             name,
