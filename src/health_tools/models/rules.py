@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from health_tools.utils.columns import expand_columns
 
@@ -215,3 +215,149 @@ class AnalysisRule:
     sampling: Dict[str, Any] = field(default_factory=dict)
     offline: Dict[str, Any] = field(default_factory=dict)
     description: str = ""
+
+
+@dataclass(frozen=True)
+class AccuracyMarkRule:
+    """check 准确度标定条件。"""
+
+    id: str
+    comparison: str
+    metric: str
+    category: str
+    label: str
+    min: Optional[float] = None
+    min_gap: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class CheckAccuracyRule:
+    """check 的准确度列、指标和标定策略。"""
+
+    enabled: bool = False
+    ref_column: str = "REF_RESULT0"
+    online_column: str = "ALGO_RESULT0"
+    comp_column: Optional[str] = "COMP_RESULT0"
+    methods: Tuple[str, ...] = (
+        "mae",
+        "within_5",
+        "within_10",
+        "within_15",
+        "rmse",
+        "correlation",
+    )
+    thresholds: Tuple[Dict[str, Any], ...] = ()
+    inclusive: bool = False
+    marks: Tuple[AccuracyMarkRule, ...] = ()
+
+
+@dataclass(frozen=True)
+class CheckRatiosRule:
+    """check 各检查项允许的异常比例。"""
+
+    range: float = 1.0
+    frame: float = 1.0
+    center: float = 5.0
+    ipd: float = 1.0
+    acc: float = 1.0
+
+
+@dataclass(frozen=True)
+class CheckTimestampRule:
+    """check 时间戳间隔检查策略。"""
+
+    column: Optional[str] = None
+    ratio: float = 20.0
+    ms: Optional[float] = None
+    fail_ratio: float = 1.0
+    base_ms: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class CheckReferenceRule:
+    """check 金标检查策略。"""
+
+    hr_column: Optional[str] = None
+    spo2_column: Optional[str] = None
+    sample_rate: float = 25.0
+    stale_seconds: float = 5.0
+    step_threshold: float = 8.0
+
+
+@dataclass(frozen=True)
+class CheckRule:
+    """check 规则的可复用业务策略。
+
+    ``values`` 保留 YAML 中除准确度外的业务配置，运行时路径、sort 控制和并行参数不属于
+    规则。通过属性提供强类型访问，兼容后续 CLI/API 的配置合并。
+    """
+
+    version: str = "1.0"
+    description: str = ""
+    chip: Optional[str] = None
+    values: Dict[str, Any] = field(default_factory=dict)
+    accuracy: CheckAccuracyRule = field(default_factory=CheckAccuracyRule)
+
+    @property
+    def checks(self) -> Tuple[str, ...]:
+        configured = self.values.get(
+            "checks",
+            ("range", "ipd", "frame", "center", "acc", "agc", "ref", "accuracy"),
+        )
+        return tuple(str(value) for value in configured)
+
+    @property
+    def tolerance(self) -> int:
+        return int(self.values.get("tolerance", 50))
+
+    @property
+    def static_min(self) -> int:
+        return int(self.values.get("static_min", 5))
+
+    @property
+    def ratios(self) -> CheckRatiosRule:
+        configured = self.values.get("ratios", {})
+        if not isinstance(configured, dict):
+            configured = {}
+        return CheckRatiosRule(
+            range=float(configured.get("range", 1.0)),
+            frame=float(configured.get("frame", 1.0)),
+            center=float(configured.get("center", 5.0)),
+            ipd=float(configured.get("ipd", 1.0)),
+            acc=float(configured.get("acc", 1.0)),
+        )
+
+    @property
+    def acc_axis(self) -> bool:
+        return bool(self.values.get("acc_axis", False))
+
+    @property
+    def timestamp(self) -> CheckTimestampRule:
+        configured = self.values.get("timestamp", {})
+        if not isinstance(configured, dict):
+            configured = {}
+        return CheckTimestampRule(
+            column=configured.get("column"),
+            ratio=float(configured.get("ratio", 20.0)),
+            ms=configured.get("ms"),
+            fail_ratio=float(configured.get("fail_ratio", 1.0)),
+            base_ms=configured.get("base_ms"),
+        )
+
+    @property
+    def reference(self) -> CheckReferenceRule:
+        configured = self.values.get("reference", {})
+        if not isinstance(configured, dict):
+            configured = {}
+        return CheckReferenceRule(
+            hr_column=configured.get("hr_column"),
+            spo2_column=configured.get("spo2_column"),
+            sample_rate=float(configured.get("sample_rate", 25.0)),
+            stale_seconds=float(configured.get("stale_seconds", 5.0)),
+            step_threshold=float(configured.get("step_threshold", 8.0)),
+        )
+
+    @property
+    def scene_regex(self) -> Optional[str]:
+        value = self.values.get("scene_regex")
+        return str(value) if value is not None else None

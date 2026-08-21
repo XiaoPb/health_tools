@@ -1,0 +1,61 @@
+version: "1.0"
+description: 默认数据质量、准确度与分拣规则
+
+# YAML 描述芯片、列语义和检查策略，不描述输入/输出和本次运行控制。
+chip: gh3036
+checks: [range, ipd, frame, center, acc, agc, ref]
+tolerance: 50
+static_min: 5
+
+ratios:
+  range: 1.0
+  frame: 1.0
+  center: 5.0
+  ipd: 1.0
+  acc: 1.0
+
+acc_axis: false
+
+timestamp:
+  column: null
+  ratio: 20.0
+  ms: null
+  fail_ratio: 1.0
+  base_ms: null
+
+reference:
+  hr_column: null
+  spo2_column: null
+  sample_rate: 25.0
+  stale_seconds: 5.0
+  step_threshold: 8.0
+
+scene_regex: null
+
+accuracy:
+  enabled: false
+  ref_column: REF_RESULT0
+  online_column: ALGO_RESULT0
+  comp_column: COMP_RESULT0
+  methods: [mae, within_5, within_10, within_15, rmse, correlation]
+  thresholds: []
+  inclusive: false
+  marks:
+    - id: online_within_5_low
+      comparison: online
+      metric: within_5
+      min: 80.0
+      label: Online ±5准确度低
+      category: accuracy_online_low
+    - id: comp_within_5_low
+      comparison: comp
+      metric: within_5
+      min: 80.0
+      label: Comp ±5准确度低
+      category: accuracy_comp_low
+    - id: online_below_comp
+      comparison: online_below_comp
+      metric: within_5
+      min_gap: 10.0
+      label: Online低于Comp 10个百分点
+      category: accuracy_online_below_comp
