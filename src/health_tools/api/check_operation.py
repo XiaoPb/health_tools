@@ -59,7 +59,7 @@ PRIMARY_RULES = (
     ("准确度标定分类", "__PRESENT__", "__accuracy__", ""),
     ("AGC变化(结果)", "FAIL", "agc", "AGC异常"),
     ("AGC调光(结果)", "FAIL", "agc", "AGC异常"),
-    ("Ipd转换(结果)", "FAIL", "ipd", "Ipd异常"),
+    ("Ipd转换(结果)", "FAIL", "ipd", "Ipd转换异常"),
 )
 
 
@@ -79,7 +79,21 @@ def _primary_match(row: Dict[str, str]) -> Tuple[str, str]:
 def primary_issue(row: Dict[str, str]) -> str:
     """按统一优先级返回报告行的主要异常中文摘要。"""
     _, label = _primary_match(row)
-    return label or ("其他异常" if row.get("总异常(结果)", "").strip().upper() == "FAIL" else "")
+    if label:
+        return label
+    failed = sorted(
+        column[: -len("(结果)")]
+        for column, value in row.items()
+        if column.endswith("(结果)")
+        and column != "总异常(结果)"
+        and (value or "").strip().upper() == "FAIL"
+        and column[: -len("(结果)")] not in TRAILING_CHECK_CATEGORIES
+    )
+    if failed:
+        return failed[0]
+    if row.get("总异常(结果)", "").strip().upper() == "FAIL":
+        return "未分类异常"
+    return "正常"
 
 
 def _safe_category_name(check_name: str) -> str:

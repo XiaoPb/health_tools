@@ -889,3 +889,17 @@ def test_primary_issue_and_sort_share_accuracy_priority_descriptor():
     }
     assert primary_issue(row) == "Online ±5准确度低"
     assert _sort_category(row) == "accuracy_online_low"
+
+
+def test_primary_issue_uses_unknown_extension_check_name():
+    row = {"总异常(结果)": "FAIL", "自定义质量(结果)": "FAIL"}
+    assert primary_issue(row) == "自定义质量"
+
+
+def test_primary_issue_uses_unclassified_and_normal_fallbacks():
+    assert primary_issue({"总异常(结果)": "FAIL"}) == "未分类异常"
+    assert primary_issue({"总异常(结果)": "PASS"}) == "正常"
+
+
+def test_primary_issue_uses_ipd_conversion_label():
+    assert primary_issue({"总异常(结果)": "FAIL", "Ipd转换(结果)": "FAIL"}) == "Ipd转换异常"
