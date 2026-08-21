@@ -48,10 +48,11 @@
    - 无异常显示 `正常`
 5. 准确度标定分类位于 `frame_warning` 之后、Ipd 和其他低优先级异常之前。每条标定规则声明稳定英文 `category`，sort 输出到 `abnormal/<category>/`。
 6. `-r/--rule` 支持用户目录 `~/.ghealth_tools/rules/check/`、包内 `rules/check/` 和绝对路径。
-7. YAML 只声明可复用的检查业务规则：检查项、阈值、列映射、场景提取、准确度方法和标定条件。
-   输入路径、输出路径、芯片选择、sort 开关、sort 输出目录、并行数和 verbose 都是本次运行上下文，
-   必须由 CLI/API 外部输入，不写入 YAML。
-8. 配置优先级为显式 CLI > YAML > `CheckRequest` 默认值。`-r/--rule` 自身不能出现在 YAML。
+7. YAML 声明可复用的数据解释和检查业务规则：芯片、检查项、阈值、时间戳列、参考列、准确度列、
+   场景提取、准确度方法和标定条件。输入路径、输出路径、sort 开关、sort 输出目录、并行数和 verbose
+   都是本次运行上下文，必须由 CLI/API 外部输入，不写入 YAML。
+8. 配置优先级为显式 CLI > YAML > `CheckRequest` 默认值；其中 `-c/--chip` 显式传入时覆盖 YAML 的 `chip`，
+   未传入时使用 YAML 芯片。`-r/--rule` 自身不能出现在 YAML。
    `--sort` 启用时默认读取本次 check 生成的报告：单文件为 `<输入文件父目录>/check_report.csv`，
    目录输入为 `<输入目录>/check_report.csv`；仍可用 CLI `--report` 覆盖已有报告，但该参数不进入 YAML。
 
@@ -63,7 +64,8 @@
 version: "1.0"
 description: 默认数据质量、准确度与分拣规则
 
-# YAML 只描述检查策略，不描述输入/输出和本次运行控制。
+# YAML 描述芯片、列语义和检查策略，不描述输入/输出和本次运行控制。
+chip: gh3036
 checks: [range, ipd, frame, center, acc, agc, ref]
 tolerance: 50
 static_min: 5
@@ -256,12 +258,14 @@ class CheckAccuracyRule:
 class CheckRule:
     version: str = "1.0"
     description: str = ""
+    chip: Optional[str] = None
     values: Dict[str, Any] = field(default_factory=dict)
     accuracy: CheckAccuracyRule = field(default_factory=CheckAccuracyRule)
 ```
 
 `values` 只保存除 `accuracy` 外的业务策略参数：`checks`、各项 ratio、`tolerance`、`static_min`、`acc_axis`、时间戳策略、参考列策略和 `scene_regex`。
-不保存 `input/output/chip/sort/report/sort_output/workers/verbose`，避免把数据位置、芯片运行上下文、文件移动动作或展示性能写死在可复用规则中。
+不保存 `input/output/sort/report/sort_output/workers/verbose`，但保留 `chip` 以及 timestamp/reference/accuracy 列配置，
+避免把数据位置、文件移动动作或展示性能写死，同时保证规则能解释输入列语义。
 
 - [ ] **Step 4: 创建完整内置规则**
 
@@ -351,6 +355,7 @@ def load_check_rule(cls, rule_file: str) -> CheckRule:
     return CheckRule(
         version=str(data.get("version", "1.0")),
         description=str(data.get("description", "")),
+        chip=data.get("chip"),
         values=normalized.values,
         accuracy=normalized.accuracy,
     )
@@ -361,9 +366,9 @@ def load_check_rule(cls, rule_file: str) -> CheckRule:
 
 - [ ] **Step 4: 实现 check schema 验证**
 
-验证器需拒绝：未知顶层字段（包括 `input`、`output`、`sort`、`report`、`sort_output`、`workers`、`verbose`、`chip`）、
+验证器需拒绝：未知顶层字段（包括 `input`、`output`、`sort`、`report`、`sort_output`、`workers`、`verbose`），
 未知检查项、负 ratio、时间戳/参考数值非法、准确度列为空、未知 method、重复 mark id/category、目录 category 非安全单段、
-mark 缺少 `min` 或 `min_gap`、comparison 与字段不匹配。`checks` 中的 `chip` 不作为检查项；芯片只能由 CLI/API 选择。
+mark 缺少 `min` 或 `min_gap`、comparison 与字段不匹配。`chip` 必须是非空字符串，并由显式 `-c/--chip` 覆盖。
 
 ```python
 if comparison in {"online", "comp"}:
@@ -407,12 +412,13 @@ def test_check_cli_explicit_values_override_rule(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr("health_tools.api.run_check", lambda request, context=None: captured.setdefault("request", request) or CheckResult(BatchResult("check")))
     rule = tmp_path / "check.yaml"
-    rule.write_text("version: '1.0'\nframe_ratio: 2\naccuracy:\n  enabled: true\n  ref_column: REF\n  online_column: ONLINE\n", encoding="utf-8")
+    rule.write_text("version: '1.0'\nchip: gh3220\nframe_ratio: 2\naccuracy:\n  enabled: true\n  ref_column: REF\n  online_column: ONLINE\n", encoding="utf-8")
 
     result = CliRunner().invoke(check_cmd, ["-r", str(rule), "--frame-ratio", "0.5", "--workers", "8"])
 
     assert result.exit_code == 0, result.output
     assert captured["request"].frame_ratio == 0.5
+    assert captured["request"].chip_name == "gh3036"
     assert captured["request"].workers == 8
 
 
@@ -420,12 +426,13 @@ def test_check_rule_fills_unspecified_policy_values(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr("health_tools.api.run_check", lambda request, context=None: captured.setdefault("request", request) or CheckResult(BatchResult("check")))
     rule = tmp_path / "check.yaml"
-    rule.write_text("version: '1.0'\nframe_ratio: 2\naccuracy:\n  enabled: true\n  ref_column: REF\n  online_column: ONLINE\n", encoding="utf-8")
+    rule.write_text("version: '1.0'\nchip: gh3220\nframe_ratio: 2\naccuracy:\n  enabled: true\n  ref_column: REF\n  online_column: ONLINE\n", encoding="utf-8")
 
     result = CliRunner().invoke(check_cmd, ["-r", str(rule), "--workers", "8"])
 
     assert result.exit_code == 0, result.output
     assert captured["request"].frame_ratio == 2.0
+    assert captured["request"].chip_name == "gh3220"
     assert captured["request"].workers == 8
 ```
 
@@ -456,7 +463,8 @@ def parse_accuracy_min(value: str) -> AccuracyMarkRule:
 
 - [ ] **Step 4: 用 Click ParameterSource 合并配置**
 
-给 `check_cmd` 增加 `@click.pass_context`，只对 YAML 允许的业务策略参数执行合并；输入/输出、chip、sort、report、sort-output、workers、verbose 不参与规则合并：
+给 `check_cmd` 增加 `@click.pass_context`，只对 YAML 允许的业务策略参数执行合并；输入/输出、sort、report、sort-output、workers、verbose 不参与规则合并，
+`chip` 参与合并且 CLI 显式 `-c/--chip` 优先：
 
 ```python
 def _effective(ctx, name, cli_value, rule_values, default):
@@ -836,8 +844,9 @@ Expected: FAIL，缺少新增关键词。
 
 - [ ] **Step 4: 更新 `docs/rules.md`**
 
-新增 `check` 规则章节，原样包含完整 YAML，逐字段表格说明业务策略与 accuracy marks；明确 `input/output/chip/sort/report/sort_output/workers/verbose`
-不允许出现在 YAML，规则导航表将 `check` 改为 `-r/--rule`；芯片只能由 `-c/--chip` 或 API 请求选择，输入/输出和 sort 路径只能由外部参数提供。
+新增 `check` 规则章节，原样包含完整 YAML，逐字段表格说明 chip、timestamp/reference/accuracy 列和 marks；明确
+`input/output/sort/report/sort_output/workers/verbose` 不允许出现在 YAML，规则导航表将 `check` 改为 `-r/--rule`；
+芯片可写在 YAML，但显式 `-c/--chip` 或 API 请求值覆盖它，输入/输出和 sort 路径仍只能由外部参数提供。
 
 - [ ] **Step 5: 更新技能参考**
 
