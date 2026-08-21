@@ -249,16 +249,18 @@ accuracy:
 | `ratios` | object | `range/frame/center/ipd/acc` 异常比例阈值 |
 | `acc_axis` | bool | 是否把 ACC 单轴异常计入结果 |
 | `timestamp` | object | 时间戳 `column`、间隔 `ratio/ms`、`fail_ratio` 和 `base_ms` |
-| `reference` | object | HR/SpO2 金标列及采样率、停滞时长、阶跃阈值 |
+| `reference` | object | HR/SpO2 金标列及采样率、停滞时长、阶跃阈值、起始 WARNING 窗口时长 |
 | `scene_regex` | string | 从文件相对路径提取 `scene` 场景的正则 |
 | `accuracy` | object | Online/Comp vs Ref 准确度和标定规则，见下 |
 
 `accuracy.ref_column`、`online_column`、`comp_column` 是数据列名，不是列索引；命令行对应的
-`--accuracy-*-column` 显式传入时覆盖规则。`methods` 支持 `mae`、`rmse`、`correlation` 和
-`within_N`；`thresholds` 可声明自定义阈值，`inclusive` 控制边界是否使用 `<=`。`marks` 中
-`comparison` 为 `online` 或 `comp` 时必须提供 `min`（0~100），为 `online_below_comp` 时必须
-提供非负 `min_gap`；`category` 必须是单段安全目录名且唯一。命中后主要异常项按声明顺序显示，
-并以该 category 作为分拣目录名。
+`--accuracy-*-column` 显式传入时覆盖规则。`methods` 支持 `std`、`rmse`、`mae`、`mape`、
+`bias`、`correlation`、`r2` 以及 `within_N`（例如 `within_5`、`within_12.5`）。
+`thresholds` 是自定义准确度指标列表，每项格式为 `{name: xxx, value: N}` 或
+`{name: xxx, percent: N}`，且只能二选一；`inclusive` 控制所有阈值边界是否使用 `<=`。
+`marks` 中 `id` 和 `category` 都必须唯一且为安全的单段目录名；`comparison` 为 `online` 或
+`comp` 时必须提供 `min`（0~100），为 `online_below_comp` 时必须提供非负 `min_gap`。
+命中后主要异常项按声明顺序显示，并以该 `category` 作为分拣目录名。
 
 ### check 规则与 CLI 合并
 
