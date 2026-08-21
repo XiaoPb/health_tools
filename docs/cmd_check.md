@@ -63,19 +63,22 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - 主报告在 `场景分类` 后追加 `主要异常项`，以及 Online/Comp 对 Ref 的准确度样本数、MAE、RMSE、相关系数和各个 `within_N` 百分比列。准确度无有效样本时留空，不把缺列误报为 0%。
 - Online/Comp 准确度沿用 offline 的共同有效边界规则：三列共同确定首尾边界，边界内 0 保留，NaN/Inf 在比较时过滤；全 0 Comp 不参与 Comp vs Ref。
 
-启用准确度时，`check_report.csv` 的核心列顺序固定为：
+启用准确度时，`check_report.csv` 的列顺序固定为：文件名、芯片、总异常结果；随后为每个
+`checks` 检查项的“状态/摘要”列，以及 ACC 证据列（启用 ACC 时）；最后部分的核心列顺序为：
 
 ```text
 场景分类,
 主要异常项,
 Online准确度样本数, Online MAE, Online RMSE, Online相关系数, Online ±5准确度, Online ±10准确度, Online ±15准确度,
 Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度, Comp ±10准确度, Comp ±15准确度,
+准确度标定分类, 准确度标定说明,
 文件相对路径
 ```
 
 实际启用的 `within_N` 方法会按规则顺序替换对应的 `±N` 列；未启用的方法不生成列。`主要异常项`
 只保留一个按异常优先级选出的中文摘要，例如 `帧不完整`、`首帧非0`、`Online ±5准确度低` 或
-`Online低于Comp 10个百分点`。
+`Online低于Comp 10个百分点`。`accuracy.comp_column` 可以省略；省略时不生成 Comp 指标，
+即使提供了 Comp 列但其有效样本全为 0，也会跳过 Comp vs Ref 统计。
 
 ## 各检查项判断逻辑
 
@@ -237,7 +240,7 @@ ghealth_tool check -i data/ --ref-hr-column REF_HR --ref-spo2-column REF_SPO2
 # 使用 50 Hz 数据和可配置阶跃阈值
 ghealth_tool check -i data/ --ref-hr-column hr_ref --ref-sample-rate 50 --ref-step-threshold 6
 
-# 使用本次 check 自动生成的报告分拣（目录输入默认读取 data/check_report.csv）
+# 读取既有 check 报告分拣（目录输入仅用于推导 data/check_report.csv，不会在同一次调用中重新检查）
 ghealth_tool check -i data/ --sort --sort-output sorted/
 # 也可显式覆盖报告路径
 ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/

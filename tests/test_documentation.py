@@ -61,8 +61,10 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     skill_commands = (SKILL_DIR / "references" / "commands.md").read_text(encoding="utf-8")
     skill_workflows = (SKILL_DIR / "references" / "workflows.md").read_text(encoding="utf-8")
 
-    for text in (command_doc, rules_doc, skill_commands, skill_workflows):
-        assert "-r/--rule" in text or "-r" in text
+    assert "`-r/--rule`" in command_doc
+    assert "`-r/--rule`" in rules_doc
+    assert "`check -r/--rule`" in skill_commands
+    assert "check -i data/ -r" in skill_workflows
 
     for keyword in (
         "主要异常项",

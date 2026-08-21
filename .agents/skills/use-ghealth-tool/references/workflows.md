@@ -39,8 +39,9 @@ ghealth_tool check -i data/ --sort --sort-output sorted/
 `accuracy.ref_column`、`accuracy.online_column`、`accuracy.comp_column` 与真实 CSV 表头一致；
 显式 `-c/--chip` 覆盖规则芯片。准确度统计按共同有效边界计算，Comp 列全为 0 时跳过
 Comp vs Ref，不把它计作低准确度。
-第二条命令会自动读取本次 check 生成的 `data/check_report.csv` 并移动报告中的源文件。也可用
-`--report` 显式覆盖报告路径。执行前确认报告路径和 `文件相对路径` 列指向正确数据。
+先完成上一条 check 命令生成 `data/check_report.csv`，再执行第二条命令；`--sort` 只读取既有报告，
+不会在同一次调用中重新检查。也可用 `--report` 显式覆盖报告路径。执行前确认报告路径和
+`文件相对路径` 列指向正确数据。
 
 启用准确度与标定示例：
 
