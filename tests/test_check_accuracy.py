@@ -1,9 +1,14 @@
+import csv
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from health_tools.api.check_operation import _save_compact_report, _save_report
 from health_tools.api.models import CheckAccuracyResult
 from health_tools.core.check_accuracy import calculate_check_accuracy, match_accuracy_mark
+from health_tools.core.checker import CheckResult as ItemCheckResult
+from health_tools.core.checker import FileCheckReport
 from health_tools.models.rules import AccuracyMarkRule, CheckAccuracyRule
 from health_tools.utils.accuracy import calculate_accuracy, prepare_accuracy_columns
 
@@ -153,3 +158,54 @@ def test_accuracy_mark_minimum_is_strictly_below_threshold() -> None:
     result = CheckAccuracyResult(online={"within_5": 80.0})
     mark = AccuracyMarkRule("low", "online", "within_5", "low", "低", min=80)
     assert match_accuracy_mark(result, (mark,)) is None
+
+
+def test_check_report_places_primary_issue_and_accuracy_after_scene(tmp_path) -> None:
+    mark = AccuracyMarkRule("low", "online", "within_5", "accuracy_low", "Online准确度低", min=80)
+    report = FileCheckReport(
+        tmp_path / "sample.csv",
+        "gh3036",
+        scene="rest",
+        results=[ItemCheckResult("帧完整性", True, "正常")],
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "mae": 2.0, "rmse": 3.0, "correlation": 0.9, "within_5": 66.666},
+            matched_mark=mark,
+        ),
+    )
+    output = tmp_path / "check_report.csv"
+
+    _save_report([report], {}, output, tmp_path, False)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        header, row = list(csv.reader(handle))
+    scene = header.index("场景分类")
+    assert header[scene + 1] == "主要异常项"
+    assert header[scene + 2 : scene + 6] == [
+        "Online准确度样本数",
+        "Online MAE",
+        "Online ±5BPM准确度",
+        "Online ±10BPM准确度",
+    ]
+    assert row[header.index("Online ±5BPM准确度")] == "66.67%"
+    assert header[-1] == "文件相对路径"
+
+
+def test_compact_report_includes_accuracy_mark_details(tmp_path) -> None:
+    mark = AccuracyMarkRule("low", "online", "within_5", "accuracy_low", "Online准确度低", min=80)
+    report = FileCheckReport(
+        tmp_path / "sample.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "within_5": 66.67}, matched_mark=mark
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["检查项"] == "准确度标定"
+    assert rows[0]["状态"] == "WARNING"
+    assert rows[0]["说明"] == "Online准确度低"
+    assert rows[0]["准确度指标"] == "±5BPM"

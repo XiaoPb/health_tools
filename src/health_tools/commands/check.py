@@ -561,6 +561,12 @@ def _save_report_csv(
     base_dir: Optional[Path] = None,
     include_acc_axis: bool = False,
 ) -> None:
+    """兼容旧命令层入口，委托 API 层生成唯一报告。"""
+    from health_tools.api.check_operation import _save_report
+
+    _save_report(reports, acc_reports, output_path, base_dir or output_path.parent, include_acc_axis)
+    return
+
     """将全部检查结果保存到统一CSV文件"""
     header = ["文件名", "芯片", "总异常(结果)"]
 

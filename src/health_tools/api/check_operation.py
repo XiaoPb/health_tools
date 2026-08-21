@@ -20,6 +20,7 @@ from health_tools.api.models import (
     ProgressEvent,
 )
 from health_tools.api.operations import _batch, _context, _load_rule, _require_path
+from health_tools.utils.accuracy import format_metric_name
 from health_tools.utils.errors import REASON_PROCESS_FAILED, classify_exception
 
 SORT_CATEGORIES = (
@@ -215,12 +216,147 @@ def _anomaly_fields(anomaly) -> List[object]:
     ]
 
 
+_DEFAULT_ACCURACY_METHODS = (
+    "mae",
+    "within_5",
+    "within_10",
+    "within_15",
+    "rmse",
+    "correlation",
+)
+
+
+def _accuracy_methods(reports) -> List[str]:
+    methods = list(_DEFAULT_ACCURACY_METHODS)
+    for report in reports:
+        result = getattr(report, "accuracy_result", None)
+        for values in (getattr(result, "online", None), getattr(result, "comp", None)):
+            if values:
+                for method in values:
+                    if method != "samples" and method not in methods:
+                        methods.append(method)
+    return methods
+
+
+def _accuracy_header(prefix: str, methods: List[str]) -> List[str]:
+    return [f"{prefix}准确度样本数"] + [
+        f"{prefix} {('相关系数' if method == 'correlation' else format_metric_name(method))}{'准确度' if method.startswith('within_') else ''}"
+        for method in methods
+    ]
+
+
+def _accuracy_values(result, methods: List[str]) -> List[object]:
+    if result is None:
+        return ["-"] * (len(methods) + 1)
+    values = result or {}
+    row: List[object] = [values.get("samples", "-")]
+    for method in methods:
+        value = values.get(method)
+        if value is None:
+            row.append("-")
+        elif method.startswith("within_"):
+            row.append(f"{float(value):.2f}%")
+        else:
+            row.append(f"{float(value):.2f}")
+    return row
+
+
+def _accuracy_mark_values(report) -> Tuple[str, str]:
+    result = getattr(report, "accuracy_result", None)
+    mark = getattr(result, "matched_mark", None) if result else None
+    return (mark.category, mark.label) if mark else ("", "")
+
+
+def _report_row_as_dict(
+    report, check_names: List[str], acc_reports: dict, base: Path, include_axis: bool
+):
+    result_map = {result.name: result for result in report.results}
+    row: Dict[str, object] = {
+        "文件名": report.file_path.name,
+        "芯片": report.chip,
+        "总异常(结果)": report.total_status,
+    }
+    for name in check_names:
+        result = result_map.get(name)
+        row[f"{name}(结果)"] = result.status if result else "-"
+        row[f"{name}(说明)"] = result.summary if result else "-"
+    if acc_reports:
+        acc = acc_reports.get(report.file_path)
+        fields = []
+        if acc:
+            fields.extend(_anomaly_fields(acc.zero))
+            fields.extend(_anomaly_fields(acc.static_xyz))
+            fields.extend(_anomaly_fields(acc.cyclic_xyz))
+            if include_axis:
+                for name in (
+                    "static_x",
+                    "static_y",
+                    "static_z",
+                    "cyclic_x",
+                    "cyclic_y",
+                    "cyclic_z",
+                ):
+                    fields.extend(_anomaly_fields(getattr(acc, name)))
+        else:
+            fields = ["-"] * (27 if include_axis else 9)
+        acc_names = [
+            "ACC全零次数",
+            "ACC全零最长帧",
+            "ACC全零前10帧",
+            "ACC静止XYZ次数",
+            "ACC静止XYZ最长帧",
+            "ACC静止XYZ前10帧",
+            "ACC循环XYZ次数",
+            "ACC循环XYZ最长帧",
+            "ACC循环XYZ前10帧",
+        ]
+        if include_axis:
+            for kind in ("静止", "循环"):
+                for axis in "XYZ":
+                    acc_names.extend(
+                        [f"ACC{kind}{axis}次数", f"ACC{kind}{axis}最长帧", f"ACC{kind}{axis}前10帧"]
+                    )
+        row.update(dict(zip(acc_names, fields)))
+    methods = _accuracy_methods([report])
+    row["场景分类"] = report.scene
+    row["主要异常项"] = primary_issue(
+        {
+            **{k: str(v) for k, v in row.items()},
+            "准确度标定分类": _accuracy_mark_values(report)[0],
+            "准确度标定说明": _accuracy_mark_values(report)[1],
+        }
+    )
+    accuracy_result = getattr(report, "accuracy_result", None)
+    row.update(
+        dict(
+            zip(
+                _accuracy_header("Online", methods),
+                _accuracy_values(getattr(accuracy_result, "online", None), methods),
+            )
+        )
+    )
+    row.update(
+        dict(
+            zip(
+                _accuracy_header("Comp", methods),
+                _accuracy_values(getattr(accuracy_result, "comp", None), methods),
+            )
+        )
+    )
+    mark_category, mark_label = _accuracy_mark_values(report)
+    row["准确度标定分类"] = mark_category
+    row["准确度标定说明"] = mark_label
+    row["文件相对路径"] = _relative_path(report.file_path, base)
+    return row, methods
+
+
 def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: bool) -> None:
     check_names = []
     for report in reports:
         for result in report.results:
             if result.name not in check_names:
                 check_names.append(result.name)
+    methods = _accuracy_methods(reports)
     header = ["文件名", "芯片", "总异常(结果)"]
     for name in check_names:
         header.extend([f"{name}(结果)", f"{name}(说明)"])
@@ -244,7 +380,10 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
                     header.extend(
                         [f"ACC{kind}{axis}次数", f"ACC{kind}{axis}最长帧", f"ACC{kind}{axis}前10帧"]
                     )
-    header.extend(["场景分类", "文件相对路径"])
+    header.extend(["场景分类", "主要异常项"])
+    header.extend(_accuracy_header("Online", methods))
+    header.extend(_accuracy_header("Comp", methods))
+    header.extend(["准确度标定分类", "准确度标定说明", "文件相对路径"])
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
@@ -273,7 +412,22 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
                             row.extend(_anomaly_fields(getattr(acc, name)))
                 else:
                     row.extend(["-"] * (27 if include_axis else 9))
-            row.extend([report.scene, _relative_path(report.file_path, base)])
+            accuracy_result = getattr(report, "accuracy_result", None)
+            row.extend(
+                [
+                    report.scene,
+                    primary_issue(
+                        {
+                            **{k: str(v) for k, v in zip(header, row)},
+                            "准确度标定分类": _accuracy_mark_values(report)[0],
+                            "准确度标定说明": _accuracy_mark_values(report)[1],
+                        }
+                    ),
+                ]
+            )
+            row.extend(_accuracy_values(getattr(accuracy_result, "online", None), methods))
+            row.extend(_accuracy_values(getattr(accuracy_result, "comp", None), methods))
+            row.extend([*_accuracy_mark_values(report), _relative_path(report.file_path, base)])
             writer.writerow(row)
 
 
@@ -301,6 +455,10 @@ COMPACT_HEADER = [
     "金标阶跃阈值",
     "金标最长静止帧",
     "金标静止帧阈值",
+    "说明",
+    "比较对象",
+    "准确度指标",
+    "准确度阈值",
 ]
 
 
@@ -374,8 +532,43 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                             "金标阶跃阈值": metric.get("step_threshold", ""),
                             "金标最长静止帧": metric.get("longest_static_frames", ""),
                             "金标静止帧阈值": metric.get("static_frame_threshold", ""),
+                            "说明": "",
+                            "比较对象": "",
+                            "准确度指标": "",
+                            "准确度阈值": "",
                         }
                     )
+            accuracy = getattr(report, "accuracy_result", None)
+            mark = getattr(accuracy, "matched_mark", None) if accuracy else None
+            if mark:
+                values = (
+                    getattr(accuracy, mark.comparison, None)
+                    if mark.comparison in {"online", "comp"}
+                    else getattr(accuracy, "online", None)
+                ) or {}
+                metric_value = values.get(mark.metric, "")
+                if mark.comparison == "online_below_comp":
+                    comp_values = getattr(accuracy, "comp", None) or {}
+                    metric_value = comp_values.get(mark.metric, "") - values.get(mark.metric, 0)
+                threshold = mark.min if mark.comparison in {"online", "comp"} else mark.min_gap
+                writer.writerow(
+                    {
+                        "文件名": report.file_path.name,
+                        "场景分类": report.scene,
+                        "文件相对路径": _relative_path(report.file_path, base),
+                        "芯片": report.chip,
+                        "检查项": "准确度标定",
+                        "状态": "WARNING",
+                        "通道": mark.comparison,
+                        "异常数": metric_value,
+                        "总数": (values.get("samples", "") if values else ""),
+                        "异常占比": _format_compact_percent(metric_value),
+                        "说明": mark.label,
+                        "比较对象": "Ref",
+                        "准确度指标": format_metric_name(mark.metric),
+                        "准确度阈值": threshold,
+                    }
+                )
 
 
 def _write_sort_list(path: Path, rows: List[List[str]]) -> None:
