@@ -532,6 +532,8 @@ class DataChecker:
                 "step_threshold": float(step_threshold),
                 "longest_static_frames": float(longest_run),
                 "static_frame_threshold": float(stale_limit),
+                "longest_static_seconds": float(longest_run / sample_rate),
+                "static_second_threshold": float(stale_seconds),
             }
         }
         reasons = []
@@ -542,9 +544,7 @@ class DataChecker:
         if step_count:
             reasons.append(f"发现 {step_count} 次阶跃（阈值>{step_threshold:g}）")
         if stale:
-            reasons.append(
-                f"最长静止 {longest_run} 帧，超过 {stale_limit:g} 帧（{stale_seconds:g} 秒）"
-            )
+            reasons.append(f"最长静止 {longest_run / sample_rate:g} 秒，超过 {stale_seconds:g} 秒")
         summary = "；".join(reasons) if reasons else "金标数据正常"
         return CheckResult(
             name,

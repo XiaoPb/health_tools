@@ -36,6 +36,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--ref-sample-rate` | 金标采样率（Hz），默认 25 |
 | `--ref-stale-seconds` | 金标连续不变判定时长（秒），默认 5 |
 | `--ref-step-threshold` | 金标相邻值阶跃阈值，默认 8；绝对变化严格大于该值判定阶跃 |
+| `--reference-detail-output` | 输出金标异常文件的秒采样 `time,ref,online,comp` 证据 CSV 目录 |
 | `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，未匹配时为 `default` |
 | `--accuracy/--no-accuracy` | 启用或禁用 Online/Comp 对 Ref 的准确度统计 |
 | `--accuracy-ref-column` | 准确度金标列名；覆盖规则中的 `accuracy.ref_column` |
@@ -156,12 +157,16 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 阶跃和静止是两种独立异常：
 
 - 阶跃：相邻有效金标值的绝对变化严格大于 `--ref-step-threshold`，默认 `8`。
-- 静止：连续相同有效值的帧数严格大于
-  `--ref-sample-rate × --ref-stale-seconds`，默认 `25 × 5 = 125` 帧。
+- 静止：原始高频数据先从 Online 首个有限非零值开始按采样率取每秒第一帧，再按秒样本判断；
+  连续相同有效值超过 `--ref-stale-seconds` 秒即异常。`TimeStamp`、Ref、Online、Comp
+  始终取同一原始行。该秒采样也用于 Online/Comp 准确度，逐帧完整性、范围、ACC 等检查不降采样。
 
 任一条件异常都会使对应的“心率金标”或“血氧金标”检查项为 `FAIL`。主报告摘要会写明
-范围异常数、非零占比、阶跃次数和最长静止帧；`check_report_compact.csv` 也会同步写入这些
+范围异常数、非零占比、阶跃次数和最长静止秒数；`check_report_compact.csv` 也会同步写入这些
 指标及阈值列。
+
+启用 `--reference-detail-output` 后，仅对金标检查为 `FAIL` 的文件输出四列证据 CSV，目录
+结构镜像输入目录；已有目标文件不会覆盖。Online 没有有效非零起点时金标明确失败，并输出表头。
 
 ## 检查结果
 

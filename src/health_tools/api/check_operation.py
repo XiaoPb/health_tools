@@ -9,6 +9,8 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import RequestValidationError
 from health_tools.api.models import (
@@ -728,18 +730,33 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     reports = []
     acc_reports = {}
     ipd_details = {}
+    reference_details = {}
 
     def check_one(
         path: Path,
-    ) -> Tuple[ItemResult, Optional[Any], Optional[Any], Optional[Any]]:
+    ) -> Tuple[ItemResult, Optional[Any], Optional[Any], Optional[Any], Optional[Any]]:
+        from health_tools.core.check_sampling import build_sample_positions, sample_check_seconds
+
         chip = request.chip_name or _detect_chip(path)
         if not chip:
-            return ItemResult(ItemStatus.SKIP, str(path), reason="无法识别芯片"), None, None, None
+            return (
+                ItemResult(ItemStatus.SKIP, str(path), reason="无法识别芯片"),
+                None,
+                None,
+                None,
+                None,
+            )
         try:
             chip_rule = _load_rule(RuleLoader.load_chip_rule, chip, "芯片")
             _, frame = CSVHandler(chip_rule).read(path)
             if frame.empty:
-                return ItemResult(ItemStatus.SKIP, str(path), reason="空文件"), None, None, None
+                return (
+                    ItemResult(ItemStatus.SKIP, str(path), reason="空文件"),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
             checker = DataChecker(
                 chip_rule, tolerance=request.tolerance, static_min=request.static_min
             )
@@ -754,7 +771,13 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 request.ref_spo2_column if (request.checks is None or "ref" in checks) else None,
             )
             if mismatch:
-                return ItemResult(ItemStatus.SKIP, str(path), reason=mismatch), None, None, None
+                return (
+                    ItemResult(ItemStatus.SKIP, str(path), reason=mismatch),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
             relative_path = _relative_path(path, base)
             report = FileCheckReport(
                 file_path=path,
@@ -781,24 +804,49 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     )
                 )
             ref_enabled = request.checks is None or "ref" in checks
+            sample_positions = np.empty(0, dtype=np.int64)
+            sampling_online = request.accuracy_online_column or "ALGO_RESULT0"
+            if (
+                ref_enabled and (request.ref_hr_column or request.ref_spo2_column)
+            ) or request.accuracy_enabled:
+                sample_positions = build_sample_positions(
+                    frame, sample_rate=request.ref_sample_rate, online_column=sampling_online
+                )
+            evidence_frame = None
             if ref_enabled and request.ref_hr_column:
+                reference_frame = sample_check_seconds(
+                    frame,
+                    positions=sample_positions,
+                    timestamp_column=request.timestamp_column or "TimeStamp",
+                    ref_column=request.ref_hr_column,
+                    online_column=sampling_online,
+                    comp_column=request.accuracy_comp_column,
+                )
                 report.results.append(
                     checker.check_reference_data(
-                        frame,
+                        reference_frame.rename(columns={"ref": request.ref_hr_column}),
                         request.ref_hr_column,
                         "hr",
-                        request.ref_sample_rate,
+                        1.0,
                         request.ref_stale_seconds,
                         request.ref_step_threshold,
                     )
                 )
             if ref_enabled and request.ref_spo2_column:
+                reference_frame = sample_check_seconds(
+                    frame,
+                    positions=sample_positions,
+                    timestamp_column=request.timestamp_column or "TimeStamp",
+                    ref_column=request.ref_spo2_column,
+                    online_column=sampling_online,
+                    comp_column=request.accuracy_comp_column,
+                )
                 report.results.append(
                     checker.check_reference_data(
-                        frame,
+                        reference_frame.rename(columns={"ref": request.ref_spo2_column}),
                         request.ref_spo2_column,
                         "spo2",
-                        request.ref_sample_rate,
+                        1.0,
                         request.ref_stale_seconds,
                         request.ref_step_threshold,
                     )
@@ -823,8 +871,22 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 from health_tools.models.rules import CheckAccuracyRule
 
                 accuracy_methods = _resolve_accuracy_methods(request)
-                report.accuracy_result = calculate_check_accuracy(
+                accuracy_frame = sample_check_seconds(
                     frame,
+                    positions=sample_positions,
+                    timestamp_column=request.timestamp_column or "TimeStamp",
+                    ref_column=request.accuracy_ref_column or "REF_RESULT0",
+                    online_column=request.accuracy_online_column or "ALGO_RESULT0",
+                    comp_column=request.accuracy_comp_column,
+                )
+                report.accuracy_result = calculate_check_accuracy(
+                    accuracy_frame.rename(
+                        columns={
+                            "ref": request.accuracy_ref_column or "REF_RESULT0",
+                            "online": request.accuracy_online_column or "ALGO_RESULT0",
+                            "comp": request.accuracy_comp_column or "__comp__",
+                        }
+                    ),
                     CheckAccuracyRule(
                         enabled=True,
                         ref_column=request.accuracy_ref_column or "REF_RESULT0",
@@ -837,7 +899,23 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     ),
                 )
                 report.accuracy_methods = tuple(accuracy_methods)
-            return ItemResult(ItemStatus.OK, str(path)), report, acc, ipd_detail
+            reference_failed = any(
+                result.name in {"心率金标", "血氧金标"} and result.status == "FAIL"
+                for result in report.results
+            )
+            if request.reference_detail_output is not None and reference_failed:
+                evidence_frame = sample_check_seconds(
+                    frame,
+                    positions=sample_positions,
+                    timestamp_column=request.timestamp_column or "TimeStamp",
+                    ref_column=request.accuracy_ref_column
+                    or request.ref_hr_column
+                    or request.ref_spo2_column
+                    or "REF_RESULT0",
+                    online_column=sampling_online,
+                    comp_column=request.accuracy_comp_column,
+                )
+            return ItemResult(ItemStatus.OK, str(path)), report, acc, ipd_detail, evidence_frame
         except Exception as exc:
             return (
                 ItemResult(
@@ -846,6 +924,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     reason=classify_exception(exc, REASON_PROCESS_FAILED),
                     detail=str(exc),
                 ),
+                None,
                 None,
                 None,
                 None,
@@ -862,7 +941,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
         for completed, future in enumerate(as_completed(futures), 1):
             ctx.check_cancelled("files", _batch("check", items))
             path = futures[future]
-            item, report, acc, ipd_detail = future.result()
+            item, report, acc, ipd_detail, evidence = future.result()
             items.append(item)
             if report is not None:
                 reports.append(report)
@@ -870,6 +949,8 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 acc_reports[path] = acc
             if ipd_detail is not None and not ipd_detail.empty:
                 ipd_details[path] = ipd_detail
+            if evidence is not None:
+                reference_details[path] = evidence
             ctx.emit(ProgressEvent("check", "files", completed, total, "完成", str(path)))
         ctx.check_cancelled("files", _batch("check", items))
     except BaseException:
@@ -892,8 +973,20 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
         detail = report_path.parent / f"ipd_detail_{path.stem}.csv"
         frame.to_csv(detail, index=False, encoding="utf-8-sig")
         artifacts.append(detail)
+    reference_detail_paths = []
+    if request.reference_detail_output is not None:
+        detail_root = Path(request.reference_detail_output)
+        for source, frame in reference_details.items():
+            destination = detail_root / _relative_path(source, base)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                raise RequestValidationError(f"金标证据文件已存在，不覆盖: {destination}")
+            frame.to_csv(destination, index=False, encoding="utf-8-sig")
+            reference_detail_paths.append(destination)
+            artifacts.append(destination)
     return CheckResult(
         _batch("check", items, artifacts),
         report_path=report_path,
         compact_report_path=compact_report_path,
+        reference_detail_paths=tuple(reference_detail_paths),
     )

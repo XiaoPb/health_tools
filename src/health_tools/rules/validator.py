@@ -191,7 +191,17 @@ class RuleValidator:
             if not isinstance(reference, dict):
                 errors.append("check 规则 'reference' 必须是映射")
             else:
-                for name in ("sample_rate", "stale_seconds", "step_threshold"):
+                if "sample_rate" in reference:
+                    value = reference["sample_rate"]
+                    if (
+                        not isinstance(value, (int, float))
+                        or isinstance(value, bool)
+                        or not math.isfinite(float(value))
+                        or float(value) <= 0
+                        or not float(value).is_integer()
+                    ):
+                        errors.append("reference.sample_rate 必须是正整数")
+                for name in ("stale_seconds", "step_threshold"):
                     errors.extend(
                         RuleValidator._validate_non_negative_number(
                             reference, name, f"reference.{name}"

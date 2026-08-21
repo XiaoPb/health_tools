@@ -149,9 +149,15 @@ class CheckResult:
     report_path: Optional[Path] = None
     compact_report_path: Optional[Path] = None
     sort_counts: Mapping[str, int] = field(default_factory=dict)
+    reference_detail_paths: Tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "sort_counts", _freeze(self.sort_counts))
+        object.__setattr__(
+            self,
+            "reference_detail_paths",
+            tuple(Path(path) for path in self.reference_detail_paths),
+        )
 
 
 @dataclass(frozen=True)
@@ -549,3 +555,4 @@ class CheckRequest:
     accuracy_custom_thresholds: Tuple[Mapping[str, Any], ...] = ()
     accuracy_inclusive: bool = False
     accuracy_marks: Tuple[AccuracyMarkRule, ...] = ()
+    reference_detail_output: Optional[Path] = None

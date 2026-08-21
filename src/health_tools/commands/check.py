@@ -77,6 +77,12 @@ if TYPE_CHECKING:
     help="金标阶跃相邻变化阈值",
 )
 @click.option(
+    "--reference-detail-output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="输出金标异常文件的秒采样 time,ref,online,comp CSV",
+)
+@click.option(
     "--scene-regex",
     type=str,
     default=None,
@@ -148,6 +154,7 @@ def check_cmd(
     ref_sample_rate: float,
     ref_stale_seconds: float,
     ref_step_threshold: float,
+    reference_detail_output: Optional[Path],
     scene_regex: Optional[str],
     accuracy_enabled: bool,
     accuracy_ref_column: Optional[str],
@@ -286,6 +293,7 @@ def check_cmd(
                     ref_sample_rate=ref_sample_rate,
                     ref_stale_seconds=ref_stale_seconds,
                     ref_step_threshold=ref_step_threshold,
+                    reference_detail_output=reference_detail_output,
                     scene_regex=scene_regex,
                     accuracy_enabled=accuracy_enabled,
                     accuracy_ref_column=accuracy_ref_column,
