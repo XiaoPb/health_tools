@@ -41,6 +41,12 @@ SORT_CATEGORIES = (
     "normal",
 )
 
+
+def _compact_report_path(report_path: Path) -> Path:
+    """根据完整报告路径生成对应的精简报告路径。"""
+    return report_path.with_name(f"{report_path.stem}_compact{report_path.suffix}")
+
+
 TRAILING_CHECK_CATEGORIES = {
     "AGC调光": "agc",
     "AGC变化": "agc",
@@ -990,7 +996,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
         target.parent / "check_report.csv" if target.is_file() else target / "check_report.csv"
     )
     _save_report(reports, acc_reports, report_path, base, request.acc_axis)
-    compact_report_path = report_path.parent / "check_report_compact.csv"
+    compact_report_path = _compact_report_path(report_path)
     _save_compact_report(reports, compact_report_path, base)
     artifacts = [report_path, compact_report_path]
     for path, frame in ipd_details.items():

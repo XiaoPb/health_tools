@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from click.testing import CliRunner
 
-from health_tools.api.check_operation import _save_compact_report
+from health_tools.api.check_operation import _compact_report_path, _save_compact_report
 from health_tools.api.models import BatchResult, CheckRequest, CheckResult
 from health_tools.commands.check import check_cmd
 from health_tools.core.checker import DataChecker, FileCheckReport
@@ -14,6 +14,11 @@ from health_tools.models.rules import ChipRule
 
 def _checker():
     return DataChecker(ChipRule(chip="gh3036", csv={}, columns=[]))
+
+
+def test_compact_report_path_follows_full_report_name(tmp_path):
+    assert _compact_report_path(tmp_path / "custom.csv") == tmp_path / "custom_compact.csv"
+    assert _compact_report_path(tmp_path / "report") == tmp_path / "report_compact"
 
 
 def test_reference_range_and_nonzero_ratio():
