@@ -106,3 +106,41 @@ def test_validate_check_rule_rejects_invalid_accuracy_mark():
     )
 
     assert "marks[0]" in " ".join(errors)
+
+
+def test_check_rule_reports_malformed_check_items_without_crashing():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "checks": ["frame", ["bad"], {"name": "range"}, 1],
+        },
+        "check",
+    )
+
+    message = " ".join(errors)
+    assert "checks" in message
+    assert "checks[1]" in message
+
+
+def test_check_rule_rejects_unsafe_accuracy_mark_id():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "accuracy": {
+                "enabled": True,
+                "marks": [
+                    {
+                        "id": "../bad",
+                        "comparison": "online",
+                        "metric": "within_5",
+                        "category": "accuracy_online_low",
+                        "label": "Online 准确度低",
+                        "min": 80,
+                    }
+                ],
+            },
+        },
+        "check",
+    )
+
+    assert "id" in " ".join(errors)

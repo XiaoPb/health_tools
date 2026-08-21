@@ -122,11 +122,15 @@ class RuleValidator:
             if not isinstance(checks, list) or not checks:
                 errors.append("check 规则 'checks' 必须是非空列表")
             else:
-                unknown_checks = set(checks) - supported_checks
+                normalized_checks = []
+                for index, check in enumerate(checks):
+                    if not isinstance(check, str) or not check.strip():
+                        errors.append(f"checks[{index}] 必须是非空字符串")
+                        continue
+                    normalized_checks.append(check)
+                unknown_checks = set(normalized_checks) - supported_checks
                 if unknown_checks:
-                    errors.append(
-                        "check 规则包含未知检查项: " + ", ".join(sorted(map(str, unknown_checks)))
-                    )
+                    errors.append("check 规则包含未知检查项: " + ", ".join(sorted(unknown_checks)))
 
         for field in ("tolerance", "static_min"):
             if field in rule and (
@@ -277,30 +281,32 @@ class RuleValidator:
                     errors.append(f"{prefix} 缺少有效的 '{field}'")
             mark_id = mark.get("id")
             category = mark.get("category")
-            if mark_id in ids:
+            if isinstance(mark_id, str) and mark_id in ids:
                 errors.append(f"{prefix}.id 重复: {mark_id}")
-            if category in categories:
+            if isinstance(category, str) and category in categories:
                 errors.append(f"{prefix}.category 重复: {category}")
-            if mark_id:
+            if isinstance(mark_id, str) and mark_id:
+                if not safe_category.fullmatch(mark_id):
+                    errors.append(f"{prefix}.id 必须是安全的单段目录名")
                 ids.add(mark_id)
-            if category:
+            if isinstance(category, str) and category:
                 categories.add(category)
                 if not safe_category.fullmatch(category):
                     errors.append(f"{prefix}.category 必须是安全的单段目录名")
             comparison = mark.get("comparison")
-            if comparison in {"online", "comp"}:
+            if isinstance(comparison, str) and comparison in {"online", "comp"}:
                 if "min" not in mark or "min_gap" in mark:
                     errors.append(f"{prefix} comparison={comparison} 需要 min 且不能有 min_gap")
                 elif not RuleValidator._is_percent(mark["min"]):
                     errors.append(f"{prefix}.min 必须是 0 到 100 的有限数")
-            elif comparison == "online_below_comp":
+            elif isinstance(comparison, str) and comparison == "online_below_comp":
                 if "min_gap" not in mark or "min" in mark:
                     errors.append(
                         f"{prefix} comparison=online_below_comp 需要 min_gap 且不能有 min"
                     )
                 elif not RuleValidator._is_non_negative_finite(mark["min_gap"]):
                     errors.append(f"{prefix}.min_gap 必须是非负有限数")
-            elif comparison:
+            elif isinstance(comparison, str) and comparison:
                 errors.append(f"{prefix}.comparison 仅支持 online、comp、online_below_comp")
         return errors
 
