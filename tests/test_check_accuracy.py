@@ -4,8 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from health_tools.api.check_operation import _save_compact_report, _save_report
-from health_tools.api.models import CheckAccuracyResult
+from health_tools.api.check_operation import (
+    _resolve_accuracy_methods,
+    _save_compact_report,
+    _save_report,
+)
+from health_tools.api.models import CheckAccuracyResult, CheckRequest
 from health_tools.core.check_accuracy import calculate_check_accuracy, match_accuracy_mark
 from health_tools.core.checker import CheckResult as ItemCheckResult
 from health_tools.core.checker import FileCheckReport
@@ -229,4 +233,40 @@ def test_check_report_uses_resolved_accuracy_methods(tmp_path) -> None:
         header = next(csv.reader(handle))
     assert "Online MAE" in header
     assert "Online相关系数" in header
+    assert "Online ±5BPM准确度" not in header
+
+
+def test_check_request_accuracy_thresholds_replace_within_methods() -> None:
+    request = CheckRequest(
+        accuracy_enabled=True,
+        accuracy_methods=("mae", "within_5", "within_10", "rmse"),
+        accuracy_thresholds=(3.0, 6.0),
+    )
+
+    assert _resolve_accuracy_methods(request) == ["mae", "within_3", "within_6", "rmse"]
+
+
+def test_check_report_columns_follow_request_accuracy_thresholds(tmp_path) -> None:
+    request = CheckRequest(
+        accuracy_enabled=True,
+        accuracy_methods=("mae", "within_5", "within_10"),
+        accuracy_thresholds=(3.0, 6.0),
+    )
+    report = FileCheckReport(
+        tmp_path / "custom.csv",
+        "gh3036",
+        accuracy_methods=tuple(_resolve_accuracy_methods(request)),
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 2, "mae": 1.0, "within_3": 90.0, "within_6": 100.0},
+            comp=None,
+        ),
+    )
+    output = tmp_path / "custom_report.csv"
+
+    _save_report([report], {}, output, tmp_path, False)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        header = next(csv.reader(handle))
+    assert "Online ±3BPM准确度" in header
+    assert "Online ±6BPM准确度" in header
     assert "Online ±5BPM准确度" not in header

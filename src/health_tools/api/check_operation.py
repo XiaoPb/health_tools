@@ -20,7 +20,7 @@ from health_tools.api.models import (
     ProgressEvent,
 )
 from health_tools.api.operations import _batch, _context, _load_rule, _require_path
-from health_tools.utils.accuracy import format_metric_name
+from health_tools.utils.accuracy import format_metric_name, resolve_accuracy_methods
 from health_tools.utils.errors import REASON_PROCESS_FAILED, classify_exception
 
 SORT_CATEGORIES = (
@@ -224,6 +224,11 @@ _DEFAULT_ACCURACY_METHODS = (
     "rmse",
     "correlation",
 )
+
+
+def _resolve_accuracy_methods(request: CheckRequest) -> List[str]:
+    """按请求阈值覆盖规则中的 within_N 方法。"""
+    return resolve_accuracy_methods(request.accuracy_methods, request.accuracy_thresholds)
 
 
 def _accuracy_methods(reports) -> List[str]:
@@ -817,6 +822,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 from health_tools.core.check_accuracy import calculate_check_accuracy
                 from health_tools.models.rules import CheckAccuracyRule
 
+                accuracy_methods = _resolve_accuracy_methods(request)
                 report.accuracy_result = calculate_check_accuracy(
                     frame,
                     CheckAccuracyRule(
@@ -824,13 +830,13 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                         ref_column=request.accuracy_ref_column or "REF_RESULT0",
                         online_column=request.accuracy_online_column or "ALGO_RESULT0",
                         comp_column=request.accuracy_comp_column,
-                        methods=tuple(request.accuracy_methods),
+                        methods=tuple(accuracy_methods),
                         thresholds=tuple(dict(item) for item in request.accuracy_custom_thresholds),
                         inclusive=request.accuracy_inclusive,
                         marks=tuple(request.accuracy_marks),
                     ),
                 )
-                report.accuracy_methods = tuple(request.accuracy_methods)
+                report.accuracy_methods = tuple(accuracy_methods)
             return ItemResult(ItemStatus.OK, str(path)), report, acc, ipd_detail
         except Exception as exc:
             return (
