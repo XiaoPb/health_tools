@@ -47,8 +47,13 @@
    - 只有总 FAIL 的旧报告显示 `未分类异常`
    - 无异常显示 `正常`
 5. 准确度标定分类位于 `frame_warning` 之后、Ipd 和其他低优先级异常之前。每条标定规则声明稳定英文 `category`，sort 输出到 `abnormal/<category>/`。
-6. `-r/--rule` 支持用户目录 `~/.ghealth_tools/rules/check/`、包内 `rules/check/` 和绝对路径。相对路径字段以规则文件所在目录为基准解析。
-7. 配置优先级为显式 CLI > YAML > `CheckRequest` 默认值。`-r/--rule` 自身不能出现在 YAML；其余当前参数及新增准确度参数均可声明。
+6. `-r/--rule` 支持用户目录 `~/.ghealth_tools/rules/check/`、包内 `rules/check/` 和绝对路径。
+7. YAML 只声明可复用的检查业务规则：检查项、阈值、列映射、场景提取、准确度方法和标定条件。
+   输入路径、输出路径、芯片选择、sort 开关、sort 输出目录、并行数和 verbose 都是本次运行上下文，
+   必须由 CLI/API 外部输入，不写入 YAML。
+8. 配置优先级为显式 CLI > YAML > `CheckRequest` 默认值。`-r/--rule` 自身不能出现在 YAML。
+   `--sort` 启用时默认读取本次 check 生成的报告：单文件为 `<输入文件父目录>/check_report.csv`，
+   目录输入为 `<输入目录>/check_report.csv`；仍可用 CLI `--report` 覆盖已有报告，但该参数不进入 YAML。
 
 ## 完整规则声明
 
@@ -58,10 +63,8 @@
 version: "1.0"
 description: 默认数据质量、准确度与分拣规则
 
-# 当前 check 的运行参数；相对路径以本规则文件目录为基准。
-input: null
-chip: null
-checks: [range, ipd, frame, center, acc, agc, ref, accuracy]
+# YAML 只描述检查策略，不描述输入/输出和本次运行控制。
+checks: [range, ipd, frame, center, acc, agc, ref]
 tolerance: 50
 static_min: 5
 
@@ -89,12 +92,6 @@ reference:
   step_threshold: 8.0
 
 scene_regex: null
-output: null
-sort: false
-report: null
-sort_output: null
-workers: 4
-verbose: false
 
 accuracy:
   enabled: false
@@ -129,6 +126,32 @@ accuracy:
 
 ```text
 -r, --rule PATH_OR_NAME
+--chip TEXT
+--checks TEXT
+--tolerance INTEGER
+--static-min INTEGER
+--range-ratio FLOAT
+--frame-ratio FLOAT
+--center-ratio FLOAT
+--ipd-ratio FLOAT
+--acc-ratio FLOAT
+--acc-axis/--no-acc-axis
+--check-timestamp TEXT
+--timestamp-ratio FLOAT
+--timestamp-ms FLOAT
+--timestamp-fail-ratio FLOAT
+--timestamp-base-ms FLOAT
+--ref-hr-column TEXT
+--ref-spo2-column TEXT
+--ref-sample-rate FLOAT
+--ref-stale-seconds FLOAT
+--ref-step-threshold FLOAT
+--scene-regex TEXT
+--sort
+--report PATH_OR_NAME
+--sort-output PATH
+--workers INTEGER
+-v, --verbose
 --accuracy/--no-accuracy
 --accuracy-ref-column TEXT
 --accuracy-online-column TEXT
@@ -157,7 +180,7 @@ ghealth_tool check -i data -r default.yaml \
 - Create: `src/health_tools/rules/check/default.yaml`：完整可复制的 check 规则。
 - Create: `tests/test_check_accuracy.py`：准确度口径、标定和主要异常单元测试。
 - Create: `tests/test_check_rules.py`：规则加载、验证、CLI 合并和帮助文本测试。
-- Modify: `src/health_tools/models/rules.py`：新增 `CheckRule`、`CheckAccuracyRule`、`AccuracyMarkRule`。
+- Modify: `src/health_tools/models/rules.py`：新增 `CheckRule`、`CheckAccuracyRule`、`AccuracyMarkRule`；`CheckRule` 只保存业务策略。
 - Modify: `src/health_tools/rules/loader.py`：加载 check 规则并保留规则文件基准目录。
 - Modify: `src/health_tools/rules/validator.py`：验证完整 check schema。
 - Modify: `src/health_tools/api/models.py`：新增 `RuleType.CHECK`、扩展 `CheckRequest` 和每文件准确度模型。
@@ -235,10 +258,10 @@ class CheckRule:
     description: str = ""
     values: Dict[str, Any] = field(default_factory=dict)
     accuracy: CheckAccuracyRule = field(default_factory=CheckAccuracyRule)
-    base_dir: Optional[Path] = None
 ```
 
-`values` 保存除 `accuracy` 外的完整 check 参数，避免在规则模型中再次复制 `CheckRequest` 的每个字段；加载后必须是验证过的规范键名。
+`values` 只保存除 `accuracy` 外的业务策略参数：`checks`、各项 ratio、`tolerance`、`static_min`、`acc_axis`、时间戳策略、参考列策略和 `scene_regex`。
+不保存 `input/output/chip/sort/report/sort_output/workers/verbose`，避免把数据位置、芯片运行上下文、文件移动动作或展示性能写死在可复用规则中。
 
 - [ ] **Step 4: 创建完整内置规则**
 
@@ -268,14 +291,26 @@ git commit -m "feat: 定义 check 完整规则模型" -m "Co-Authored-By: Codex 
 - Modify: `tests/test_api_rules.py`
 - Modify: `tests/test_api_contract.py`
 
-- [ ] **Step 1: 写失败测试覆盖加载、路径解析和验证错误**
+- [ ] **Step 1: 写失败测试覆盖加载和验证错误**
 
 ```python
-def test_check_rule_relative_paths_use_rule_directory(tmp_path):
-    rule_path = tmp_path / "check.yaml"
-    rule_path.write_text("version: '1.0'\ninput: data\naccuracy: {enabled: false}\n", encoding="utf-8")
-    rule = RuleLoader.load_check_rule(str(rule_path))
-    assert rule.values["input"] == tmp_path / "data"
+def test_check_rule_rejects_runtime_paths_and_controls():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "input": "data",
+            "output": "report.csv",
+            "sort": True,
+            "workers": 8,
+            "accuracy": {"enabled": False},
+        },
+        "check",
+    )
+    message = " ".join(errors)
+    assert "input" in message
+    assert "output" in message
+    assert "sort" in message
+    assert "workers" in message
 
 
 def test_validate_check_rule_rejects_invalid_accuracy_mark():
@@ -318,15 +353,17 @@ def load_check_rule(cls, rule_file: str) -> CheckRule:
         description=str(data.get("description", "")),
         values=normalized.values,
         accuracy=normalized.accuracy,
-        base_dir=rule_path.parent,
     )
 ```
 
-只对 `input/output/report/sort_output` 四个路径字段做规则目录相对解析；空值保持 `None`。
+规则加载器不再解析任何路径字段；`input/output/report/sort_output` 均不属于 check YAML schema。
+`--report` 仅作为 CLI 对自动报告路径的显式覆盖，`--sort-output` 仍必须由 CLI/API 提供。
 
 - [ ] **Step 4: 实现 check schema 验证**
 
-验证器需拒绝：未知顶层字段、未知检查项、非正 workers、负 ratio、时间戳/参考数值非法、准确度列为空、未知 method、重复 mark id/category、目录 category 非安全单段、mark 缺少 `min` 或 `min_gap`、comparison 与字段不匹配。
+验证器需拒绝：未知顶层字段（包括 `input`、`output`、`sort`、`report`、`sort_output`、`workers`、`verbose`、`chip`）、
+未知检查项、负 ratio、时间戳/参考数值非法、准确度列为空、未知 method、重复 mark id/category、目录 category 非安全单段、
+mark 缺少 `min` 或 `min_gap`、comparison 与字段不匹配。`checks` 中的 `chip` 不作为检查项；芯片只能由 CLI/API 选择。
 
 ```python
 if comparison in {"online", "comp"}:
@@ -370,7 +407,7 @@ def test_check_cli_explicit_values_override_rule(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr("health_tools.api.run_check", lambda request, context=None: captured.setdefault("request", request) or CheckResult(BatchResult("check")))
     rule = tmp_path / "check.yaml"
-    rule.write_text("version: '1.0'\nframe_ratio: 2\nworkers: 2\naccuracy:\n  enabled: true\n  ref_column: REF\n  online_column: ONLINE\n", encoding="utf-8")
+    rule.write_text("version: '1.0'\nframe_ratio: 2\naccuracy:\n  enabled: true\n  ref_column: REF\n  online_column: ONLINE\n", encoding="utf-8")
 
     result = CliRunner().invoke(check_cmd, ["-r", str(rule), "--frame-ratio", "0.5", "--workers", "8"])
 
@@ -379,9 +416,17 @@ def test_check_cli_explicit_values_override_rule(monkeypatch, tmp_path):
     assert captured["request"].workers == 8
 
 
-def test_check_rule_fills_unspecified_cli_values(...):
+def test_check_rule_fills_unspecified_policy_values(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setattr("health_tools.api.run_check", lambda request, context=None: captured.setdefault("request", request) or CheckResult(BatchResult("check")))
+    rule = tmp_path / "check.yaml"
+    rule.write_text("version: '1.0'\nframe_ratio: 2\naccuracy:\n  enabled: true\n  ref_column: REF\n  online_column: ONLINE\n", encoding="utf-8")
+
+    result = CliRunner().invoke(check_cmd, ["-r", str(rule), "--workers", "8"])
+
+    assert result.exit_code == 0, result.output
     assert captured["request"].frame_ratio == 2.0
-    assert captured["request"].workers == 2
+    assert captured["request"].workers == 8
 ```
 
 - [ ] **Step 2: 运行测试确认 `-r` 尚不存在**
@@ -411,7 +456,7 @@ def parse_accuracy_min(value: str) -> AccuracyMarkRule:
 
 - [ ] **Step 4: 用 Click ParameterSource 合并配置**
 
-给 `check_cmd` 增加 `@click.pass_context`，为每个参数执行：
+给 `check_cmd` 增加 `@click.pass_context`，只对 YAML 允许的业务策略参数执行合并；输入/输出、chip、sort、report、sort-output、workers、verbose 不参与规则合并：
 
 ```python
 def _effective(ctx, name, cli_value, rule_values, default):
@@ -441,7 +486,8 @@ accuracy_marks: Tuple[AccuracyMarkRule, ...] = ()
 
 - [ ] **Step 6: 更新帮助和请求透传测试**
 
-断言 `--help` 包含所有新增选项，并检查 `--sort` 模式也能从规则取得 `report/sort_output`。
+断言 `--help` 包含所有新增选项，并检查 `--sort` 模式在未提供 `--report` 时自动推导本次 check 的报告路径，
+`--sort-output` 仍必须由 CLI/API 提供，规则不能覆盖这些运行路径。
 
 - [ ] **Step 7: 运行 CLI 相关测试**
 
@@ -790,7 +836,8 @@ Expected: FAIL，缺少新增关键词。
 
 - [ ] **Step 4: 更新 `docs/rules.md`**
 
-新增 `check` 规则章节，原样包含完整 YAML，逐字段表格说明所有当前参数与 accuracy marks；规则导航表将 `check` 改为 `-r/--rule`，chip 仍由规则或 `-c` 选择。
+新增 `check` 规则章节，原样包含完整 YAML，逐字段表格说明业务策略与 accuracy marks；明确 `input/output/chip/sort/report/sort_output/workers/verbose`
+不允许出现在 YAML，规则导航表将 `check` 改为 `-r/--rule`；芯片只能由 `-c/--chip` 或 API 请求选择，输入/输出和 sort 路径只能由外部参数提供。
 
 - [ ] **Step 5: 更新技能参考**
 
