@@ -5,6 +5,7 @@ import pytest
 from health_tools.core.check_sampling import (
     build_sample_positions,
     normalize_frame_rate,
+    predict_sample_rate_from_timestamp,
     sample_check_seconds,
 )
 
@@ -74,3 +75,8 @@ def test_normalize_frame_rate_rejects_non_positive_or_fractional_values(value):
 
 def test_normalize_frame_rate_accepts_integer_float():
     assert normalize_frame_rate(25.0) == 25
+
+
+def test_predict_sample_rate_from_timestamp_uses_median_millisecond_interval():
+    frame = pd.DataFrame({"TimeStamp": [1000, 1010, 1020, 1030]})
+    assert predict_sample_rate_from_timestamp(frame, timestamp_column="TimeStamp") == 100

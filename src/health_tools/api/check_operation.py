@@ -735,7 +735,11 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     def check_one(
         path: Path,
     ) -> Tuple[ItemResult, Optional[Any], Optional[Any], Optional[Any], Optional[Any]]:
-        from health_tools.core.check_sampling import build_sample_positions, sample_check_seconds
+        from health_tools.core.check_sampling import (
+            build_sample_positions,
+            predict_sample_rate_from_timestamp,
+            sample_check_seconds,
+        )
 
         chip = request.chip_name or _detect_chip(path)
         if not chip:
@@ -792,25 +796,32 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 report.results.append(checker.check_data_centering(frame, request.center_ratio))
             if "agc" in checks:
                 report.results.append(checker.check_agc_changes(frame))
+            timestamp_result = None
             if request.timestamp_column:
-                report.results.append(
-                    checker.check_timestamp_interval(
-                        frame,
-                        request.timestamp_column,
-                        ratio_tolerance=request.timestamp_ratio,
-                        ms_tolerance=request.timestamp_ms,
-                        threshold_ratio=request.timestamp_fail_ratio,
-                        expected_base_ms=request.timestamp_base_ms,
-                    )
+                timestamp_result = checker.check_timestamp_interval(
+                    frame,
+                    request.timestamp_column,
+                    ratio_tolerance=request.timestamp_ratio,
+                    ms_tolerance=request.timestamp_ms,
+                    threshold_ratio=request.timestamp_fail_ratio,
+                    expected_base_ms=request.timestamp_base_ms,
                 )
+                report.results.append(timestamp_result)
             ref_enabled = request.checks is None or "ref" in checks
             sample_positions = np.empty(0, dtype=np.int64)
             sampling_online = request.accuracy_online_column or "ALGO_RESULT0"
+            sampling_rate = request.ref_sample_rate
+            if timestamp_result is not None and timestamp_result.status == "FAIL":
+                predicted_rate = predict_sample_rate_from_timestamp(
+                    frame, timestamp_column=request.timestamp_column or ""
+                )
+                if predicted_rate is not None:
+                    sampling_rate = float(predicted_rate)
             if (
                 ref_enabled and (request.ref_hr_column or request.ref_spo2_column)
             ) or request.accuracy_enabled:
                 sample_positions = build_sample_positions(
-                    frame, sample_rate=request.ref_sample_rate, online_column=sampling_online
+                    frame, sample_rate=sampling_rate, online_column=sampling_online
                 )
             evidence_frame = None
             if ref_enabled and request.ref_hr_column:

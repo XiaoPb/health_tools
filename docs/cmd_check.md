@@ -160,6 +160,8 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 - 静止：原始高频数据先从 Online 首个有限非零值开始按采样率取每秒第一帧，再按秒样本判断；
   连续相同有效值超过 `--ref-stale-seconds` 秒即异常。`TimeStamp`、Ref、Online、Comp
   始终取同一原始行。该秒采样也用于 Online/Comp 准确度，逐帧完整性、范围、ACC 等检查不降采样。
+  若时间戳检查为 FAIL，则使用时间戳有效间隔中位数预测实际采样率进行抽样；时间戳正常时使用
+  指定的 `--ref-sample-rate`（默认 25 Hz）。
 
 任一条件异常都会使对应的“心率金标”或“血氧金标”检查项为 `FAIL`。主报告摘要会写明
 范围异常数、非零占比、阶跃次数和最长静止秒数；`check_report_compact.csv` 也会同步写入这些
