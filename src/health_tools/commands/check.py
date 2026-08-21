@@ -3,11 +3,18 @@
 import csv
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import click
+from click.core import ParameterSource
 from rich.console import Console
 from rich.table import Table
+
+from health_tools.commands.accuracy_options import (
+    parse_accuracy_min,
+    parse_accuracy_thresholds,
+    parse_online_comp_gap,
+)
 
 console = Console()
 
@@ -17,6 +24,7 @@ if TYPE_CHECKING:
 
 @click.command("check")
 @click.option("-i", "--input", "input_path", help="输入CSV文件或目录")
+@click.option("-r", "--rule", "rule_file", help="check 规则文件路径或内置规则名")
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)，不指定则自动识别")
 @click.option(
     "--checks",
@@ -29,7 +37,7 @@ if TYPE_CHECKING:
 @click.option("--center-ratio", type=float, default=5.0, help="数据居中异常允许比例 (%, 默认5)")
 @click.option("--ipd-ratio", type=float, default=1.0, help="Ipd超差允许比例 (%, 默认1)")
 @click.option("--acc-ratio", type=float, default=1.0, help="ACC异常帧允许比例 (%, 默认1)")
-@click.option("--acc-axis", is_flag=True, help="ACC单轴异常也计入结果")
+@click.option("--acc-axis/--no-acc-axis", default=False, help="ACC单轴异常也计入结果")
 @click.option("--check-timestamp", "timestamp_column", help="指定时间戳列并检查间隔稳定性")
 @click.option(
     "--timestamp-ratio", type=float, default=20.0, help="时间戳间隔百分比容差 (%, 默认20)"
@@ -73,6 +81,32 @@ if TYPE_CHECKING:
     default=None,
     help="按文件相对路径提取场景的正则（需包含命名组 scene）",
 )
+@click.option("--accuracy/--no-accuracy", "accuracy_enabled", default=False, help="统计准确度")
+@click.option("--accuracy-ref-column", help="准确度金标列名")
+@click.option("--accuracy-online-column", help="Online 结果列名")
+@click.option("--accuracy-comp-column", help="Comp 结果列名")
+@click.option(
+    "--accuracy-thresholds",
+    callback=parse_accuracy_thresholds,
+    help="逗号分隔的准确度阈值；默认采用规则或 5,10,15",
+)
+@click.option(
+    "--accuracy-inclusive/--accuracy-strict",
+    default=False,
+    help="阈值命中使用 <=；默认严格使用 <",
+)
+@click.option(
+    "--accuracy-min",
+    multiple=True,
+    metavar="COMPARISON:METRIC:MIN:CATEGORY[:LABEL]",
+    help="标定 Online/Comp 准确度低于阈值的文件",
+)
+@click.option(
+    "--online-comp-gap",
+    multiple=True,
+    metavar="METRIC:MIN_GAP:CATEGORY[:LABEL]",
+    help="标定 Online 准确度低于 Comp 的文件",
+)
 @click.option(
     "-o",
     "--output",
@@ -88,8 +122,11 @@ if TYPE_CHECKING:
 @click.option("--sort-output", "sort_output", type=click.Path(), default=None, help="分拣输出目录")
 @click.option("-w", "--workers", type=int, default=4, help="并行线程数 (默认4)")
 @click.option("-v", "--verbose", is_flag=True, help="显示详细信息")
+@click.pass_context
 def check_cmd(
+    ctx: click.Context,
     input_path: Optional[str],
+    rule_file: Optional[str],
     chip_name: Optional[str],
     checks: Optional[str],
     tolerance: int,
@@ -111,6 +148,14 @@ def check_cmd(
     ref_stale_seconds: float,
     ref_step_threshold: float,
     scene_regex: Optional[str],
+    accuracy_enabled: bool,
+    accuracy_ref_column: Optional[str],
+    accuracy_online_column: Optional[str],
+    accuracy_comp_column: Optional[str],
+    accuracy_thresholds: Optional[Tuple[float, ...]],
+    accuracy_inclusive: bool,
+    accuracy_min: Tuple[str, ...],
+    online_comp_gap: Tuple[str, ...],
     output_path: Optional[str],
     sort_report: bool,
     report_path: Optional[str],
@@ -121,12 +166,93 @@ def check_cmd(
     """检查PPG数据完整性和正确性"""
     from health_tools.api import CheckRequest, run_check
     from health_tools.commands.api_support import CliExecution, invoke_api, print_batch
+    from health_tools.models.rules import CheckAccuracyRule, CheckRule
+    from health_tools.rules.loader import RuleLoader
+
+    try:
+        rule = RuleLoader.load_check_rule(rule_file) if rule_file else CheckRule()
+    except Exception as exc:
+        raise click.ClickException(f"无法加载 check 规则 {rule_file}: {exc}") from exc
+
+    def effective(name: str, cli_value: Any, rule_value: Any, default: Any) -> Any:
+        if ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE:
+            return cli_value
+        return rule_value if rule_file else default
+
+    ratios = rule.ratios
+    timestamp = rule.timestamp
+    reference = rule.reference
+    accuracy = rule.accuracy if rule_file else CheckAccuracyRule()
+    checks = effective("checks", checks, ",".join(rule.checks), None)
+    chip_name = effective("chip_name", chip_name, rule.chip, None)
+    tolerance = effective("tolerance", tolerance, rule.tolerance, 50)
+    static_min = effective("static_min", static_min, rule.static_min, 5)
+    range_ratio = effective("range_ratio", range_ratio, ratios.range, 1.0)
+    frame_ratio = effective("frame_ratio", frame_ratio, ratios.frame, 1.0)
+    center_ratio = effective("center_ratio", center_ratio, ratios.center, 5.0)
+    ipd_ratio = effective("ipd_ratio", ipd_ratio, ratios.ipd, 1.0)
+    acc_ratio = effective("acc_ratio", acc_ratio, ratios.acc, 1.0)
+    acc_axis = effective("acc_axis", acc_axis, rule.acc_axis, False)
+    timestamp_column = effective("timestamp_column", timestamp_column, timestamp.column, None)
+    timestamp_ratio = effective("timestamp_ratio", timestamp_ratio, timestamp.ratio, 20.0)
+    timestamp_ms = effective("timestamp_ms", timestamp_ms, timestamp.ms, None)
+    timestamp_fail_ratio = effective(
+        "timestamp_fail_ratio", timestamp_fail_ratio, timestamp.fail_ratio, 1.0
+    )
+    timestamp_base_ms = effective("timestamp_base_ms", timestamp_base_ms, timestamp.base_ms, None)
+    ref_hr_column = effective("ref_hr_column", ref_hr_column, reference.hr_column, None)
+    ref_spo2_column = effective("ref_spo2_column", ref_spo2_column, reference.spo2_column, None)
+    ref_sample_rate = effective("ref_sample_rate", ref_sample_rate, reference.sample_rate, 25.0)
+    ref_stale_seconds = effective(
+        "ref_stale_seconds", ref_stale_seconds, reference.stale_seconds, 5.0
+    )
+    ref_step_threshold = effective(
+        "ref_step_threshold", ref_step_threshold, reference.step_threshold, 8.0
+    )
+    scene_regex = effective("scene_regex", scene_regex, rule.scene_regex, None)
+    accuracy_enabled = effective("accuracy_enabled", accuracy_enabled, accuracy.enabled, False)
+    accuracy_ref_column = effective(
+        "accuracy_ref_column", accuracy_ref_column, accuracy.ref_column, "REF_RESULT0"
+    )
+    accuracy_online_column = effective(
+        "accuracy_online_column", accuracy_online_column, accuracy.online_column, "ALGO_RESULT0"
+    )
+    accuracy_comp_column = effective(
+        "accuracy_comp_column", accuracy_comp_column, accuracy.comp_column, "COMP_RESULT0"
+    )
+    accuracy_inclusive = effective(
+        "accuracy_inclusive", accuracy_inclusive, accuracy.inclusive, False
+    )
+
+    try:
+        cli_marks = tuple(
+            parse_accuracy_min(value, index) for index, value in enumerate(accuracy_min)
+        ) + tuple(
+            parse_online_comp_gap(value, len(accuracy_min) + index)
+            for index, value in enumerate(online_comp_gap)
+        )
+    except click.BadParameter as exc:
+        raise click.UsageError(str(exc)) from exc
+    accuracy_marks = cli_marks if accuracy_min or online_comp_gap else accuracy.marks
+
+    inferred_report_path = report_path
+    if sort_report and inferred_report_path is None:
+        if output_path:
+            inferred_report_path = output_path
+        elif input_path:
+            input_target = Path(input_path)
+            inferred_report_path = str(
+                input_target.parent / "check_report.csv"
+                if input_target.suffix
+                else input_target / "check_report.csv"
+            )
 
     with CliExecution(console) as context:
         result = invoke_api(
             lambda: run_check(
                 CheckRequest(
                     input_path=Path(input_path) if input_path else None,
+                    rule_file=rule_file,
                     chip_name=chip_name,
                     checks=checks,
                     tolerance=tolerance,
@@ -148,9 +274,18 @@ def check_cmd(
                     ref_stale_seconds=ref_stale_seconds,
                     ref_step_threshold=ref_step_threshold,
                     scene_regex=scene_regex,
+                    accuracy_enabled=accuracy_enabled,
+                    accuracy_ref_column=accuracy_ref_column,
+                    accuracy_online_column=accuracy_online_column,
+                    accuracy_comp_column=accuracy_comp_column,
+                    accuracy_methods=accuracy.methods,
+                    accuracy_thresholds=accuracy_thresholds,
+                    accuracy_custom_thresholds=accuracy.thresholds,
+                    accuracy_inclusive=accuracy_inclusive,
+                    accuracy_marks=accuracy_marks,
                     output_path=Path(output_path) if output_path else None,
                     sort_report=sort_report,
-                    report_path=Path(report_path) if report_path else None,
+                    report_path=Path(inferred_report_path) if inferred_report_path else None,
                     sort_output=Path(sort_output) if sort_output else None,
                     workers=workers,
                 ),

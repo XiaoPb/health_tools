@@ -6,6 +6,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Tuple
 
+from health_tools.models.rules import AccuracyMarkRule
+
 
 def _freeze(value: Any) -> Any:
     if isinstance(value, Mapping):
@@ -498,6 +500,7 @@ class AnalyzeResult:
 @dataclass(frozen=True)
 class CheckRequest:
     input_path: Optional[Path] = None
+    rule_file: Optional[str] = None
     chip_name: Optional[str] = None
     checks: Optional[str] = None
     tolerance: int = 50
@@ -524,3 +527,12 @@ class CheckRequest:
     report_path: Optional[Path] = None
     sort_output: Optional[Path] = None
     workers: int = 4
+    accuracy_enabled: bool = False
+    accuracy_ref_column: Optional[str] = None
+    accuracy_online_column: Optional[str] = None
+    accuracy_comp_column: Optional[str] = None
+    accuracy_methods: Tuple[str, ...] = ()
+    accuracy_thresholds: Optional[Tuple[float, ...]] = None
+    accuracy_custom_thresholds: Tuple[Mapping[str, Any], ...] = ()
+    accuracy_inclusive: bool = False
+    accuracy_marks: Tuple[AccuracyMarkRule, ...] = ()
