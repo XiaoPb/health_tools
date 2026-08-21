@@ -47,6 +47,7 @@ class FileCheckReport:
     scene: str = "default"
     results: List[CheckResult] = field(default_factory=list)
     accuracy_result: Optional["CheckAccuracyResult"] = None
+    accuracy_methods: Tuple[str, ...] = ()
 
     @property
     def all_passed(self) -> bool:

@@ -227,7 +227,15 @@ _DEFAULT_ACCURACY_METHODS = (
 
 
 def _accuracy_methods(reports) -> List[str]:
-    methods = list(_DEFAULT_ACCURACY_METHODS)
+    configured = next(
+        (
+            tuple(getattr(report, "accuracy_methods", ()))
+            for report in reports
+            if getattr(report, "accuracy_methods", ())
+        ),
+        (),
+    )
+    methods = list(configured or _DEFAULT_ACCURACY_METHODS)
     for report in reports:
         result = getattr(report, "accuracy_result", None)
         for values in (getattr(result, "online", None), getattr(result, "comp", None)):
@@ -240,7 +248,7 @@ def _accuracy_methods(reports) -> List[str]:
 
 def _accuracy_header(prefix: str, methods: List[str]) -> List[str]:
     return [f"{prefix}准确度样本数"] + [
-        f"{prefix} {('相关系数' if method == 'correlation' else format_metric_name(method))}{'准确度' if method.startswith('within_') else ''}"
+        f"{prefix}{('' if method == 'correlation' else ' ')}{('相关系数' if method == 'correlation' else format_metric_name(method))}{'准确度' if method.startswith('within_') else ''}"
         for method in methods
     ]
 
@@ -564,7 +572,9 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                         "总数": (values.get("samples", "") if values else ""),
                         "异常占比": _format_compact_percent(metric_value),
                         "说明": mark.label,
-                        "比较对象": "Ref",
+                        "比较对象": (
+                            "Online vs Comp" if mark.comparison == "online_below_comp" else "Ref"
+                        ),
                         "准确度指标": format_metric_name(mark.metric),
                         "准确度阈值": threshold,
                     }
@@ -820,6 +830,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                         marks=tuple(request.accuracy_marks),
                     ),
                 )
+                report.accuracy_methods = tuple(request.accuracy_methods)
             return ItemResult(ItemStatus.OK, str(path)), report, acc, ipd_detail
         except Exception as exc:
             return (

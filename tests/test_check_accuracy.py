@@ -209,3 +209,24 @@ def test_compact_report_includes_accuracy_mark_details(tmp_path) -> None:
     assert rows[0]["状态"] == "WARNING"
     assert rows[0]["说明"] == "Online准确度低"
     assert rows[0]["准确度指标"] == "±5BPM"
+
+
+def test_check_report_uses_resolved_accuracy_methods(tmp_path) -> None:
+    report = FileCheckReport(
+        tmp_path / "custom.csv",
+        "gh3036",
+        accuracy_methods=("mae", "correlation"),
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 2, "mae": 1.0, "correlation": 0.8},
+            comp=None,
+        ),
+    )
+    output = tmp_path / "custom_report.csv"
+
+    _save_report([report], {}, output, tmp_path, False)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        header = next(csv.reader(handle))
+    assert "Online MAE" in header
+    assert "Online相关系数" in header
+    assert "Online ±5BPM准确度" not in header
