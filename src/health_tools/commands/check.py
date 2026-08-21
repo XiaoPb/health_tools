@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from health_tools.commands.accuracy_options import (
+    OrderedAccuracyMarksCommand,
     parse_accuracy_min,
     parse_accuracy_thresholds,
     parse_online_comp_gap,
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     pass
 
 
-@click.command("check")
+@click.command("check", cls=OrderedAccuracyMarksCommand)
 @click.option("-i", "--input", "input_path", help="输入CSV文件或目录")
 @click.option("-r", "--rule", "rule_file", help="check 规则文件路径或内置规则名")
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)，不指定则自动识别")
@@ -225,12 +226,24 @@ def check_cmd(
     )
 
     try:
+        ordered_mark_arguments = ctx.meta.get("accuracy_mark_arguments", ())
         cli_marks = tuple(
-            parse_accuracy_min(value, index) for index, value in enumerate(accuracy_min)
-        ) + tuple(
-            parse_online_comp_gap(value, len(accuracy_min) + index)
-            for index, value in enumerate(online_comp_gap)
+            (
+                parse_accuracy_min(value, index)
+                if name == "accuracy_min"
+                else parse_online_comp_gap(value, index)
+            )
+            for index, (name, value) in enumerate(ordered_mark_arguments)
         )
+        categories = [mark.category for mark in cli_marks]
+        if len(categories) != len(set(categories)):
+            duplicate = next(category for category in categories if categories.count(category) > 1)
+            raise click.BadParameter(f"accuracy mark category 重复: {duplicate}")
+        mark_ids = [mark.id for mark in cli_marks]
+        if len(mark_ids) != len(set(mark_ids)) or any(
+            not mark_id.replace("_", "").replace("-", "").isalnum() for mark_id in mark_ids
+        ):
+            raise click.BadParameter("accuracy mark id 必须唯一且为安全的单段名称")
     except click.BadParameter as exc:
         raise click.UsageError(str(exc)) from exc
     accuracy_marks = cli_marks if accuracy_min or online_comp_gap else accuracy.marks

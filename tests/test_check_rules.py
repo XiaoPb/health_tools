@@ -144,6 +144,53 @@ def test_check_cli_accuracy_marks_replace_rule_marks(monkeypatch, tmp_path):
     assert marks[1].min_gap == 10.0
 
 
+def test_check_cli_accuracy_marks_keep_reverse_interleaved_order(monkeypatch):
+    captured = _capture_check_request(monkeypatch)
+
+    result = CliRunner().invoke(
+        check_cmd,
+        [
+            "--online-comp-gap",
+            "within_5:10:first_gap",
+            "--accuracy-min",
+            "online:within_5:80:online_low",
+            "--online-comp-gap",
+            "within_10:15:second_gap",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    marks = captured["request"].accuracy_marks
+    assert [mark.category for mark in marks] == ["first_gap", "online_low", "second_gap"]
+    assert len({mark.id for mark in marks}) == 3
+
+
+@pytest.mark.parametrize("category", ["../outside", "nested/path", r"nested\path", "has space"])
+def test_check_cli_accuracy_marks_reject_unsafe_category(category):
+    result = CliRunner().invoke(
+        check_cmd,
+        ["--accuracy-min", f"online:within_5:80:{category}"],
+    )
+
+    assert result.exit_code == 2
+    assert "安全的单段目录名" in result.output
+
+
+def test_check_cli_accuracy_marks_reject_duplicate_category_across_option_types():
+    result = CliRunner().invoke(
+        check_cmd,
+        [
+            "--accuracy-min",
+            "online:within_5:80:duplicate",
+            "--online-comp-gap",
+            "within_5:10:duplicate",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "category 重复" in result.output
+
+
 def test_check_sort_infers_report_from_check_output_path(monkeypatch, tmp_path):
     captured = _capture_check_request(monkeypatch)
     report = tmp_path / "reports" / "custom.csv"
