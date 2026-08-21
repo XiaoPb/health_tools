@@ -219,6 +219,7 @@ reference:
   sample_rate: 25.0
   stale_seconds: 5.0
   step_threshold: 8.0
+  warning_seconds: 10.0
 scene_regex: null
 accuracy:
   enabled: false

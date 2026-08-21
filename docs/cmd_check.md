@@ -36,6 +36,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--ref-sample-rate` | 金标采样率（Hz），默认 25 |
 | `--ref-stale-seconds` | 金标连续不变判定时长（秒），默认 5 |
 | `--ref-step-threshold` | 金标相邻值阶跃阈值，默认 8；绝对变化严格大于该值判定阶跃 |
+| `--ref-warning-seconds` | 金标异常起始警告窗口（秒），默认 10；窗口内异常为 WARNING，窗口外异常为 FAIL |
 | `--reference-detail-output` | 输出金标异常文件的秒采样 `time,ref,online,comp` 证据 CSV 目录 |
 | `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，未匹配时为 `default` |
 | `--accuracy/--no-accuracy` | 启用或禁用 Online/Comp 对 Ref 的准确度统计 |
@@ -164,11 +165,12 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
   若时间戳检查为 FAIL，则使用时间戳有效间隔中位数预测实际采样率进行抽样；时间戳正常时使用
   指定的 `--ref-sample-rate`（默认 25 Hz）。
 
-任一条件异常都会使对应的“心率金标”或“血氧金标”检查项为 `FAIL`。主报告摘要会写明
+任一条件异常都会使对应的“心率金标”或“血氧金标”检查项产生 `WARNING` 或 `FAIL`：异常发生在
+起始 `--ref-warning-seconds` 秒内时为 `WARNING`，只要有异常发生在窗口外则为 `FAIL`。主报告摘要会写明
 范围异常数、非零占比、阶跃次数和最长静止秒数；`check_report_compact.csv` 也会同步写入这些
 指标及阈值列。
 
-启用 `--reference-detail-output` 后，仅对金标检查为 `FAIL` 的文件输出四列证据 CSV，目录
+启用 `--reference-detail-output` 后，对金标检查为 `WARNING` 或 `FAIL` 的文件输出四列证据 CSV，目录
 结构镜像输入目录；已有目标文件不会覆盖。Online 没有有效非零起点时金标明确失败，并输出表头。
 
 ## 检查结果

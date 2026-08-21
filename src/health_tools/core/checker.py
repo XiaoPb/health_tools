@@ -477,6 +477,7 @@ class DataChecker:
         sample_rate: float = 25.0,
         stale_seconds: float = 5.0,
         step_threshold: float = 8.0,
+        warning_seconds: float = 10.0,
     ) -> CheckResult:
         """检查心率/血氧金标的范围、有效率、阶跃和静止异常。"""
         name_map = {"hr": "心率金标", "spo2": "血氧金标"}
@@ -491,6 +492,8 @@ class DataChecker:
             or stale_seconds <= 0
             or not np.isfinite(step_threshold)
             or step_threshold < 0
+            or not np.isfinite(warning_seconds)
+            or warning_seconds <= 0
         ):
             return CheckResult(name, False, "金标检测参数无效")
         if column not in df.columns:
@@ -560,22 +563,28 @@ class DataChecker:
             else ""
         )
         abnormal_times = []
+        stale_positions = []
         if step_count:
             abnormal_times.extend(f"阶跃@{_time_at(int(index))}" for index in step_indices[:10])
-        if stale and timestamp is not None:
+        if stale:
             for _, run in valid_values.notna().groupby(groups):
                 indices = run.index[run.to_numpy()]
                 if len(indices) < 2:
                     continue
                 start, end = indices[0], indices[-1]
-                start_time, end_time = timestamp.loc[start], timestamp.loc[end]
-                duration = (
-                    float(end_time - start_time) / 1000.0
-                    if pd.notna(start_time) and pd.notna(end_time) and end_time >= start_time
-                    else len(indices) / sample_rate
-                )
+                if timestamp is not None:
+                    start_time, end_time = timestamp.loc[start], timestamp.loc[end]
+                    duration = (
+                        float(end_time - start_time) / 1000.0
+                        if pd.notna(start_time) and pd.notna(end_time) and end_time >= start_time
+                        else len(indices) / sample_rate
+                    )
+                else:
+                    duration = len(indices) / sample_rate
                 if duration > stale_seconds:
-                    abnormal_times.append(f"静止@{_time_at(int(start))}")
+                    stale_positions.append(int(start))
+                    if timestamp is not None:
+                        abnormal_times.append(f"静止@{_time_at(int(start))}")
         if range_count:
             abnormal_times.extend(
                 f"范围@{_time_at(int(index))}"
@@ -597,6 +606,7 @@ class DataChecker:
                 "static_frame_threshold": float(stale_limit),
                 "longest_static_seconds": float(longest_static_seconds),
                 "static_second_threshold": float(stale_seconds),
+                "warning_seconds": float(warning_seconds),
             }
         }
         reasons = []
@@ -611,11 +621,41 @@ class DataChecker:
         if stale:
             reasons.append(f"最长静止 {longest_static_seconds:g} 秒，超过 {stale_seconds:g} 秒")
         summary = "；".join(reasons) if reasons else "金标数据正常"
+        anomaly_positions = set()
+        if range_count:
+            anomaly_positions.update(int(index) for index in np.flatnonzero(range_mask.to_numpy()))
+        if nonzero_ratio < 70.0:
+            anomaly_positions.update(
+                int(index) for index in np.flatnonzero((~values.notna() | values.eq(0)).to_numpy())
+            )
+        if step_count:
+            anomaly_positions.update(int(index) for index in step_indices)
+        anomaly_positions.update(stale_positions)
+
+        timestamp_start = None
+        if timestamp is not None:
+            valid_timestamp = timestamp.dropna()
+            if not valid_timestamp.empty:
+                timestamp_start = float(valid_timestamp.iloc[0])
+
+        def _in_warning_window(index: int) -> bool:
+            if timestamp_start is not None and timestamp is not None:
+                value = timestamp.loc[index]
+                if pd.notna(value):
+                    return float(value) - timestamp_start <= warning_seconds * 1000.0
+            return index / sample_rate <= warning_seconds
+
+        warning_only = (
+            bool(reasons)
+            and bool(anomaly_positions)
+            and all(_in_warning_window(index) for index in anomaly_positions)
+        )
+        status = "WARNING" if warning_only else ("FAIL" if reasons else "PASS")
         return CheckResult(
             name,
-            not reasons,
+            not reasons or warning_only,
             summary,
-            status="FAIL" if reasons else "PASS",
+            status=status,
             channel_metrics=metrics,
         )
 

@@ -201,7 +201,7 @@ class RuleValidator:
                         or not float(value).is_integer()
                     ):
                         errors.append("reference.sample_rate 必须是正整数")
-                for name in ("stale_seconds", "step_threshold"):
+                for name in ("stale_seconds", "step_threshold", "warning_seconds"):
                     errors.extend(
                         RuleValidator._validate_non_negative_number(
                             reference, name, f"reference.{name}"

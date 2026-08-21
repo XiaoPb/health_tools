@@ -540,6 +540,7 @@ class CheckRequest:
     ref_sample_rate: float = 25.0
     ref_stale_seconds: float = 5.0
     ref_step_threshold: float = 8.0
+    ref_warning_seconds: float = 10.0
     scene_regex: Optional[str] = None
     output_path: Optional[Path] = None
     sort_report: bool = False

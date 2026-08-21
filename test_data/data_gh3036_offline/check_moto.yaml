@@ -29,6 +29,7 @@ reference:
   sample_rate: 25.0
   stale_seconds: 30.0
   step_threshold: 15.0
+  warning_seconds: 10.0
 
 scene_regex: '(?P<scene>[^/\\]+)[/\\][^/\\]+.csv'
 

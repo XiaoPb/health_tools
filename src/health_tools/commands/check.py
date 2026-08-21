@@ -77,6 +77,13 @@ if TYPE_CHECKING:
     help="金标阶跃相邻变化阈值",
 )
 @click.option(
+    "--ref-warning-seconds",
+    type=click.FloatRange(min=0.0, min_open=True),
+    default=10.0,
+    show_default=True,
+    help="金标异常在起始窗口内记为WARNING的时长（秒）",
+)
+@click.option(
     "--reference-detail-output",
     type=click.Path(path_type=Path),
     default=None,
@@ -154,6 +161,7 @@ def check_cmd(
     ref_sample_rate: float,
     ref_stale_seconds: float,
     ref_step_threshold: float,
+    ref_warning_seconds: float,
     reference_detail_output: Optional[Path],
     scene_regex: Optional[str],
     accuracy_enabled: bool,
@@ -216,6 +224,9 @@ def check_cmd(
     )
     ref_step_threshold = effective(
         "ref_step_threshold", ref_step_threshold, reference.step_threshold, 8.0
+    )
+    ref_warning_seconds = effective(
+        "ref_warning_seconds", ref_warning_seconds, reference.warning_seconds, 10.0
     )
     scene_regex = effective("scene_regex", scene_regex, rule.scene_regex, None)
     accuracy_enabled = effective("accuracy_enabled", accuracy_enabled, accuracy.enabled, False)
@@ -293,6 +304,7 @@ def check_cmd(
                     ref_sample_rate=ref_sample_rate,
                     ref_stale_seconds=ref_stale_seconds,
                     ref_step_threshold=ref_step_threshold,
+                    ref_warning_seconds=ref_warning_seconds,
                     reference_detail_output=reference_detail_output,
                     scene_regex=scene_regex,
                     accuracy_enabled=accuracy_enabled,

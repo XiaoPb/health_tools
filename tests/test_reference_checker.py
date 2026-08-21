@@ -29,7 +29,7 @@ def test_reference_range_and_nonzero_ratio():
     result = _checker().check_reference_data(
         pd.DataFrame({"REF_HR": [29, 241] + [0] * 98}), "REF_HR", "hr"
     )
-    assert result.status == "FAIL"
+    assert result.status == "WARNING"
 
 
 def test_reference_step_and_static_are_independent():
@@ -44,22 +44,40 @@ def test_reference_step_and_static_are_independent():
         "REF_SPO2",
         "spo2",
     )
-    assert result.status == "FAIL"
+    assert result.status == "WARNING"
     result = _checker().check_reference_data(
         pd.DataFrame({"REF_SPO2": [80, 89, 90]}), "REF_SPO2", "spo2"
     )
-    assert result.status == "FAIL"
+    assert result.status == "WARNING"
 
 
 def test_reference_step_threshold_is_configurable():
     result = _checker().check_reference_data(
         pd.DataFrame({"REF_HR": [80, 86, 87]}), "REF_HR", "hr", step_threshold=5
     )
-    assert result.status == "FAIL"
+    assert result.status == "WARNING"
     result = _checker().check_reference_data(
         pd.DataFrame({"REF_HR": [80, 86, 87]}), "REF_HR", "hr", step_threshold=6
     )
     assert result.status == "PASS"
+
+
+def test_reference_anomaly_in_warning_window_is_warning():
+    frame = pd.DataFrame({"time": [0, 5000, 10000], "REF_HR": [80, 100, 100]})
+    result = _checker().check_reference_data(
+        frame, "REF_HR", "hr", sample_rate=1, step_threshold=15, warning_seconds=10
+    )
+    assert result.status == "WARNING"
+    assert result.passed
+
+
+def test_reference_anomaly_after_warning_window_is_fail():
+    frame = pd.DataFrame({"time": [0, 5000, 11000], "REF_HR": [80, 80, 100]})
+    result = _checker().check_reference_data(
+        frame, "REF_HR", "hr", sample_rate=1, step_threshold=15, warning_seconds=10
+    )
+    assert result.status == "FAIL"
+    assert result.failed
 
 
 def test_reference_metrics_include_max_step_and_abnormal_times():
@@ -126,6 +144,7 @@ def test_check_request_keeps_reference_options():
         ref_sample_rate=50,
         ref_stale_seconds=3,
         ref_step_threshold=6,
+        ref_warning_seconds=12,
     )
 
     assert request.ref_hr_column == "REF_HR"
@@ -133,6 +152,7 @@ def test_check_request_keeps_reference_options():
     assert request.ref_sample_rate == 50
     assert request.ref_stale_seconds == 3
     assert request.ref_step_threshold == 6
+    assert request.ref_warning_seconds == 12
 
 
 def test_check_request_reference_defaults():
@@ -143,6 +163,7 @@ def test_check_request_reference_defaults():
     assert request.ref_sample_rate == 25.0
     assert request.ref_stale_seconds == 5.0
     assert request.ref_step_threshold == 8.0
+    assert request.ref_warning_seconds == 10.0
 
 
 def test_check_help_lists_reference_options():
@@ -154,6 +175,7 @@ def test_check_help_lists_reference_options():
     assert "--ref-sample-rate" in result.output
     assert "--ref-stale-seconds" in result.output
     assert "--ref-step-threshold" in result.output
+    assert "--ref-warning-seconds" in result.output
 
 
 def test_check_rejects_invalid_reference_numeric_options():
@@ -163,6 +185,7 @@ def test_check_rejects_invalid_reference_numeric_options():
         ("--ref-sample-rate", "0"),
         ("--ref-stale-seconds", "0"),
         ("--ref-step-threshold", "-1"),
+        ("--ref-warning-seconds", "0"),
     ):
         result = runner.invoke(check_cmd, [option, value])
         assert result.exit_code == 2
@@ -177,6 +200,7 @@ def test_run_check_rejects_invalid_reference_numeric_options(tmp_path):
         {"ref_sample_rate": 0},
         {"ref_stale_seconds": 0},
         {"ref_step_threshold": -1},
+        {"ref_warning_seconds": 0},
     ):
         request = CheckRequest(input_path=tmp_path, **values)
         try:
@@ -210,6 +234,8 @@ def test_check_passes_reference_options_to_request(monkeypatch, tmp_path):
             "3",
             "--ref-step-threshold",
             "6",
+            "--ref-warning-seconds",
+            "12",
         ],
     )
 
@@ -220,3 +246,4 @@ def test_check_passes_reference_options_to_request(monkeypatch, tmp_path):
     assert request.ref_sample_rate == 50.0
     assert request.ref_stale_seconds == 3.0
     assert request.ref_step_threshold == 6.0
+    assert request.ref_warning_seconds == 12.0

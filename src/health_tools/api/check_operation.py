@@ -743,6 +743,8 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
         raise RequestValidationError("ref_sample_rate 必须大于 0 且为有限数值")
     if not math.isfinite(request.ref_stale_seconds) or request.ref_stale_seconds <= 0:
         raise RequestValidationError("ref_stale_seconds 必须大于 0 且为有限数值")
+    if not math.isfinite(request.ref_warning_seconds) or request.ref_warning_seconds <= 0:
+        raise RequestValidationError("ref_warning_seconds 必须大于 0 且为有限数值")
     if not math.isfinite(request.ref_step_threshold) or request.ref_step_threshold < 0:
         raise RequestValidationError("ref_step_threshold 必须大于等于 0 且为有限数值")
     items: List[ItemResult] = []
@@ -860,6 +862,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                         1.0,
                         request.ref_stale_seconds,
                         request.ref_step_threshold,
+                        request.ref_warning_seconds,
                     )
                 )
             if ref_enabled and request.ref_spo2_column:
@@ -879,6 +882,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                         1.0,
                         request.ref_stale_seconds,
                         request.ref_step_threshold,
+                        request.ref_warning_seconds,
                     )
                 )
             if "ipd" in checks and chip.startswith("gh3036"):
@@ -929,11 +933,11 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     ),
                 )
                 report.accuracy_methods = tuple(accuracy_methods)
-            reference_failed = any(
-                result.name in {"心率金标", "血氧金标"} and result.status == "FAIL"
+            reference_abnormal = any(
+                result.name in {"心率金标", "血氧金标"} and result.status in {"WARNING", "FAIL"}
                 for result in report.results
             )
-            if request.reference_detail_output is not None and reference_failed:
+            if request.reference_detail_output is not None and reference_abnormal:
                 evidence_frame = sample_check_seconds(
                     frame,
                     positions=sample_positions,

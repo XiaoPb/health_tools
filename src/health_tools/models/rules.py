@@ -282,6 +282,7 @@ class CheckReferenceRule:
     sample_rate: float = 25.0
     stale_seconds: float = 5.0
     step_threshold: float = 8.0
+    warning_seconds: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -355,6 +356,7 @@ class CheckRule:
             sample_rate=float(configured.get("sample_rate", 25.0)),
             stale_seconds=float(configured.get("stale_seconds", 5.0)),
             step_threshold=float(configured.get("step_threshold", 8.0)),
+            warning_seconds=float(configured.get("warning_seconds", 10.0)),
         )
 
     @property
