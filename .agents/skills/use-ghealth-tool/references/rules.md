@@ -11,6 +11,7 @@
 | 日志行如何提取成列或多组输出 | `parse` |
 | 文件如何提取标签并放入目录 | `classify` |
 | 第三方 CSV 如何映射、计算、填充或合并金标 | `convert` |
+| 检查完整性、列语义、准确度和分拣策略 | `check` |
 | 心率/血氧使用哪些列、阈值、分类和指标 | `evaluate` |
 | 自动分析使用哪些特征、原因和原始数据措施 | `analysis` |
 
@@ -32,9 +33,16 @@
 - `extra_source.align.left_on/right_on` 必须成对存在；正则提取应包含捕获组。
 - classify 的目标路径相对于输出目录，不要写绝对路径。
 - evaluate 的列索引命令行参数是 1-based；规则默认优先使用列名。
+- check 规则可以声明 `chip`、`timestamp.column`、`reference.hr_column/spo2_column`、
+  `accuracy.ref_column/online_column/comp_column`、检查阈值和准确度标定；显式 `-c/--chip`
+  覆盖规则芯片。
+- check YAML 不写 `input`、`output`、`sort`、`report`、`sort_output`、`workers`、`verbose` 或
+  `rule`。这些是本次运行上下文。`--sort` 未给 `--report` 时自动读取本次 check 生成的报告。
+- check 报告在 `场景分类` 后提供 `主要异常项` 和 Online/Comp vs Ref 准确度列；标定 category
+  按优先级分拣到 `abnormal/<category>/`，不再生成 `other` 目录。
 
 ## 验证限制
 
-`validate` 对 chip、parse、classify、convert、evaluate、analysis 做基础结构检查。多
+`validate` 对 chip、parse、classify、convert、check、evaluate、analysis 做基础结构检查。多
 pattern parse 必须通过目标命令验证；分类条件、计算公式、外部数据对齐也只有读取真实样本
 才能证明正确。验证后检查输出列、行数、非零值和跳过原因。

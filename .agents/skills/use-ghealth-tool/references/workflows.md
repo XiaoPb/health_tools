@@ -30,11 +30,21 @@ ghealth_tool check -i converted.csv -c gh3036
 ## 检查并分拣
 
 ```bash
-ghealth_tool check -i data/ -c gh3036 -o data/check_report.csv
-ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/
+ghealth_tool check -i data/ -r default.yaml -o data/check_report.csv
+ghealth_tool check -i data/ --sort --sort-output sorted/
 ```
 
-第二条命令会移动报告中的源文件。执行前确认报告路径和 `文件相对路径` 列指向正确数据。
+规则中的 `chip`、时间戳/金标列和准确度策略会参与本次检查；显式 `-c/--chip` 覆盖规则芯片。
+第二条命令会自动读取本次 check 生成的 `data/check_report.csv` 并移动报告中的源文件。也可用
+`--report` 显式覆盖报告路径。执行前确认报告路径和 `文件相对路径` 列指向正确数据。
+
+启用准确度与标定示例：
+
+```bash
+ghealth_tool check -i data/ -r default.yaml --accuracy \
+  --accuracy-min 'online:within_5:80:accuracy_online_low:Online ±5准确度低' \
+  --online-comp-gap 'within_5:10:accuracy_online_below_comp:Online低于Comp 10个百分点'
+```
 
 ## 分类与评估
 

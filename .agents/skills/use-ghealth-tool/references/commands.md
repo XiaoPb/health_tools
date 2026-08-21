@@ -19,7 +19,7 @@
 | `config` (`cfg`) | 配置选项 | 用户配置 | 初始化规则、扫描离线版本、设置默认版本 |
 | `evaluate` (`eval`) | 结果目录 | 评估报告 | `--type hr|spo2`；列索引为 1-based 且优先于列名 |
 | `offline` | 芯片 CSV 目录 | 版本结果、PSD、准确度 | 会调用 exe 并移动不合规输入；支持多版本和 `--no-run` |
-| `check` (`chk`) | CSV/目录或报告 | 检查报告/分拣目录 | 普通检查需 `-i`；`--sort` 需 `--sort-output` |
+| `check` (`chk`) | CSV/目录或报告 | 检查报告/分拣目录 | 普通检查需 `-i`；可用 `-r` 复用 check YAML；`--sort` 需 `--sort-output`，未给 `--report` 时自动读取本次 check 报告 |
 | `analyze` (`ana`) | CSV/目录或 offline 结果 | 诊断报告和证据图 | `--focus` 强制深度分析；`--report` 选择 Markdown/PPT |
 
 ## 高影响参数
@@ -28,6 +28,8 @@
 - `parse --dry-run`：只加载和打印规则，不读取日志或证明正则能匹配。
 - `classify --move`：移动源文件。默认使用 `--copy`。
 - `check --sort`：根据报告移动源文件到正常/异常目录。
+- `check -r/--rule`：加载 check 规则；规则可声明 chip、时间戳/金标/准确度列和检查策略，不能声明输入输出路径、sort、report、workers 或 verbose。
+- `check --accuracy`：统计 Online vs Ref、Comp vs Ref；`--accuracy-min` 和 `--online-comp-gap` 可声明标定及分拣优先级。
 - `offline --version`、`--versions`、`--all-versions`：互斥。
 - `offline --no-run`：只处理已有结果，不运行输入预检和外部算法。
 - `offline --no-plot`、`--no-accuracy`：分别跳过耗时阶段。

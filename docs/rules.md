@@ -1,6 +1,6 @@
 # 规则文件格式
 
-GHealth Tools 使用 YAML 描述 CSV、日志解析、转换、分类、评估和分析行为。规则把设备差异和
+GHealth Tools 使用 YAML 描述 CSV、日志解析、转换、分类、检查、评估和分析行为。规则把设备差异和
 项目配置从 Python 代码中分离出来，便于复用和审查。
 
 ## 规则目录与查找顺序
@@ -13,6 +13,7 @@ src/health_tools/rules/
 ├── parse/     # default.yaml、gh3220.yaml
 ├── classify/  # default.yaml、posture_patterns.yaml、spo2_posture.yaml
 ├── convert/   # standard.yaml、template.yaml
+├── check/     # default.yaml
 ├── evaluate/  # evaluate_hr.yaml、evaluate_spo2.yaml
 └── analysis/  # analysis_hr.yaml、analysis_spo2.yaml
 ```
@@ -28,6 +29,7 @@ src/health_tools/rules/
 | `classify` | `-r/--rule` | classify 规则；`--extend` 追加 patterns |
 | `evaluate` | `--rule` | evaluate 规则，默认随 `--type` 选内置 |
 | `analyze` | `--rule` | analysis 规则；`--type other` 时必填 |
+| `check` | `-r/--rule` | check 规则；可同时用 `-c/--chip` 覆盖规则中的芯片 |
 | `check`/`factory`/`offline` | `-c/--chip` | 通过 `chip/<chip>.yaml` 加载芯片规则 |
 
 ## 通用约定
@@ -189,6 +191,83 @@ gain_tia_map:
 ### hr_ref_column / spo_ref_column
 
 `evaluate` 解析参考列与预测列时优先级为：命令行 `--ref-column-col/--pred-column-col` > 规则 `ref_column/pred_column` 列名 > chip 规则的 `hr_ref_column`/`spo_ref_column`（按 `type` 选择：先取同名列的 1-based 索引；列名不在映射中时取第一个有效索引）。因此即使输出 CSV 改了列顺序，只要索引正确，evaluate 仍能定位参考列。
+
+## check 规则
+
+路径：`rules/check/<name>.yaml`。check 规则描述芯片、列语义、检查阈值、时间戳/金标列和
+准确度标定策略。它不描述本次运行的输入输出路径或并行控制；`-i/-o/--sort/--report/--sort-output/
+--workers/-v` 必须由 CLI 或 API 传入。规则名按用户目录 → 包内目录查找，绝对路径直接使用。
+
+```yaml
+version: "1.0"
+description: 默认数据质量、准确度与分拣规则
+chip: gh3036
+checks: [range, ipd, frame, center, acc, agc, ref]
+tolerance: 50
+static_min: 5
+ratios: {range: 1.0, frame: 1.0, center: 5.0, ipd: 1.0, acc: 1.0}
+acc_axis: false
+timestamp:
+  column: null
+  ratio: 20.0
+  ms: null
+  fail_ratio: 1.0
+  base_ms: null
+reference:
+  hr_column: null
+  spo2_column: null
+  sample_rate: 25.0
+  stale_seconds: 5.0
+  step_threshold: 8.0
+scene_regex: null
+accuracy:
+  enabled: false
+  ref_column: REF_RESULT0
+  online_column: ALGO_RESULT0
+  comp_column: COMP_RESULT0
+  methods: [mae, within_5, within_10, within_15, rmse, correlation]
+  thresholds: []
+  inclusive: false
+  marks:
+    - {id: online_within_5_low, comparison: online, metric: within_5, min: 80.0,
+       label: Online ±5准确度低, category: accuracy_online_low}
+    - {id: comp_within_5_low, comparison: comp, metric: within_5, min: 80.0,
+       label: Comp ±5准确度低, category: accuracy_comp_low}
+    - {id: online_below_comp, comparison: online_below_comp, metric: within_5, min_gap: 10.0,
+       label: Online低于Comp 10个百分点, category: accuracy_online_below_comp}
+```
+
+### check 字段说明
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `version` / `description` | string | 规则版本与说明 |
+| `chip` | string | 默认芯片；命令行显式 `-c/--chip` 优先覆盖 |
+| `checks` | list | `range,ipd,frame,center,acc,agc,ref` 检查项；准确度由 `accuracy.enabled` 控制 |
+| `tolerance` / `static_min` | number | Ipd 误差容忍度（pA）与 ACC 静止最小连续帧数 |
+| `ratios` | object | `range/frame/center/ipd/acc` 异常比例阈值 |
+| `acc_axis` | bool | 是否把 ACC 单轴异常计入结果 |
+| `timestamp` | object | 时间戳 `column`、间隔 `ratio/ms`、`fail_ratio` 和 `base_ms` |
+| `reference` | object | HR/SpO2 金标列及采样率、停滞时长、阶跃阈值 |
+| `scene_regex` | string | 从文件相对路径提取 `scene` 场景的正则 |
+| `accuracy` | object | Online/Comp vs Ref 准确度和标定规则，见下 |
+
+`accuracy.ref_column`、`online_column`、`comp_column` 是数据列名，不是列索引；命令行对应的
+`--accuracy-*-column` 显式传入时覆盖规则。`methods` 支持 `mae`、`rmse`、`correlation` 和
+`within_N`；`thresholds` 可声明自定义阈值，`inclusive` 控制边界是否使用 `<=`。`marks` 中
+`comparison` 为 `online` 或 `comp` 时必须提供 `min`（0~100），为 `online_below_comp` 时必须
+提供非负 `min_gap`；`category` 必须是单段安全目录名且唯一。命中后主要异常项按声明顺序显示，
+并以该 category 作为分拣目录名。
+
+### check 规则与 CLI 合并
+
+业务策略采用“显式 CLI > YAML > 内置默认值”。`-c/--chip` 只有在命令行显式传入时覆盖 YAML；
+未传入则使用 YAML 的 `chip`。`--accuracy-min` 和 `--online-comp-gap` 可重复，命令行出现任意
+一条时整体替换 YAML 的 `accuracy.marks`。
+
+以下字段禁止写入 check YAML：`input`、`output`、`sort`、`report`、`sort_output`、`workers`、
+`verbose` 以及 `rule` 本身。这些字段属于本次运行上下文；`--sort` 未显式给 `--report` 时，
+会自动读取本次 check 生成的报告路径（文件输入取其父目录，目录输入取输入目录）。
 
 ## parse 规则
 

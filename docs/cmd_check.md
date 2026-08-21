@@ -15,6 +15,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | 参数 | 说明 |
 |------|------|
 | `-i/--input` | 输入 CSV 文件或目录，普通检查模式必需 |
+| `-r/--rule` | check 规则文件路径或内置规则名；支持用户规则目录、包内规则和绝对路径 |
 | `-c/--chip` | 芯片型号，不指定则尝试从 CSV info 行自动识别 |
 | `--checks` | 指定检查项：`range,ipd,frame,center,acc,agc,ref`，默认全部 |
 | `--tolerance` | Ipd 转换误差容忍度，单位 pA，默认 50 |
@@ -24,7 +25,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--center-ratio` | 数据居中异常允许比例，默认 5% |
 | `--ipd-ratio` | Ipd 超差允许比例，默认 1% |
 | `--acc-ratio` | ACC 异常帧允许比例，默认 1% |
-| `--acc-axis` | 将 ACC 单轴静止或循环异常也计入检查结果；默认只统计 XYZ 联合异常 |
+| `--acc-axis/--no-acc-axis` | 将 ACC 单轴静止或循环异常也计入检查结果；默认只统计 XYZ 联合异常 |
 | `--check-timestamp` | 指定时间戳列并检查相邻间隔稳定性 |
 | `--timestamp-ratio` | 时间戳间隔百分比容差，默认 20% |
 | `--timestamp-ms` | 时间戳间隔固定毫秒容差 |
@@ -36,6 +37,14 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--ref-stale-seconds` | 金标连续不变判定时长（秒），默认 5 |
 | `--ref-step-threshold` | 金标相邻值阶跃阈值，默认 8；绝对变化严格大于该值判定阶跃 |
 | `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，未匹配时为 `default` |
+| `--accuracy/--no-accuracy` | 启用或禁用 Online/Comp 对 Ref 的准确度统计 |
+| `--accuracy-ref-column` | 准确度金标列名；覆盖规则中的 `accuracy.ref_column` |
+| `--accuracy-online-column` | Online 结果列名；覆盖规则中的 `accuracy.online_column` |
+| `--accuracy-comp-column` | Comp 结果列名；覆盖规则中的 `accuracy.comp_column` |
+| `--accuracy-thresholds` | 逗号分隔的 `within_N` 阈值，例如 `5,10,15` |
+| `--accuracy-inclusive/--accuracy-strict` | 准确度阈值使用 `<=` 或严格 `<`；默认严格 `<` |
+| `--accuracy-min` | 准确度标定：`comparison:metric:min:category[:label]`，可重复 |
+| `--online-comp-gap` | Online 低于 Comp 标定：`metric:min_gap:category[:label]`，可重复 |
 | `-o/--output` | 检查报告 CSV 输出路径，默认 `<path>/check_report.csv` |
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
 | `--report` | 分拣使用的检查报告路径 |
@@ -51,6 +60,8 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - 有可检查文件时生成 `check_report.csv`；如果启用 ACC 且存在 Ipd FAIL，会额外生成 `ipd_detail_<文件名>.csv`。
 - 同目录固定生成 `check_report_compact.csv`，仅保留 `WARNING`/`FAIL` 检查项的通道长表，便于后续分析程序直接读取。所有占比统一按百分比显示并保留两位小数（如 `16.00%`）；ACC 行同时包含异常帧数和总帧数。AGC 证据同时包含变化次数、有效相邻对数和变化占比，避免用 PPG 通道样本数误算调光比例。
 - `check_report.csv`、`check_report_compact.csv` 以及分拣清单均包含 `场景分类` 列；未指定正则或未匹配时显示 `default`。
+- 主报告在 `场景分类` 后追加 `主要异常项`，以及 Online/Comp 对 Ref 的准确度样本数、MAE、RMSE、相关系数和各个 `within_N` 百分比列。准确度无有效样本时留空，不把缺列误报为 0%。
+- Online/Comp 准确度沿用 offline 的共同有效边界规则：三列共同确定首尾边界，边界内 0 保留，NaN/Inf 在比较时过滤；全 0 Comp 不参与 Comp vs Ref。
 
 ## 各检查项判断逻辑
 
@@ -157,10 +168,12 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 6. `数据居中(结果)=FAIL` → `abnormal/center/`
 7. `心率金标(结果)=FAIL` 或 `血氧金标(结果)=FAIL` → `abnormal/reference/`
 8. `帧完整性(结果)=WARNING` → `abnormal/frame_warning/`
-9. 低优先级检查项分别进入自身目录，例如 `Ipd转换(结果)=FAIL` → `abnormal/ipd/`；扩展
-   报告中的未知检查项使用检查项名称作为目录名
-10. 旧报告只有 `总异常(结果)=FAIL`、没有失败单项时 → `abnormal/total_fail/`
-11. 其余文件（包括只有数据范围、时间戳或数据居中 WARNING 的文件）→ `normal/`
+9. 准确度标定命中按规则声明顺序进入 `abnormal/<category>/`，例如
+   `accuracy_online_low`、`accuracy_online_below_comp`；其优先级低于帧警告，高于 Ipd 和其他扩展检查项。
+10. 低优先级检查项分别进入自身目录，例如 `Ipd转换(结果)=FAIL` → `abnormal/ipd/`；扩展
+   报告中的未知检查项使用检查项名称作为目录名。
+11. 旧报告只有 `总异常(结果)=FAIL`、没有失败单项时 → `abnormal/total_fail/`
+12. 其余文件（包括只有数据范围、时间戳或数据居中 WARNING 的文件）→ `normal/`
 
 例如 `sub/a.csv` 被判定为帧不完整时，目标路径为 `abnormal/frame/sub/a.csv`。如果同一文件同时有
 多项异常，只按上面的第一项分类；因此明确的 FAIL 分类优先于首帧警告，首帧警告优先于 Ipd
@@ -210,7 +223,12 @@ ghealth_tool check -i data/ --ref-hr-column REF_HR --ref-spo2-column REF_SPO2
 # 使用 50 Hz 数据和可配置阶跃阈值
 ghealth_tool check -i data/ --ref-hr-column hr_ref --ref-sample-rate 50 --ref-step-threshold 6
 
-# 按检查报告分拣
+# 使用本次 check 自动生成的报告分拣（目录输入默认读取 data/check_report.csv）
+ghealth_tool check -i data/ --sort --sort-output sorted/
+# 也可显式覆盖报告路径
 ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/
 # 输出示例：sorted/abnormal/frame/<原相对路径>
+
+# 使用完整 check 规则，规则中的 chip/列名/准确度策略可复用
+ghealth_tool check -i data/ -r default.yaml
 ```
