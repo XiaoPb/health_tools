@@ -17,7 +17,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `-i/--input` | 输入 CSV 文件或目录，普通检查模式必需 |
 | `-r/--rule` | check 规则文件路径或内置规则名；支持用户规则目录、包内规则和绝对路径 |
 | `-c/--chip` | 芯片型号，不指定则尝试从 CSV info 行自动识别 |
-| `--checks` | 指定检查项：`range,ipd,frame,center,acc,agc,ref`，默认全部 |
+| `--checks` | 指定检查项：`range,ipd,frame,center,acc,agc,ref`。不指定规则文件时默认执行 `range,ipd,frame,center,acc,agc`；`ref` 仅在显式指定且提供金标列时执行。使用 `-r` 时按规则文件中的 `checks` 声明执行 |
 | `--tolerance` | Ipd 转换误差容忍度，单位 pA，默认 50 |
 | `--static-min` | ACC 静止检测最小连续帧数，默认 5 |
 | `--range-ratio` | 数据范围异常允许比例，默认 1% |
@@ -85,7 +85,7 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 
 ### 数据范围（`range`）
 
-读取芯片规则中的数据列，逐个数值化后检查是否落在芯片允许范围内（边界值算正常）。全 0 的预留通道会跳过，不计入异常分母；没有可检查的数据列直接 `FAIL`。
+读取芯片规则中的数据列，逐个数值化后检查是否落在芯片允许范围内（边界值算正常）。全 0 的预留通道会跳过，不计入异常分母；缺少数据列时文件会被跳过，并在检查处理结果中记录列结构原因。
 
 异常比例为所有有效数据单元格中超范围单元格的比例，默认 `--range-ratio 1%`：
 
@@ -104,19 +104,19 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 
 默认 `--frame-ratio 1%`，后续丢帧按异常比例三态判断。第一帧不是 `0`、但后续帧完全连续时，
 结果固定为 `WARNING`，且不把开头缺失的帧计入丢帧率；如果后续同时存在丢帧，则仍按丢帧率
-决定 `WARNING` 或 `FAIL`。缺少帧列、帧列没有有效数值时直接 `FAIL`。
+决定 `WARNING` 或 `FAIL`。缺少帧列时文件会被跳过并记录列结构原因；帧列存在但没有有效数值时记为 `FAIL`。
 
 ### 数据居中（`center`）
 
 先计算 `Rawdata - adc_offset`，再按 ADC 满量程判断：低于 `0.30 * full_scale` 或高于 `0.85 * full_scale` 的点属于偏离居中；边界值算正常。另行统计不高于 `0.05 * full_scale` 的接近 0 点，以及不低于 `0.95 * full_scale` 的接近满量程点。
 
-全 0 预留通道跳过。异常比例为偏离居中的有效点占比，默认 `--center-ratio 5%`：异常比例 `≤ 5%` 为 `WARNING`，超过 `5%` 为 `FAIL`；没有异常为 `PASS`。缺少数据列直接 `FAIL`。
+全 0 预留通道跳过。异常比例为偏离居中的有效点占比，默认 `--center-ratio 5%`：异常比例 `≤ 5%` 为 `WARNING`，超过 `5%` 为 `FAIL`；没有异常为 `PASS`。缺少数据列时文件会被跳过，并记录列结构原因。
 
 ### Ipd 转换（`ipd`）
 
 按行使用 `Rawdata`、AGC 增益和芯片参数计算期望 `Ipd_pA`，检查实际值与期望值的绝对误差。误差不超过 `--tolerance`（默认 `±50 pA`）算正常；全 0 预留通道跳过。
 
-超差点比例默认允许 `1%`（`--ipd-ratio`）：无超差为 `PASS`，比例不超过阈值为 `WARNING`，超过阈值为 `FAIL`。缺少 Ipd/Rawdata 列直接 `FAIL`；所有通道都是全 0 预留通道时为 `PASS` 并说明已跳过。
+超差点比例默认允许 `1%`（`--ipd-ratio`）：无超差为 `PASS`，比例不超过阈值为 `WARNING`，超过阈值为 `FAIL`。缺少 Ipd/Rawdata 列时文件会被跳过，并记录列结构原因；所有通道都是全 0 预留通道时为 `PASS` 并说明已跳过。
 
 ### ACC 异常（`acc`）
 
@@ -144,7 +144,7 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 
 其余间隔以中位数作为统计基准，单个间隔偏离基准超过 `--timestamp-ratio`（默认 `±20%`），或超过 `--timestamp-ms` 固定毫秒容差，就计为异常间隔。异常间隔比例默认允许 `1%`（`--timestamp-fail-ratio`），按 `PASS/WARNING/FAIL` 三态判断。
 
-指定 `--timestamp-base-ms` 时，还会比较统计基准与期望基准；相对偏差严格大于 `20%` 直接 `FAIL`，等于 `20%` 不失败。
+指定 `--timestamp-base-ms` 时，还会比较统计基准与期望基准；相对偏差严格大于 `20%` 直接 `FAIL`，等于 `20%` 不失败。缺少指定时间戳列时文件会被跳过并记录列结构原因；时间戳无法解析、倒退或有效点不足时记为 `FAIL`。
 
 ### 金标数据（`--ref-hr-column`、`--ref-spo2-column`）
 
@@ -166,7 +166,7 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 任一条件异常都会使对应的“心率金标”或“血氧金标”检查项产生 `WARNING` 或 `FAIL`：异常发生在
 起始 `--ref-warning-seconds` 秒内时为 `WARNING`，只要有异常发生在窗口外则为 `FAIL`。主报告摘要会写明
 范围异常数、非零占比、阶跃次数和最长静止秒数；`check_report_compact.csv` 也会同步写入这些
-指标及阈值列。
+指标及阈值列。缺少指定金标列时文件会被跳过并记录列结构原因；金标列存在但没有有效数值时记为 `FAIL`。
 
 启用 `--reference-detail-output` 后，对金标检查为 `WARNING` 或 `FAIL` 的文件输出四列证据 CSV，目录
 结构镜像输入目录；已有目标文件不会覆盖。Online 没有有效非零起点时金标明确失败，并输出表头。
@@ -179,7 +179,7 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 - `WARNING`：有异常，但异常比例不超过对应 `--*-ratio`；WARNING 仍表示文件存在数据问题。
 - `FAIL`：异常比例超过阈值，或缺少必要列、数据无法解析、时间戳倒退/基准偏差超限等硬性条件触发失败。
 
-比例阈值采用“**小于等于阈值为 WARNING，严格超过阈值为 FAIL**”。`总异常(结果)` 只输出 `PASS` 或 `FAIL`：单项全部为 PASS/WARNING 时总结果为 `PASS`，任意单项为 FAIL 时总结果为 `FAIL`。因此 WARNING 文件在默认 `--sort` 中会进入 `normal/`，需要重点关注精简报告中的 WARNING 行。
+比例阈值采用“**小于等于阈值为 WARNING，严格超过阈值为 FAIL**”。`总异常(结果)` 只输出 `PASS` 或 `FAIL`：单项全部为 PASS/WARNING 时总结果为 `PASS`，任意单项为 FAIL 时总结果为 `FAIL`。因此未被专门分拣规则捕获的 WARNING 文件（例如数据范围、时间戳、数据居中、金标或 Ipd WARNING）在默认 `--sort` 中会进入 `normal/`，需要重点关注精简报告中的 WARNING 行。
 
 ## 分拣报告
 
@@ -198,7 +198,7 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 10. 低优先级检查项分别进入自身目录，例如 `Ipd转换(结果)=FAIL` → `abnormal/ipd/`；扩展
    报告中的未知检查项使用检查项名称作为目录名。
 11. 旧报告只有 `总异常(结果)=FAIL`、没有失败单项时 → `abnormal/total_fail/`
-12. 其余文件（包括只有数据范围、时间戳或数据居中 WARNING 的文件）→ `normal/`
+12. 其余文件（包括只有数据范围、时间戳、数据居中、金标或 Ipd WARNING 的文件）→ `normal/`
 
 例如 `sub/a.csv` 被判定为帧不完整时，目标路径为 `abnormal/frame/sub/a.csv`。如果同一文件同时有
 多项异常，只按上面的第一项分类；因此明确的 FAIL 分类优先于首帧警告，首帧警告优先于 Ipd
