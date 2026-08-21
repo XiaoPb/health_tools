@@ -55,6 +55,35 @@ def test_command_indexes_cover_all_primary_commands():
         assert doc_name in command_index
 
 
+def test_check_documentation_covers_rules_accuracy_and_sort_contract():
+    command_doc = (DOCS_DIR / "cmd_check.md").read_text(encoding="utf-8")
+    rules_doc = (DOCS_DIR / "rules.md").read_text(encoding="utf-8")
+    skill_commands = (SKILL_DIR / "references" / "commands.md").read_text(encoding="utf-8")
+    skill_workflows = (SKILL_DIR / "references" / "workflows.md").read_text(encoding="utf-8")
+
+    for text in (command_doc, rules_doc, skill_commands, skill_workflows):
+        assert "-r/--rule" in text or "-r" in text
+
+    for keyword in (
+        "主要异常项",
+        "Online准确度",
+        "Comp准确度",
+        "online_below_comp",
+        "frame_warning",
+        "input",
+        "sort_output",
+        "workers",
+        "verbose",
+    ):
+        assert keyword in command_doc or keyword in rules_doc
+
+    assert "validate custom_rules/check/custom.yaml" in skill_workflows
+    assert "accuracy.ref_column" in skill_workflows
+    assert "accuracy.online_column" in skill_workflows
+    assert "accuracy.comp_column" in skill_workflows
+    assert "全为 0 时跳过" in skill_workflows
+
+
 def test_current_documentation_has_no_broken_local_links():
     markdown_files = [ROOT / "README.md", ROOT / "CHANGELOG.md", *DOCS_DIR.glob("*.md")]
     link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")

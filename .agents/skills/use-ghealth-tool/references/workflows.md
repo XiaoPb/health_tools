@@ -30,11 +30,15 @@ ghealth_tool check -i converted.csv -c gh3036
 ## 检查并分拣
 
 ```bash
-ghealth_tool check -i data/ -r default.yaml -o data/check_report.csv
+ghealth_tool validate custom_rules/check/custom.yaml
+ghealth_tool check -i data/ -r custom_rules/check/custom.yaml -o data/check_report.csv
 ghealth_tool check -i data/ --sort --sort-output sorted/
 ```
 
-规则中的 `chip`、时间戳/金标列和准确度策略会参与本次检查；显式 `-c/--chip` 覆盖规则芯片。
+先用 `validate` 检查 check YAML，再执行 `check -r`。确认规则中的 `chip`、时间戳列以及
+`accuracy.ref_column`、`accuracy.online_column`、`accuracy.comp_column` 与真实 CSV 表头一致；
+显式 `-c/--chip` 覆盖规则芯片。准确度统计按共同有效边界计算，Comp 列全为 0 时跳过
+Comp vs Ref，不把它计作低准确度。
 第二条命令会自动读取本次 check 生成的 `data/check_report.csv` 并移动报告中的源文件。也可用
 `--report` 显式覆盖报告路径。执行前确认报告路径和 `文件相对路径` 列指向正确数据。
 

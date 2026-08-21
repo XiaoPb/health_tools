@@ -22,7 +22,7 @@
 3. 使用 `{0-15}` 展开范围；需要字面方括号时写 `rawdata[{0-1}]`。
 4. 保持列名大小写、空格和顺序与真实输入一致。
 5. 把自定义规则放入用户规则目录的对应类型子目录，或用绝对路径调用。
-6. 运行 `validate`；再用一个小文件执行目标命令并检查输出值。
+6. 运行 `validate`（check 规则也必须先验证）；再用一个小文件执行目标命令并检查输出值。
 
 ## 关键不变量
 
@@ -36,6 +36,8 @@
 - check 规则可以声明 `chip`、`timestamp.column`、`reference.hr_column/spo2_column`、
   `accuracy.ref_column/online_column/comp_column`、检查阈值和准确度标定；显式 `-c/--chip`
   覆盖规则芯片。
+- 执行 check 前确认 `accuracy.ref_column`、`accuracy.online_column`、`accuracy.comp_column`
+  都存在于实际 CSV 表头；Comp 列全为 0 时跳过 Comp vs Ref 准确度统计。
 - check YAML 不写 `input`、`output`、`sort`、`report`、`sort_output`、`workers`、`verbose` 或
   `rule`。这些是本次运行上下文。`--sort` 未给 `--report` 时自动读取本次 check 生成的报告。
 - check 报告在 `场景分类` 后提供 `主要异常项` 和 Online/Comp vs Ref 准确度列；标定 category
