@@ -694,7 +694,18 @@ def test_offline_runner_callback_error_terminates_and_propagates(monkeypatch, tm
             on_output=lambda line: (_ for _ in ()).throw(RuntimeError("callback failed")),
         )
 
-    assert taskkill_calls and taskkill_calls[0][0] == ["taskkill", "/PID", "4321", "/T", "/F"]
+    if os.name == "nt":
+        assert taskkill_calls and taskkill_calls[0][0] == [
+            "taskkill",
+            "/PID",
+            "4321",
+            "/T",
+            "/F",
+        ]
+        assert process.terminated is False
+    else:
+        assert taskkill_calls == []
+        assert process.terminated is True
     assert process.stdout.closed is True
     assert process.stderr.closed is True
 
