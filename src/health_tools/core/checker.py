@@ -4,13 +4,16 @@ import re
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import ChipRule
 from health_tools.utils.columns import expand_columns
+
+if TYPE_CHECKING:
+    from health_tools.api.models import CheckAccuracyResult
 
 
 @dataclass
@@ -43,6 +46,7 @@ class FileCheckReport:
     chip: str
     scene: str = "default"
     results: List[CheckResult] = field(default_factory=list)
+    accuracy_result: Optional["CheckAccuracyResult"] = None
 
     @property
     def all_passed(self) -> bool:

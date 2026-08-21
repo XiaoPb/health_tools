@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from health_tools.core.check_accuracy import calculate_check_accuracy
-from health_tools.models.rules import CheckAccuracyRule
+from health_tools.api.models import CheckAccuracyResult
+from health_tools.core.check_accuracy import calculate_check_accuracy, match_accuracy_mark
+from health_tools.models.rules import AccuracyMarkRule, CheckAccuracyRule
 from health_tools.utils.accuracy import calculate_accuracy, prepare_accuracy_columns
 
 
@@ -128,3 +129,27 @@ def test_check_accuracy_matches_shared_accuracy_helpers() -> None:
 
     assert result.online == expected_online
     assert result.comp == expected_comp
+
+
+def test_accuracy_marks_use_rule_order_and_percentage_point_gap() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0}, comp={"within_5": 85.0})
+    marks = (
+        AccuracyMarkRule(
+            "online_low", "online", "within_5", "accuracy_online_low", "Online ±5准确度低", min=80
+        ),
+        AccuracyMarkRule(
+            "online_gap",
+            "online_below_comp",
+            "within_5",
+            "accuracy_online_below_comp",
+            "Online低于Comp 10个百分点",
+            min_gap=10,
+        ),
+    )
+    assert match_accuracy_mark(result, marks).id == "online_low"
+
+
+def test_accuracy_mark_minimum_is_strictly_below_threshold() -> None:
+    result = CheckAccuracyResult(online={"within_5": 80.0})
+    mark = AccuracyMarkRule("low", "online", "within_5", "low", "低", min=80)
+    assert match_accuracy_mark(result, (mark,)) is None

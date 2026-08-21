@@ -11,6 +11,7 @@ from health_tools.api.check_operation import (
     _compile_scene_regex,
     _save_compact_report,
     _scene_for_path,
+    primary_issue,
 )
 from health_tools.commands.check import _save_report_csv
 from health_tools.core.checker import CheckResult, DataChecker, FileCheckReport
@@ -855,3 +856,24 @@ class TestTimestampInterval:
 
         assert result.status == "FAIL"
         assert "偏差 22.5%" in result.summary
+
+
+def test_primary_issue_places_accuracy_after_frame_warning():
+    row = {
+        "总异常(结果)": "PASS",
+        "帧完整性(结果)": "WARNING",
+        "准确度标定分类": "accuracy_online_low",
+        "准确度标定说明": "Online ±5准确度低",
+    }
+    assert primary_issue(row) == "首帧非0"
+
+
+def test_primary_issue_uses_accuracy_before_ipd():
+    row = {
+        "总异常(结果)": "FAIL",
+        "帧完整性(结果)": "PASS",
+        "准确度标定分类": "accuracy_online_low",
+        "准确度标定说明": "Online ±5准确度低",
+        "Ipd转换(结果)": "FAIL",
+    }
+    assert primary_issue(row) == "Online ±5准确度低"

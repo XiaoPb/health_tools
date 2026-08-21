@@ -1,12 +1,32 @@
 """check 命令的 Online/Comp 准确度计算。"""
 
-from typing import Dict
+from typing import Dict, Iterable, Optional
 
 import pandas as pd
 
 from health_tools.api.models import CheckAccuracyResult
-from health_tools.models.rules import CheckAccuracyRule
+from health_tools.models.rules import AccuracyMarkRule, CheckAccuracyRule
 from health_tools.utils.accuracy import calculate_accuracy, prepare_accuracy_columns
+
+
+def match_accuracy_mark(
+    result: CheckAccuracyResult, marks: Iterable[AccuracyMarkRule]
+) -> Optional[AccuracyMarkRule]:
+    """按规则声明顺序匹配首个准确度标定。"""
+    for mark in marks:
+        if mark.comparison in {"online", "comp"}:
+            metrics = getattr(result, mark.comparison)
+            value = metrics.get(mark.metric) if metrics is not None else None
+            if value is not None and mark.min is not None and value < mark.min:
+                return mark
+        elif mark.comparison == "online_below_comp":
+            if result.online is None or result.comp is None or mark.min_gap is None:
+                continue
+            online = result.online.get(mark.metric)
+            comp = result.comp.get(mark.metric)
+            if online is not None and comp is not None and comp - online >= mark.min_gap:
+                return mark
+    return None
 
 
 def calculate_check_accuracy(frame: pd.DataFrame, config: CheckAccuracyRule) -> CheckAccuracyResult:
@@ -55,4 +75,6 @@ def calculate_check_accuracy(frame: pd.DataFrame, config: CheckAccuracyRule) -> 
             trim_zero_padding=False,
         )
 
-    return CheckAccuracyResult(online=online, comp=comp)
+    result = CheckAccuracyResult(online=online, comp=comp)
+    mark = match_accuracy_mark(result, config.marks)
+    return CheckAccuracyResult(online=result.online, comp=result.comp, matched_mark=mark)

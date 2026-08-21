@@ -31,6 +31,7 @@ SORT_CATEGORIES = (
     "center",
     "reference",
     "frame_warning",
+    "accuracy",
     "agc",
     "ipd",
     "total_fail",
@@ -42,6 +43,40 @@ TRAILING_CHECK_CATEGORIES = {
     "AGC变化": "agc",
     "Ipd转换": "ipd",
 }
+
+
+def primary_issue(row: Dict[str, str]) -> str:
+    """按统一优先级返回报告行的主要异常中文摘要。"""
+
+    def status(key: str) -> str:
+        return row.get(key, "").strip().upper()
+
+    if status("帧完整性(结果)") == "FAIL":
+        return "帧不完整"
+    if status("数据范围(结果)") == "FAIL":
+        return "数据范围异常"
+    if status("ACC异常(结果)") == "FAIL":
+        return "ACC异常"
+    if status("ACC异常(结果)") == "WARNING":
+        return "ACC警告"
+    if status("时间戳间隔(结果)") == "FAIL":
+        return "时间戳异常"
+    if status("数据居中(结果)") == "FAIL":
+        return "数据未居中"
+    if status("心率金标(结果)") == "FAIL" or status("血氧金标(结果)") == "FAIL":
+        return "金标异常"
+    if status("帧完整性(结果)") == "WARNING":
+        return "首帧非0"
+    category = row.get("准确度标定分类", "").strip()
+    if category:
+        return row.get("准确度标定说明", "").strip() or category
+    if status("Ipd转换(结果)") == "FAIL":
+        return "Ipd异常"
+    if status("AGC变化(结果)") == "FAIL" or status("AGC调光(结果)") == "FAIL":
+        return "AGC异常"
+    if status("总异常(结果)") == "FAIL":
+        return "其他异常"
+    return ""
 
 
 def _safe_category_name(check_name: str) -> str:
@@ -92,6 +127,9 @@ def _sort_category(row: Dict[str, str]) -> str:
         return "reference"
     if checks["frame"] == "WARNING":
         return "frame_warning"
+    accuracy_category = row.get("准确度标定分类", "").strip()
+    if accuracy_category:
+        return _safe_category_name(accuracy_category)
     if status == "FAIL":
         return _fallback_check_category(row) or "total_fail"
     return "normal"
@@ -576,6 +614,23 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 report.results.append(checker.build_acc_result(acc, request.acc_ratio))
             else:
                 acc = None
+            if request.accuracy_enabled:
+                from health_tools.core.check_accuracy import calculate_check_accuracy
+                from health_tools.models.rules import CheckAccuracyRule
+
+                report.accuracy_result = calculate_check_accuracy(
+                    frame,
+                    CheckAccuracyRule(
+                        enabled=True,
+                        ref_column=request.accuracy_ref_column or "REF_RESULT0",
+                        online_column=request.accuracy_online_column or "ALGO_RESULT0",
+                        comp_column=request.accuracy_comp_column,
+                        methods=tuple(request.accuracy_methods),
+                        thresholds=tuple(request.accuracy_custom_thresholds),
+                        inclusive=request.accuracy_inclusive,
+                        marks=tuple(request.accuracy_marks),
+                    ),
+                )
             return ItemResult(ItemStatus.OK, str(path)), report, acc, ipd_detail
         except Exception as exc:
             return (
