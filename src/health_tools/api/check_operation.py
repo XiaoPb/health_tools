@@ -91,13 +91,18 @@ def _safe_category_name(check_name: str) -> str:
 
 def _fallback_check_category(row: Dict[str, str]) -> str:
     """识别低优先级检查项，未知项保留检查名称作为独立目录。"""
-    for column, value in row.items():
-        if not column.endswith("(结果)") or column == "总异常(结果)":
-            continue
-        if (value or "").strip().upper() != "FAIL":
-            continue
-        check_name = column[: -len("(结果)")]
-        return TRAILING_CHECK_CATEGORIES.get(check_name, _safe_category_name(check_name))
+    failed = {
+        column[: -len("(结果)")]
+        for column, value in row.items()
+        if column.endswith("(结果)")
+        and column != "总异常(结果)"
+        and (value or "").strip().upper() == "FAIL"
+    }
+    for check_name in ("AGC调光", "AGC变化", "Ipd转换"):
+        if check_name in failed:
+            return TRAILING_CHECK_CATEGORIES[check_name]
+    unknown = sorted(failed - set(TRAILING_CHECK_CATEGORIES))
+    return _safe_category_name(unknown[0]) if unknown else ""
     return ""
 
 

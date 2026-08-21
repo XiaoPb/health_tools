@@ -356,6 +356,29 @@ def test_sort_report_uses_unknown_failed_check_name_as_category(tmp_path):
     assert (tmp_path / "sorted/abnormal/自定义质量/nested/sample.csv").exists()
 
 
+def test_sort_report_fallback_order_does_not_depend_on_csv_column_order(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "sample.csv").write_text("data", encoding="utf-8")
+    report = src / "check_report.csv"
+    _write_report(
+        report,
+        [
+            [
+                "文件名",
+                "总异常(结果)",
+                "自定义乙(结果)",
+                "Ipd转换(结果)",
+                "自定义甲(结果)",
+                "文件相对路径",
+            ],
+            ["sample.csv", "FAIL", "FAIL", "FAIL", "FAIL", "sample.csv"],
+        ],
+    )
+    stats = _sort_report(report, tmp_path / "sorted")
+    assert stats == {"ipd": 1, "skipped": 0}
+
+
 def test_sort_report_sanitizes_unknown_check_category(tmp_path):
     src = tmp_path / "src"
     source = src / "sample.csv"
