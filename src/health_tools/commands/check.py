@@ -256,7 +256,7 @@ def check_cmd(
             input_target = Path(input_path)
             inferred_report_path = str(
                 input_target.parent / "check_report.csv"
-                if input_target.suffix
+                if input_target.exists() and input_target.is_file()
                 else input_target / "check_report.csv"
             )
 

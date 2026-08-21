@@ -217,6 +217,35 @@ def test_check_sort_infers_default_report_from_input(monkeypatch, tmp_path):
     assert captured["request"].report_path == input_dir / "check_report.csv"
 
 
+@pytest.mark.parametrize("input_name", ["input", "samples.csv"])
+def test_check_sort_infers_report_using_actual_file_type(monkeypatch, tmp_path, input_name):
+    captured = _capture_check_request(monkeypatch)
+    input_path = tmp_path / input_name
+    input_path.mkdir()
+
+    result = CliRunner().invoke(
+        check_cmd,
+        ["--sort", "-i", str(input_path), "--sort-output", str(tmp_path / "sorted")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["request"].report_path == input_path / "check_report.csv"
+
+
+def test_check_sort_infers_report_for_extensionless_file(monkeypatch, tmp_path):
+    captured = _capture_check_request(monkeypatch)
+    input_path = tmp_path / "input"
+    input_path.write_text("csv", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        check_cmd,
+        ["--sort", "-i", str(input_path), "--sort-output", str(tmp_path / "sorted")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["request"].report_path == tmp_path / "check_report.csv"
+
+
 def test_check_help_lists_rule_and_accuracy_options():
     result = CliRunner().invoke(check_cmd, ["--help"])
 
@@ -248,6 +277,20 @@ def test_check_rejects_invalid_accuracy_mark_options(option, value):
 
     assert result.exit_code == 2
     assert "Error:" in result.output
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("--accuracy-min", "online:within_5:-1:category"),
+        ("--online-comp-gap", "within_5:-1:category"),
+    ],
+)
+def test_check_rejects_negative_accuracy_mark_threshold(option, value):
+    result = CliRunner().invoke(check_cmd, [option, value])
+
+    assert result.exit_code == 2
+    assert "非负" in result.output
 
 
 def test_load_check_rule_keeps_all_supported_parameters():

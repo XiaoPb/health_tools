@@ -50,8 +50,8 @@ def _finite_number(value: str, label: str) -> float:
         number = float(value)
     except ValueError as exc:
         raise click.BadParameter(f"{label}必须是有限数字") from exc
-    if not math.isfinite(number):
-        raise click.BadParameter(f"{label}必须是有限数字")
+    if not math.isfinite(number) or number < 0:
+        raise click.BadParameter(f"{label}必须是有限非负数字")
     return number
 
 
