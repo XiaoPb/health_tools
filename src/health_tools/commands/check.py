@@ -320,15 +320,25 @@ def check_cmd(
             "center",
             "reference",
             "frame_warning",
-            "agc",
-            "ipd",
-            "total_fail",
-            "normal",
         )
-        extra_categories = sorted(set(result.sort_counts) - set(category_order) - {"skipped"})
+        # 准确度标定分类由规则声明，名称不固定；保持报告/规则出现顺序，
+        # 但整体位置固定在首帧警告之后、AGC/Ipd 之前。
+        accuracy_categories = [
+            category
+            for category in result.sort_counts
+            if category.startswith("accuracy") and category != "accuracy"
+        ]
+        trailing_categories = ("agc", "ipd", "total_fail", "normal")
+        known = set(category_order) | set(accuracy_categories) | set(trailing_categories)
+        extra_categories = sorted(set(result.sort_counts) - known - {"skipped"})
         distribution = ", ".join(
             f"{category}={result.sort_counts.get(category, 0)}"
-            for category in (*category_order, *extra_categories)
+            for category in (
+                *category_order,
+                *accuracy_categories,
+                *trailing_categories,
+                *extra_categories,
+            )
         )
         console.print(
             "[green]分拣完成[/green]: "
@@ -564,7 +574,9 @@ def _save_report_csv(
     """兼容旧命令层入口，委托 API 层生成唯一报告。"""
     from health_tools.api.check_operation import _save_report
 
-    _save_report(reports, acc_reports, output_path, base_dir or output_path.parent, include_acc_axis)
+    _save_report(
+        reports, acc_reports, output_path, base_dir or output_path.parent, include_acc_axis
+    )
     return
 
     """将全部检查结果保存到统一CSV文件"""

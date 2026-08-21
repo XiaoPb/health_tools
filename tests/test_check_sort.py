@@ -420,6 +420,57 @@ def test_sort_report_places_unclassified_total_failure_last(tmp_path):
     assert (tmp_path / "sorted/abnormal/total_fail/sample.csv").exists()
 
 
+def test_sort_report_places_accuracy_marks_after_frame_warning_before_ipd(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    rows = [
+        ("frame_warning.csv", "WARNING", "frame_warning"),
+        ("online_low.csv", "PASS", "accuracy_online_low"),
+        ("comp_low.csv", "PASS", "accuracy_comp_low"),
+        ("online_gap.csv", "PASS", "accuracy_online_below_comp"),
+        ("ipd.csv", "FAIL", ""),
+    ]
+    for name, _, _ in rows:
+        (src / name).write_text(name, encoding="utf-8")
+    report = src / "check_report.csv"
+    header = [
+        "文件名",
+        "总异常(结果)",
+        "帧完整性(结果)",
+        "Ipd转换(结果)",
+        "准确度标定分类",
+        "准确度标定说明",
+        "文件相对路径",
+    ]
+    report_rows = [
+        [
+            name,
+            status,
+            "WARNING" if category == "frame_warning" else "PASS",
+            "FAIL" if category == "" else "PASS",
+            category,
+            category,
+            name,
+        ]
+        for name, status, category in rows
+    ]
+    _write_report(report, [header, *report_rows])
+
+    stats = _sort_report_files(report, tmp_path / "sorted")
+
+    assert list(stats) == [
+        "skipped",
+        "frame_warning",
+        "accuracy_online_low",
+        "accuracy_comp_low",
+        "accuracy_online_below_comp",
+        "ipd",
+    ]
+    for name, _, category in rows:
+        expected = "frame_warning" if category == "frame_warning" else category or "ipd"
+        assert (tmp_path / "sorted" / "abnormal" / expected / name).exists()
+
+
 def test_sort_report_skips_existing_target(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
