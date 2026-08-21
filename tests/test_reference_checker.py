@@ -57,6 +57,19 @@ def test_reference_step_threshold_is_configurable():
     assert result.status == "PASS"
 
 
+def test_reference_metrics_include_max_step_and_abnormal_times():
+    result = _checker().check_reference_data(
+        pd.DataFrame({"time": [1000, 2000, 3000], "REF_HR": [80, 100, 100]}),
+        "REF_HR",
+        "hr",
+        step_threshold=15,
+    )
+    metric = result.channel_metrics["REF_HR"]
+    assert metric["max_step_change"] == 20
+    assert metric["max_step_time"] == "2000"
+    assert "阶跃@2000" in metric["abnormal_times"]
+
+
 def test_reference_static_duration_prefers_timestamp_span():
     frame = pd.DataFrame(
         {

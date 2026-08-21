@@ -375,6 +375,8 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
     header = ["文件名", "芯片", "总异常(结果)"]
     for name in check_names:
         header.extend([f"{name}(结果)", f"{name}(说明)"])
+        if name in {"心率金标", "血氧金标"}:
+            header.append(f"{name}(异常时间)")
     if acc_reports:
         header.extend(
             [
@@ -409,6 +411,11 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
             for name in check_names:
                 result = result_map.get(name)
                 row.extend([result.status, result.summary] if result else ["-", "-"])
+                if name in {"心率金标", "血氧金标"}:
+                    metric: Dict[str, Any] = (
+                        next(iter(result.channel_metrics.values()), {}) if result else {}
+                    )
+                    row.append(metric.get("abnormal_times", "") if result else "-")
             if acc_reports:
                 acc = acc_reports.get(report.file_path)
                 if acc:
@@ -468,8 +475,11 @@ COMPACT_HEADER = [
     "金标非零占比",
     "金标阶跃次数",
     "金标阶跃阈值",
+    "金标最大阶跃变化",
+    "金标最大阶跃时间",
     "金标最长静止帧",
     "金标静止帧阈值",
+    "金标异常时间",
     "说明",
     "比较对象",
     "准确度指标",
@@ -545,8 +555,11 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                             ),
                             "金标阶跃次数": metric.get("step_count", ""),
                             "金标阶跃阈值": metric.get("step_threshold", ""),
+                            "金标最大阶跃变化": metric.get("max_step_change", ""),
+                            "金标最大阶跃时间": metric.get("max_step_time", ""),
                             "金标最长静止帧": metric.get("longest_static_frames", ""),
                             "金标静止帧阈值": metric.get("static_frame_threshold", ""),
+                            "金标异常时间": metric.get("abnormal_times", ""),
                             "说明": "",
                             "比较对象": "",
                             "准确度指标": "",

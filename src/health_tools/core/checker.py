@@ -514,6 +514,8 @@ class DataChecker:
         valid_pairs = values.notna() & values.shift().notna() & values.ne(0) & values.shift().ne(0)
         step_mask = valid_pairs & (values.diff().abs() > step_threshold)
         step_count = int(step_mask.sum())
+        step_differences = values.diff().abs().where(step_mask)
+        max_step_change = float(step_differences.max()) if step_count else 0.0
 
         valid_values = values.where(values.ne(0))
         groups = valid_values.ne(valid_values.shift()).cumsum()
@@ -540,6 +542,41 @@ class DataChecker:
                 longest_static_seconds = max(durations)
         stale = longest_static_seconds > stale_seconds
 
+        def _time_at(index: int) -> str:
+            if timestamp is None or index not in timestamp.index or pd.isna(timestamp.loc[index]):
+                return str(index)
+            value = timestamp.loc[index]
+            return f"{value:g}" if isinstance(value, (int, float, np.number)) else str(value)
+
+        step_indices = np.flatnonzero(step_mask.to_numpy())
+        max_step_time = (
+            _time_at(int(step_indices[np.argmax(step_differences.iloc[step_indices])]))
+            if step_count
+            else ""
+        )
+        abnormal_times = []
+        if step_count:
+            abnormal_times.extend(f"阶跃@{_time_at(int(index))}" for index in step_indices[:10])
+        if stale and timestamp is not None:
+            for _, run in valid_values.notna().groupby(groups):
+                indices = run.index[run.to_numpy()]
+                if len(indices) < 2:
+                    continue
+                start, end = indices[0], indices[-1]
+                start_time, end_time = timestamp.loc[start], timestamp.loc[end]
+                duration = (
+                    float(end_time - start_time) / 1000.0
+                    if pd.notna(start_time) and pd.notna(end_time) and end_time >= start_time
+                    else len(indices) / sample_rate
+                )
+                if duration > stale_seconds:
+                    abnormal_times.append(f"静止@{_time_at(int(start))}")
+        if range_count:
+            abnormal_times.extend(
+                f"范围@{_time_at(int(index))}"
+                for index in np.flatnonzero(range_mask.to_numpy())[:10]
+            )
+
         metrics = {
             column: {
                 "total_count": float(total_count),
@@ -548,6 +585,9 @@ class DataChecker:
                 "zero_count": float(zero_count),
                 "step_count": float(step_count),
                 "step_threshold": float(step_threshold),
+                "max_step_change": max_step_change,
+                "max_step_time": max_step_time,
+                "abnormal_times": ";".join(abnormal_times[:20]),
                 "longest_static_frames": float(longest_run),
                 "static_frame_threshold": float(stale_limit),
                 "longest_static_seconds": float(longest_static_seconds),
@@ -560,7 +600,9 @@ class DataChecker:
         if nonzero_ratio < 70.0:
             reasons.append(f"非零占比 {nonzero_ratio:.2f}% 低于 70%")
         if step_count:
-            reasons.append(f"发现 {step_count} 次阶跃（阈值>{step_threshold:g}）")
+            reasons.append(
+                f"发现 {step_count} 次阶跃（阈值>{step_threshold:g}，最大变化 {max_step_change:g}，时间 {max_step_time}）"
+            )
         if stale:
             reasons.append(f"最长静止 {longest_static_seconds:g} 秒，超过 {stale_seconds:g} 秒")
         summary = "；".join(reasons) if reasons else "金标数据正常"
