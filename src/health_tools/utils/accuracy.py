@@ -6,9 +6,6 @@ from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from rich.console import Console
-
-console = Console()
 
 DEFAULT_ACCURACY_THRESHOLDS = (5.0, 10.0, 15.0)
 DEFAULT_ACCURACY_METHODS = (
@@ -430,6 +427,9 @@ class AccuracyCalculator:
 
     def print_report(self) -> None:
         """打印准确度报告"""
+        from rich.console import Console
+
+        console = Console()
         self.finalize()
         total_results = self.get_total_results()
 
@@ -470,6 +470,9 @@ class AccuracyCalculator:
 
     def save_report(self, output_path: Union[str, Path]) -> None:
         """保存报告到CSV文件"""
+        from rich.console import Console
+
+        console = Console()
         self.finalize()
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
