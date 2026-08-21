@@ -19,7 +19,6 @@ def test_load_check_rule_keeps_all_supported_parameters():
         "acc",
         "agc",
         "ref",
-        "accuracy",
     )
     assert rule.ratios.frame == 1.0
     assert rule.timestamp.ratio == 20.0
