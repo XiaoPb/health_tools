@@ -75,6 +75,22 @@ def test_reference_metrics_include_max_step_and_abnormal_times():
     assert "阶跃@2000" in metric["abnormal_times"]
 
 
+def test_reference_abnormal_time_does_not_use_scientific_notation():
+    result = _checker().check_reference_data(
+        pd.DataFrame(
+            {
+                "time": [2441420, 2442420, 2443420, 2444420],
+                "REF_HR": [80, 80, 80, 81],
+            }
+        ),
+        "REF_HR",
+        "hr",
+        sample_rate=1,
+        stale_seconds=1.5,
+    )
+    assert result.channel_metrics["REF_HR"]["abnormal_times"] == "静止@2441420"
+
+
 def test_reference_static_duration_prefers_timestamp_span():
     frame = pd.DataFrame(
         {

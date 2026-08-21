@@ -546,7 +546,12 @@ class DataChecker:
             if timestamp is None or index not in timestamp.index or pd.isna(timestamp.loc[index]):
                 return str(index)
             value = timestamp.loc[index]
-            return f"{value:g}" if isinstance(value, (int, float, np.number)) else str(value)
+            if isinstance(value, (int, float, np.number)):
+                numeric = float(value)
+                if numeric.is_integer():
+                    return str(int(numeric))
+                return format(numeric, ".15g")
+            return str(value)
 
         step_indices = np.flatnonzero(step_mask.to_numpy())
         max_step_time = (
@@ -588,7 +593,7 @@ class DataChecker:
                 "max_step_change": max_step_change,
                 "max_step_time": max_step_time,
                 "abnormal_times": ";".join(abnormal_times[:20]),
-                "longest_static_frames": float(longest_run),
+                "longest_static_frames": int(longest_run),
                 "static_frame_threshold": float(stale_limit),
                 "longest_static_seconds": float(longest_static_seconds),
                 "static_second_threshold": float(stale_seconds),

@@ -220,7 +220,7 @@ def _anomaly_fields(anomaly) -> List[object]:
     return [
         anomaly.count,
         anomaly.max_duration,
-        ",".join(str(value) for value in anomaly.frames[:10]),
+        "'" + ",".join(str(value) for value in anomaly.frames[:10]),
     ]
 
 

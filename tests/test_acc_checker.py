@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from health_tools.api.check_operation import (
+    _anomaly_fields,
     _compile_scene_regex,
     _save_compact_report,
     _scene_for_path,
@@ -647,6 +648,14 @@ class TestCheckResultStatus:
         assert rows[0]["异常数"] == "16"
         assert rows[0]["总数"] == "100"
         assert rows[0]["异常占比"] == "16.00%"
+
+    def test_report_acc_frame_list_is_forced_to_text(self):
+        anomaly = type(
+            "Anomaly",
+            (),
+            {"count": 1, "max_duration": 10, "frames": [72994, 73001, 206654]},
+        )()
+        assert _anomaly_fields(anomaly)[2] == "'72994,73001,206654"
 
     def test_scene_regex_uses_named_group_and_defaults(self):
         pattern = _compile_scene_regex(r"subject\d+_(?P<scene>rest|motion)_")

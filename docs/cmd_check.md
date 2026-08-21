@@ -60,6 +60,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - `-v/--verbose` 会显示跳过文件明细和每个检查项的详情。
 - 有可检查文件时生成 `check_report.csv`；如果启用 ACC 且存在 Ipd FAIL，会额外生成 `ipd_detail_<文件名>.csv`。
 - 同目录生成精简报告，文件名在完整报告主名后追加 `_compact`（例如 `custom.csv` 对应 `custom_compact.csv`），仅保留 `WARNING`/`FAIL` 检查项的通道长表，便于后续分析程序直接读取。所有占比统一按百分比显示并保留两位小数（如 `16.00%`）；ACC 行同时包含异常帧数和总帧数。AGC 证据同时包含变化次数、有效相邻对数和变化占比，避免用 PPG 通道样本数误算调光比例。
+- 完整报告中的 ACC 异常帧列表以文本形式写入（前置 `'`），避免 Excel 自动识别为货币或科学计数格式；金标异常时间戳使用普通整数文本显示。
 - 完整报告、对应的 `_compact` 精简报告以及分拣清单均包含 `场景分类` 列；未指定正则或未匹配时显示 `default`。
 - 主报告在 `场景分类` 后追加 `主要异常项`，以及 Online/Comp 对 Ref 的准确度样本数、MAE、RMSE、相关系数和各个 `within_N` 百分比列。准确度列缺失时输出 `-`；配置已启用但没有有效样本时样本数为 `0`、指标为 `-`，不把缺列误报为 0%。
 - Online/Comp 准确度沿用 offline 的共同有效边界规则：三列共同确定首尾边界，边界内 0 保留，NaN/Inf 在比较时过滤；全 0 Comp 不参与 Comp vs Ref。
