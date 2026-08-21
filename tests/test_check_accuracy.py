@@ -1,0 +1,125 @@
+import numpy as np
+import pandas as pd
+import pytest
+
+from health_tools.core.check_accuracy import calculate_check_accuracy
+from health_tools.models.rules import CheckAccuracyRule
+from health_tools.utils.accuracy import calculate_accuracy, prepare_accuracy_columns
+
+
+def config(**overrides) -> CheckAccuracyRule:
+    values = {
+        "enabled": True,
+        "ref_column": "REF",
+        "online_column": "ONLINE",
+        "comp_column": "COMP",
+        "methods": ("mae", "rmse", "correlation", "within_5"),
+    }
+    values.update(overrides)
+    return CheckAccuracyRule(**values)
+
+
+def test_check_accuracy_matches_offline_shared_boundary() -> None:
+    frame = pd.DataFrame(
+        {
+            "REF": [0, 80, 85, 90, 0],
+            "ONLINE": [0, 84, 95, 90, 0],
+            "COMP": [0, 82, 85, 100, 0],
+        }
+    )
+
+    result = calculate_check_accuracy(frame, config())
+
+    assert result.online is not None
+    assert result.comp is not None
+    assert result.online["samples"] == 3
+    assert result.online["within_5"] == 66.67
+    assert result.comp["within_5"] == 66.67
+
+
+def test_check_accuracy_skips_all_zero_comp() -> None:
+    frame = pd.DataFrame({"REF": [80, 81], "ONLINE": [80, 82], "COMP": [0, 0]})
+
+    result = calculate_check_accuracy(frame, config())
+
+    assert result.online is not None
+    assert result.online["samples"] == 2
+    assert result.comp is None
+
+
+@pytest.mark.parametrize("disabled", ["REF", "ONLINE"])
+def test_check_accuracy_returns_zero_samples_when_required_series_is_all_zero(
+    disabled: str,
+) -> None:
+    columns = {"REF": [80, 81], "ONLINE": [80, 82], "COMP": [80, 81]}
+    columns[disabled] = [0, 0]
+
+    result = calculate_check_accuracy(pd.DataFrame(columns), config())
+
+    assert result.online == {"samples": 0}
+    assert result.comp is None
+
+
+@pytest.mark.parametrize(
+    "comp_column, columns",
+    [
+        (None, {"REF": [80, 81], "ONLINE": [80, 82]}),
+        ("COMP", {"REF": [80, 81], "ONLINE": [80, 82]}),
+    ],
+)
+def test_check_accuracy_skips_unconfigured_or_missing_comp(comp_column, columns) -> None:
+    result = calculate_check_accuracy(pd.DataFrame(columns), config(comp_column=comp_column))
+
+    assert result.online is not None
+    assert result.online["samples"] == 2
+    assert result.comp is None
+
+
+@pytest.mark.parametrize("missing", ["REF", "ONLINE"])
+def test_check_accuracy_requires_ref_and_online_columns(missing: str) -> None:
+    frame = pd.DataFrame({name: [80, 81] for name in ("REF", "ONLINE", "COMP") if name != missing})
+
+    with pytest.raises(ValueError, match=f"缺少准确度列: {missing}"):
+        calculate_check_accuracy(frame, config())
+
+
+def test_check_accuracy_matches_shared_accuracy_helpers() -> None:
+    frame = pd.DataFrame(
+        {
+            "REF": [0, 80, 0, np.nan, 84, 90, 0],
+            "ONLINE": [0, 81, 0, 82, 85, 95, 0],
+            "COMP": [0, 82, 0, 83, np.inf, 96, 0],
+        }
+    )
+    rule = config(
+        methods=("mae", "rmse", "correlation", "within_5"),
+        thresholds=({"name": "within_3", "value": 3},),
+        inclusive=True,
+    )
+    prepared = prepare_accuracy_columns(
+        {"ref": frame["REF"], "online": frame["ONLINE"], "comp": frame["COMP"]}
+    )
+    metric_frame = pd.DataFrame(prepared.columns)
+
+    result = calculate_check_accuracy(frame, rule)
+    expected_online = calculate_accuracy(
+        metric_frame,
+        "ref",
+        "online",
+        list(rule.methods),
+        list(rule.thresholds),
+        rule.inclusive,
+        trim_zero_padding=False,
+    )
+    expected_comp = calculate_accuracy(
+        metric_frame,
+        "ref",
+        "comp",
+        list(rule.methods),
+        list(rule.thresholds),
+        rule.inclusive,
+        trim_zero_padding=False,
+    )
+
+    assert result.online == expected_online
+    assert result.comp == expected_comp

@@ -155,6 +155,19 @@ class CheckResult:
 
 
 @dataclass(frozen=True)
+class CheckAccuracyResult:
+    online: Optional[Mapping[str, float]] = None
+    comp: Optional[Mapping[str, float]] = None
+    matched_mark: Optional[AccuracyMarkRule] = None
+
+    def __post_init__(self) -> None:
+        if self.online is not None:
+            object.__setattr__(self, "online", _freeze(self.online))
+        if self.comp is not None:
+            object.__setattr__(self, "comp", _freeze(self.comp))
+
+
+@dataclass(frozen=True)
 class OfflineResult:
     batch: BatchResult
     output_dir: Optional[Path] = None
