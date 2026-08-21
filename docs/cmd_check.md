@@ -66,13 +66,16 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 
 ### 帧完整性（`frame`）
 
-读取 `FRAME_ID`（或芯片规则指定的帧列）并统计丢失帧数：GH3220 按 `0~255` 循环帧号检查，其他芯片按递增帧号检查。丢失率计算为：
+读取 `FRAME_ID`（或芯片规则指定的帧列）并统计丢失帧数：首帧期望为 `0`；GH3220
+按 `0~255` 循环帧号检查，其他芯片按递增帧号检查。丢失率计算为：
 
 ```text
 丢失帧数 / (实际帧数 + 丢失帧数) × 100%
 ```
 
-默认 `--frame-ratio 1%`，按异常比例三态判断。缺少帧列、帧列没有有效数值时直接 `FAIL`。
+默认 `--frame-ratio 1%`，后续丢帧按异常比例三态判断。第一帧不是 `0`、但后续帧完全连续时，
+结果固定为 `WARNING`，且不把开头缺失的帧计入丢帧率；如果后续同时存在丢帧，则仍按丢帧率
+决定 `WARNING` 或 `FAIL`。缺少帧列、帧列没有有效数值时直接 `FAIL`。
 
 ### 数据居中（`center`）
 
@@ -153,14 +156,24 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 5. `时间戳间隔(结果)=FAIL` → `abnormal/timestamp/`
 6. `数据居中(结果)=FAIL` → `abnormal/center/`
 7. `心率金标(结果)=FAIL` 或 `血氧金标(结果)=FAIL` → `abnormal/reference/`
-8. 其他 `总异常(结果)=FAIL`（例如 Ipd 转换失败）→ `abnormal/other/`
-9. 其余文件（包括只有 WARNING 的非 ACC 检查项）→ `normal/`
+8. `帧完整性(结果)=WARNING` → `abnormal/frame_warning/`
+9. 低优先级检查项分别进入自身目录，例如 `Ipd转换(结果)=FAIL` → `abnormal/ipd/`；扩展
+   报告中的未知检查项使用检查项名称作为目录名
+10. 旧报告只有 `总异常(结果)=FAIL`、没有失败单项时 → `abnormal/total_fail/`
+11. 其余文件（包括只有数据范围、时间戳或数据居中 WARNING 的文件）→ `normal/`
 
-例如 `sub/a.csv` 被判定为帧不完整时，目标路径为 `abnormal/frame/sub/a.csv`。如果同一文件同时有多项异常，只按上面的第一项分类；因此帧不完整会优先于数据范围，数据范围优先于 ACC。
+例如 `sub/a.csv` 被判定为帧不完整时，目标路径为 `abnormal/frame/sub/a.csv`。如果同一文件同时有
+多项异常，只按上面的第一项分类；因此明确的 FAIL 分类优先于首帧警告，首帧警告优先于 Ipd
+等原低优先级检查项。
 
-报告必须包含 `文件相对路径` 列；旧报告缺少具体检查项列时，会按可识别的列和 `总异常(结果)` 回退到 `abnormal/other/` 或 `normal/`。分拣不会覆盖目标同名文件，源文件不存在、路径非法或目标已存在时记录为跳过。
+报告必须包含 `文件相对路径` 列；旧报告缺少具体检查项列时，会按可识别的列分类，只有总异常
+结果时进入 `abnormal/total_fail/`。分拣不会覆盖目标同名文件，源文件不存在、路径非法或目标
+已存在时记录为跳过。
 
-正常文件生成 `normal_files.csv`，异常文件统一生成一个 `abnormal_files.csv`。异常清单新增 `分类` 列，列出 `frame`、`range`、`acc_fail`、`acc_warning`、`timestamp`、`center`、`reference` 或 `other`；两个清单都包含文件名、相对路径、目标路径、移动状态、原因和场景分类。
+正常文件生成 `normal_files.csv`，异常文件统一生成一个 `abnormal_files.csv`。异常清单新增 `分类`
+列，常见值包括 `frame`、`range`、`acc_fail`、`acc_warning`、`timestamp`、`center`、
+`reference`、`frame_warning`、`ipd` 和 `total_fail`；扩展检查项使用检查项名称。两个清单都
+包含文件名、相对路径、目标路径、移动状态、原因和场景分类，不再生成 `other` 分类目录。
 
 ```text
 abnormal_files.csv

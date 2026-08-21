@@ -30,9 +30,37 @@ SORT_CATEGORIES = (
     "timestamp",
     "center",
     "reference",
-    "other",
+    "frame_warning",
+    "agc",
+    "ipd",
+    "total_fail",
     "normal",
 )
+
+TRAILING_CHECK_CATEGORIES = {
+    "AGC调光": "agc",
+    "AGC变化": "agc",
+    "Ipd转换": "ipd",
+}
+
+
+def _safe_category_name(check_name: str) -> str:
+    """将扩展检查项名称转换为单个安全目录名。"""
+    name = check_name.replace("\\", "/").split("/")[-1]
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")
+    return name or "total_fail"
+
+
+def _fallback_check_category(row: Dict[str, str]) -> str:
+    """识别低优先级检查项，未知项保留检查名称作为独立目录。"""
+    for column, value in row.items():
+        if not column.endswith("(结果)") or column == "总异常(结果)":
+            continue
+        if (value or "").strip().upper() != "FAIL":
+            continue
+        check_name = column[: -len("(结果)")]
+        return TRAILING_CHECK_CATEGORIES.get(check_name, _safe_category_name(check_name))
+    return ""
 
 
 def _sort_category(row: Dict[str, str]) -> str:
@@ -62,7 +90,11 @@ def _sort_category(row: Dict[str, str]) -> str:
         or row.get("血氧金标(结果)", "").strip().upper() == "FAIL"
     ):
         return "reference"
-    return "other" if status == "FAIL" else "normal"
+    if checks["frame"] == "WARNING":
+        return "frame_warning"
+    if status == "FAIL":
+        return _fallback_check_category(row) or "total_fail"
+    return "normal"
 
 
 def _detect_chip(csv_file: Path) -> Optional[str]:
@@ -334,9 +366,9 @@ def _sort_report(report: Path, output: Path) -> Dict[str, int]:
     for row in rows:
         relative_text = row.get("文件相对路径", "").strip()
         file_name = row.get("文件名", "").strip()
+        scene = row.get("场景分类", "default") or "default"
         category = _sort_category(row)
         bucket = "normal" if category == "normal" else "abnormal"
-        scene = row.get("场景分类", "default") or "default"
         if not relative_text:
             records[bucket].append([file_name, "", "", "跳过", "文件相对路径为空", category, scene])
             stats["skipped"] += 1

@@ -664,6 +664,27 @@ class TestCheckResultStatus:
         assert result.passed
         assert result.abnormal_ratio == pytest.approx(1.0)
 
+    def test_frame_start_offset_is_warning_when_following_frames_are_continuous(self, checker):
+        df = pd.DataFrame({"FRAME_ID": [10, 11, 12, 13]})
+
+        result = checker.check_frame_completeness(df, threshold_ratio=0)
+
+        assert result.status == "WARNING"
+        assert result.passed
+        assert result.abnormal_ratio == pytest.approx(0.0)
+        assert "首帧 10 非起始帧 0" in result.summary
+        assert "后续帧连续" in result.summary
+
+    def test_frame_start_offset_does_not_hide_later_frame_loss(self, checker):
+        df = pd.DataFrame({"FRAME_ID": [10, 11, 14, 15]})
+
+        result = checker.check_frame_completeness(df, threshold_ratio=1)
+
+        assert result.status == "FAIL"
+        assert not result.passed
+        assert "首帧 10 非起始帧 0" in result.summary
+        assert "丢包 2 帧" in result.summary
+
     def test_file_total_status_treats_warning_as_pass(self, checker):
         df = pd.DataFrame({"FRAME_ID": list(range(50)) + list(range(51, 100))})
         warning = checker.check_frame_completeness(df, threshold_ratio=1)

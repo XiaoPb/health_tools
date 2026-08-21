@@ -309,6 +309,8 @@ class DataChecker:
             return CheckResult("帧完整性", False, "FRAME_ID 列无有效数据")
 
         actual_count = len(frame_ids)
+        first_frame = int(frame_ids.iloc[0])
+        start_offset = first_frame != 0
 
         if self.chip_name.startswith("gh3220"):
             lost = self._check_cyclic_frames(frame_ids, cycle=256)
@@ -317,7 +319,7 @@ class DataChecker:
 
         expected = actual_count + lost
         pct = lost / expected * 100
-        return self._build_result(
+        result = self._build_result(
             name="帧完整性",
             abnormal_count=lost,
             total_count=expected,
@@ -327,6 +329,15 @@ class DataChecker:
                 f"丢包 {lost} 帧, 实际 {actual_count} 帧, 预期 {expected} 帧, " f"丢包率 {pct:.2f}%"
             ),
         )
+        if start_offset:
+            start_summary = f"首帧 {first_frame} 非起始帧 0"
+            if lost == 0:
+                result.status = "WARNING"
+                result.passed = True
+                result.summary = f"{start_summary}，后续帧连续"
+            else:
+                result.summary = f"{start_summary}；{result.summary}"
+        return result
 
     def _check_cyclic_frames(self, frame_ids: pd.Series, cycle: int = 256) -> int:
         """检查循环帧号（GH3220: 0-255循环）"""

@@ -171,11 +171,16 @@ def check_cmd(
             "timestamp",
             "center",
             "reference",
-            "other",
+            "frame_warning",
+            "agc",
+            "ipd",
+            "total_fail",
             "normal",
         )
+        extra_categories = sorted(set(result.sort_counts) - set(category_order) - {"skipped"})
         distribution = ", ".join(
-            f"{category}={result.sort_counts.get(category, 0)}" for category in category_order
+            f"{category}={result.sort_counts.get(category, 0)}"
+            for category in (*category_order, *extra_categories)
         )
         console.print(
             "[green]分拣完成[/green]: "

@@ -39,9 +39,11 @@ def test_sort_report_moves_files_and_keeps_relative_paths(tmp_path):
     output = tmp_path / "sorted"
     stats = _sort_report_files(report, output)
 
-    assert stats == {"normal": 1, "other": 1, "skipped": 0}
+    assert stats == {"normal": 1, "total_fail": 1, "skipped": 0}
     assert (output / "normal" / "ok.csv").read_text(encoding="utf-8") == "ok"
-    assert (output / "abnormal" / "other" / "sub" / "bad.csv").read_text(encoding="utf-8") == "bad"
+    assert (output / "abnormal" / "total_fail" / "sub" / "bad.csv").read_text(
+        encoding="utf-8"
+    ) == "bad"
     assert not (src / "ok.csv").exists()
     assert not (src / "sub" / "bad.csv").exists()
 
@@ -51,7 +53,7 @@ def test_sort_report_moves_files_and_keeps_relative_paths(tmp_path):
     assert normal_rows[1][3] == "已移动"
     assert abnormal_rows[1][0:2] == ["bad.csv", "sub/bad.csv"]
     assert abnormal_rows[1][3] == "已移动"
-    assert abnormal_rows[1][5] == "other"
+    assert abnormal_rows[1][5] == "total_fail"
 
 
 def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
@@ -63,7 +65,10 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
         "scene/acc_warning.csv",
         "scene/timestamp.csv",
         "scene/center.csv",
-        "scene/other.csv",
+        "scene/reference.csv",
+        "scene/frame_warning.csv",
+        "scene/agc.csv",
+        "scene/ipd.csv",
         "scene/normal.csv",
     ]
     for relative in paths:
@@ -79,14 +84,55 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
         "ACC异常(结果)",
         "时间戳间隔(结果)",
         "数据居中(结果)",
+        "AGC变化(结果)",
+        "心率金标(结果)",
         "Ipd转换(结果)",
         "场景分类",
         "文件相对路径",
     ]
     rows = [
-        ["frame.csv", "FAIL", "FAIL", "FAIL", "FAIL", "FAIL", "FAIL", "PASS", "scene", paths[0]],
-        ["range.csv", "FAIL", "PASS", "FAIL", "FAIL", "FAIL", "FAIL", "PASS", "scene", paths[1]],
-        ["acc_fail.csv", "FAIL", "PASS", "PASS", "FAIL", "FAIL", "FAIL", "PASS", "scene", paths[2]],
+        [
+            "frame.csv",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "scene",
+            paths[0],
+        ],
+        [
+            "range.csv",
+            "FAIL",
+            "PASS",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "scene",
+            paths[1],
+        ],
+        [
+            "acc_fail.csv",
+            "FAIL",
+            "PASS",
+            "PASS",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "scene",
+            paths[2],
+        ],
         [
             "acc_warning.csv",
             "PASS",
@@ -95,6 +141,8 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
             "WARNING",
             "PASS",
             "WARNING",
+            "PASS",
+            "PASS",
             "PASS",
             "scene",
             paths[3],
@@ -107,23 +155,95 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
             "PASS",
             "FAIL",
             "FAIL",
+            "FAIL",
+            "FAIL",
             "PASS",
             "scene",
             paths[4],
         ],
-        ["center.csv", "FAIL", "PASS", "PASS", "PASS", "PASS", "FAIL", "PASS", "scene", paths[5]],
-        ["other.csv", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS", "FAIL", "scene", paths[6]],
         [
-            "normal.csv",
+            "center.csv",
+            "FAIL",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "scene",
+            paths[5],
+        ],
+        [
+            "reference.csv",
+            "FAIL",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "FAIL",
+            "FAIL",
+            "FAIL",
+            "scene",
+            paths[6],
+        ],
+        [
+            "frame_warning.csv",
             "PASS",
             "WARNING",
-            "WARNING",
             "PASS",
-            "WARNING",
-            "WARNING",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
             "PASS",
             "scene",
             paths[7],
+        ],
+        [
+            "agc.csv",
+            "FAIL",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "FAIL",
+            "PASS",
+            "FAIL",
+            "scene",
+            paths[8],
+        ],
+        [
+            "ipd.csv",
+            "FAIL",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "PASS",
+            "FAIL",
+            "scene",
+            paths[9],
+        ],
+        [
+            "normal.csv",
+            "PASS",
+            "PASS",
+            "WARNING",
+            "PASS",
+            "WARNING",
+            "WARNING",
+            "PASS",
+            "PASS",
+            "PASS",
+            "scene",
+            paths[10],
         ],
     ]
     _write_report(report, [header, *rows])
@@ -137,7 +257,10 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
         "acc_warning": 1,
         "timestamp": 1,
         "center": 1,
-        "other": 1,
+        "reference": 1,
+        "frame_warning": 1,
+        "agc": 1,
+        "ipd": 1,
         "normal": 1,
         "skipped": 0,
     }
@@ -148,13 +271,16 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
         "acc_warning": paths[3],
         "timestamp": paths[4],
         "center": paths[5],
-        "other": paths[6],
+        "reference": paths[6],
+        "frame_warning": paths[7],
+        "agc": paths[8],
+        "ipd": paths[9],
     }
     for category, relative in expected.items():
         assert (tmp_path / "sorted" / "abnormal" / category / relative).exists()
         assert (tmp_path / "sorted" / "abnormal_files.csv").exists()
         assert not (tmp_path / "sorted" / f"{category}_files.csv").exists()
-    assert (tmp_path / "sorted" / "normal" / paths[7]).exists()
+    assert (tmp_path / "sorted" / "normal" / paths[10]).exists()
     assert (tmp_path / "sorted" / "normal_files.csv").exists()
 
 
@@ -184,7 +310,7 @@ def test_api_sort_report_uses_same_priority_rules(tmp_path):
     assert (tmp_path / "sorted/abnormal/frame/nested/sample.csv").exists()
 
 
-def test_sort_report_places_reference_fail_before_other(tmp_path):
+def test_sort_report_places_reference_fail_before_ipd(tmp_path):
     src = tmp_path / "src"
     source = src / "nested" / "sample.csv"
     source.parent.mkdir(parents=True)
@@ -208,6 +334,67 @@ def test_sort_report_places_reference_fail_before_other(tmp_path):
 
     assert stats == {"reference": 1, "skipped": 0}
     assert (tmp_path / "sorted/abnormal/reference/nested/sample.csv").exists()
+
+
+def test_sort_report_uses_unknown_failed_check_name_as_category(tmp_path):
+    src = tmp_path / "src"
+    source = src / "nested" / "sample.csv"
+    source.parent.mkdir(parents=True)
+    source.write_text("data", encoding="utf-8")
+    report = src / "check_report.csv"
+    _write_report(
+        report,
+        [
+            ["文件名", "总异常(结果)", "自定义质量(结果)", "文件相对路径"],
+            ["sample.csv", "FAIL", "FAIL", "nested/sample.csv"],
+        ],
+    )
+
+    stats = _sort_report(report, tmp_path / "sorted")
+
+    assert stats == {"自定义质量": 1, "skipped": 0}
+    assert (tmp_path / "sorted/abnormal/自定义质量/nested/sample.csv").exists()
+
+
+def test_sort_report_sanitizes_unknown_check_category(tmp_path):
+    src = tmp_path / "src"
+    source = src / "sample.csv"
+    src.mkdir()
+    source.write_text("data", encoding="utf-8")
+    report = src / "check_report.csv"
+    _write_report(
+        report,
+        [
+            ["文件名", "总异常(结果)", "../自定义:质量(结果)", "文件相对路径"],
+            ["sample.csv", "FAIL", "FAIL", "sample.csv"],
+        ],
+    )
+
+    stats = _sort_report(report, tmp_path / "sorted")
+
+    assert stats == {"自定义_质量": 1, "skipped": 0}
+    assert (tmp_path / "sorted/abnormal/自定义_质量/sample.csv").exists()
+
+
+def test_sort_report_places_unclassified_total_failure_last(tmp_path):
+    src = tmp_path / "src"
+    source = src / "sample.csv"
+    src.mkdir()
+    source.write_text("data", encoding="utf-8")
+    report = src / "check_report.csv"
+    _write_report(
+        report,
+        [
+            ["文件名", "总异常(结果)", "文件相对路径"],
+            ["sample.csv", "FAIL", "sample.csv"],
+        ],
+    )
+
+    stats = _sort_report(report, tmp_path / "sorted")
+
+    assert stats == {"total_fail": 1, "skipped": 0}
+    assert not source.exists()
+    assert (tmp_path / "sorted/abnormal/total_fail/sample.csv").exists()
 
 
 def test_sort_report_skips_existing_target(tmp_path):
