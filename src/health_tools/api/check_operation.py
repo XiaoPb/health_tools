@@ -407,10 +407,12 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
     header.extend(_accuracy_header("Online", methods))
     header.extend(_accuracy_header("Comp", methods))
     header.extend(["准确度标定分类", "准确度标定说明", "文件相对路径"])
+    leading_columns = ["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项"]
+    output_header = leading_columns + [column for column in header if column not in leading_columns]
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
-        writer.writerow(header)
+        writer.writerow(output_header)
         for report in reports:
             row: List[object] = [report.file_path.name, report.chip, report.total_status]
             result_map = {result.name: result for result in report.results}
@@ -456,7 +458,8 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
             row.extend(_accuracy_values(getattr(accuracy_result, "online", None), methods))
             row.extend(_accuracy_values(getattr(accuracy_result, "comp", None), methods))
             row.extend([*_accuracy_mark_values(report), _relative_path(report.file_path, base)])
-            writer.writerow(row)
+            row_by_name = dict(zip(header, row))
+            writer.writerow([row_by_name[column] for column in output_header])
 
 
 COMPACT_HEADER = [

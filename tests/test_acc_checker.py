@@ -739,8 +739,8 @@ class TestCheckResultStatus:
         with open(output, newline="", encoding="utf-8-sig") as f:
             rows = list(csv.reader(f))
 
-        assert rows[0][:5] == ["文件名", "芯片", "总异常(结果)", "帧完整性(结果)", "帧完整性(说明)"]
-        assert rows[1][:5] == ["data.csv", "gh3220", "PASS", "WARNING", "丢包 1 帧"]
+        assert rows[0][:5] == ["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项"]
+        assert rows[1][:5] == ["data.csv", "gh3220", "PASS", "rest", "首帧非0"]
         assert rows[0][-1] == "文件相对路径"
         assert rows[1][-1] == "data.csv"
         assert "场景分类" in rows[0]

@@ -164,7 +164,7 @@ def test_accuracy_mark_minimum_is_strictly_below_threshold() -> None:
     assert match_accuracy_mark(result, (mark,)) is None
 
 
-def test_check_report_places_primary_issue_and_accuracy_after_scene(tmp_path) -> None:
+def test_check_report_places_scene_and_primary_issue_after_total(tmp_path) -> None:
     mark = AccuracyMarkRule("low", "online", "within_5", "accuracy_low", "Online准确度低", min=80)
     report = FileCheckReport(
         tmp_path / "sample.csv",
@@ -182,13 +182,12 @@ def test_check_report_places_primary_issue_and_accuracy_after_scene(tmp_path) ->
 
     with output.open(newline="", encoding="utf-8-sig") as handle:
         header, row = list(csv.reader(handle))
-    scene = header.index("场景分类")
-    assert header[scene + 1] == "主要异常项"
-    assert header[scene + 2 : scene + 6] == [
+    assert header[:5] == ["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项"]
+    assert header[5:9] == [
+        "帧完整性(结果)",
+        "帧完整性(说明)",
         "Online准确度样本数",
         "Online MAE",
-        "Online ±5BPM准确度",
-        "Online ±10BPM准确度",
     ]
     assert row[header.index("Online ±5BPM准确度")] == "66.67%"
     assert header[-1] == "文件相对路径"
