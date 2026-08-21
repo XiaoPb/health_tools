@@ -1,7 +1,7 @@
 import math
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Union, cast
 
 import yaml
 
@@ -92,7 +92,7 @@ class RuleValidator:
 
     @staticmethod
     def _validate_check_rule(rule: dict, strict: bool) -> List[str]:
-        errors = []
+        errors: List[str] = []
         allowed = {
             "version",
             "description",
@@ -345,25 +345,24 @@ class RuleValidator:
 
     @staticmethod
     def _is_non_negative_finite(value: object) -> bool:
-        return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(float(value))
-            and value >= 0
-        )
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        number = float(cast(Union[int, float], value))
+        return math.isfinite(number) and number >= 0
 
     @staticmethod
     def _is_percent(value: object) -> bool:
-        return RuleValidator._is_non_negative_finite(value) and float(value) <= 100
+        return (
+            RuleValidator._is_non_negative_finite(value)
+            and float(cast(Union[int, float], value)) <= 100
+        )
 
     @staticmethod
     def _is_positive_finite(value: object) -> bool:
-        return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(float(value))
-            and value > 0
-        )
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        number = float(cast(Union[int, float], value))
+        return math.isfinite(number) and number > 0
 
     @staticmethod
     def _validate_chip_rule(rule: dict, strict: bool) -> List[str]:

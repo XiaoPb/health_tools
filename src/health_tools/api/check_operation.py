@@ -825,7 +825,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                         online_column=request.accuracy_online_column or "ALGO_RESULT0",
                         comp_column=request.accuracy_comp_column,
                         methods=tuple(request.accuracy_methods),
-                        thresholds=tuple(request.accuracy_custom_thresholds),
+                        thresholds=tuple(dict(item) for item in request.accuracy_custom_thresholds),
                         inclusive=request.accuracy_inclusive,
                         marks=tuple(request.accuracy_marks),
                     ),
