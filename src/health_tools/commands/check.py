@@ -321,12 +321,10 @@ def check_cmd(
             "reference",
             "frame_warning",
         )
-        # 准确度标定分类由规则声明，名称不固定；保持报告/规则出现顺序，
+        # 准确度标定分类由规则声明，名称不固定；按有效 marks 的声明顺序展示，
         # 但整体位置固定在首帧警告之后、AGC/Ipd 之前。
         accuracy_categories = [
-            category
-            for category in result.sort_counts
-            if category.startswith("accuracy") and category != "accuracy"
+            mark.category for mark in accuracy_marks if mark.category in result.sort_counts
         ]
         trailing_categories = ("agc", "ipd", "total_fail", "normal")
         known = set(category_order) | set(accuracy_categories) | set(trailing_categories)

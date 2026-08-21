@@ -165,6 +165,46 @@ def test_check_cli_accuracy_marks_keep_reverse_interleaved_order(monkeypatch):
     assert len({mark.id for mark in marks}) == 3
 
 
+def test_check_sort_summary_uses_mark_order_without_category_prefix(monkeypatch, tmp_path):
+    rule = tmp_path / "check.yaml"
+    rule.write_text(
+        """version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: online_low
+      comparison: online
+      metric: within_5
+      min: 80
+      category: online_low
+      label: Online 准确度低
+    - id: comp_low
+      comparison: comp
+      metric: within_5
+      min: 70
+      category: comp_low
+      label: Comp 准确度低
+""",
+        encoding="utf-8",
+    )
+
+    def fake_run_check(request, *, context=None):
+        return CheckResult(
+            BatchResult("check"),
+            sort_counts={"comp_low": 1, "online_low": 1, "ipd": 1, "skipped": 0},
+        )
+
+    monkeypatch.setattr("health_tools.api.run_check", fake_run_check)
+    result = CliRunner().invoke(
+        check_cmd,
+        ["-r", str(rule), "--sort", "--sort-output", str(tmp_path / "sorted")],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.index("online_low=1") < result.output.index("comp_low=1")
+    assert result.output.index("comp_low=1") < result.output.index("ipd=1")
+
+
 @pytest.mark.parametrize("category", ["../outside", "nested/path", r"nested\path", "has space"])
 def test_check_cli_accuracy_marks_reject_unsafe_category(category):
     result = CliRunner().invoke(
