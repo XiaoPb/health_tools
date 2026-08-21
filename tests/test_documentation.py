@@ -89,7 +89,7 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     assert "准确度标定分类" in command_doc
     assert "准确度标定说明" in command_doc
     assert "文件相对路径" in command_doc
-    assert "accuracy.comp_column 可以省略" in command_doc
+    assert "`accuracy.comp_column` 可以省略" in command_doc
     assert "读取既有 check 报告" in command_doc
     assert "不会在同一次调用中重新检查" in command_doc
 
