@@ -47,17 +47,22 @@ def test_check_accuracy_skips_all_zero_comp() -> None:
     assert result.comp is None
 
 
-@pytest.mark.parametrize("disabled", ["REF", "ONLINE"])
-def test_check_accuracy_returns_zero_samples_when_required_series_is_all_zero(
-    disabled: str,
-) -> None:
-    columns = {"REF": [80, 81], "ONLINE": [80, 82], "COMP": [80, 81]}
-    columns[disabled] = [0, 0]
+def test_check_accuracy_disables_both_comparisons_when_ref_is_all_zero() -> None:
+    frame = pd.DataFrame({"REF": [0, 0], "ONLINE": [80, 82], "COMP": [80, 81]})
 
-    result = calculate_check_accuracy(pd.DataFrame(columns), config())
+    result = calculate_check_accuracy(frame, config())
 
     assert result.online == {"samples": 0}
     assert result.comp is None
+
+
+def test_check_accuracy_still_computes_comp_when_online_is_all_zero() -> None:
+    frame = pd.DataFrame({"REF": [80, 81], "ONLINE": [0, 0], "COMP": [80, 82]})
+
+    result = calculate_check_accuracy(frame, config(methods=("mae",)))
+
+    assert result.online == {"samples": 0}
+    assert result.comp == {"mae": 0.5, "samples": 2}
 
 
 @pytest.mark.parametrize(

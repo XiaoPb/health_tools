@@ -25,22 +25,24 @@ def calculate_check_accuracy(frame: pd.DataFrame, config: CheckAccuracyRule) -> 
 
     prepared = prepare_accuracy_columns(columns)
     active = set(prepared.active_columns)
-    if not {"ref", "online"}.issubset(active):
+    if "ref" not in active:
         return CheckAccuracyResult(online={"samples": 0})
 
     metric_frame = pd.DataFrame(prepared.columns)
     methods = list(config.methods)
     thresholds = list(config.thresholds)
 
-    online = calculate_accuracy(
-        metric_frame,
-        "ref",
-        "online",
-        methods,
-        thresholds,
-        config.inclusive,
-        trim_zero_padding=False,
-    )
+    online = {"samples": 0}
+    if "online" in active:
+        online = calculate_accuracy(
+            metric_frame,
+            "ref",
+            "online",
+            methods,
+            thresholds,
+            config.inclusive,
+            trim_zero_padding=False,
+        )
     comp = None
     if "comp" in active:
         comp = calculate_accuracy(
