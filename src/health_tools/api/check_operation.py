@@ -45,38 +45,41 @@ TRAILING_CHECK_CATEGORIES = {
 }
 
 
+# 主要异常与分拣共用的优先级事实来源；表项按优先级从高到低排列。
+PRIMARY_RULES = (
+    ("帧完整性(结果)", "FAIL", "frame", "帧不完整"),
+    ("数据范围(结果)", "FAIL", "range", "数据范围异常"),
+    ("ACC异常(结果)", "FAIL", "acc_fail", "ACC异常"),
+    ("ACC异常(结果)", "WARNING", "acc_warning", "ACC警告"),
+    ("时间戳间隔(结果)", "FAIL", "timestamp", "时间戳异常"),
+    ("数据居中(结果)", "FAIL", "center", "数据未居中"),
+    ("心率金标(结果)", "FAIL", "reference", "金标异常"),
+    ("血氧金标(结果)", "FAIL", "reference", "金标异常"),
+    ("帧完整性(结果)", "WARNING", "frame_warning", "首帧非0"),
+    ("准确度标定分类", "__PRESENT__", "__accuracy__", ""),
+    ("AGC变化(结果)", "FAIL", "agc", "AGC异常"),
+    ("AGC调光(结果)", "FAIL", "agc", "AGC异常"),
+    ("Ipd转换(结果)", "FAIL", "ipd", "Ipd异常"),
+)
+
+
+def _primary_match(row: Dict[str, str]) -> Tuple[str, str]:
+    """返回报告行的统一优先级匹配结果（目录分类、中文摘要）。"""
+    for column, expected, category, label in PRIMARY_RULES:
+        if expected == "__PRESENT__":
+            value = row.get(column, "").strip()
+            if value:
+                return _safe_category_name(value), row.get("准确度标定说明", "").strip() or value
+            continue
+        if row.get(column, "").strip().upper() == expected:
+            return category, label
+    return "", ""
+
+
 def primary_issue(row: Dict[str, str]) -> str:
     """按统一优先级返回报告行的主要异常中文摘要。"""
-
-    def status(key: str) -> str:
-        return row.get(key, "").strip().upper()
-
-    if status("帧完整性(结果)") == "FAIL":
-        return "帧不完整"
-    if status("数据范围(结果)") == "FAIL":
-        return "数据范围异常"
-    if status("ACC异常(结果)") == "FAIL":
-        return "ACC异常"
-    if status("ACC异常(结果)") == "WARNING":
-        return "ACC警告"
-    if status("时间戳间隔(结果)") == "FAIL":
-        return "时间戳异常"
-    if status("数据居中(结果)") == "FAIL":
-        return "数据未居中"
-    if status("心率金标(结果)") == "FAIL" or status("血氧金标(结果)") == "FAIL":
-        return "金标异常"
-    if status("帧完整性(结果)") == "WARNING":
-        return "首帧非0"
-    category = row.get("准确度标定分类", "").strip()
-    if category:
-        return row.get("准确度标定说明", "").strip() or category
-    if status("Ipd转换(结果)") == "FAIL":
-        return "Ipd异常"
-    if status("AGC变化(结果)") == "FAIL" or status("AGC调光(结果)") == "FAIL":
-        return "AGC异常"
-    if status("总异常(结果)") == "FAIL":
-        return "其他异常"
-    return ""
+    _, label = _primary_match(row)
+    return label or ("其他异常" if row.get("总异常(结果)", "").strip().upper() == "FAIL" else "")
 
 
 def _safe_category_name(check_name: str) -> str:
@@ -101,35 +104,9 @@ def _fallback_check_category(row: Dict[str, str]) -> str:
 def _sort_category(row: Dict[str, str]) -> str:
     """按异常优先级为单个报告行选择唯一分拣目录。"""
     status = row.get("总异常(结果)", "").strip().upper()
-    checks = {
-        "frame": row.get("帧完整性(结果)", "").strip().upper(),
-        "range": row.get("数据范围(结果)", "").strip().upper(),
-        "acc": row.get("ACC异常(结果)", "").strip().upper(),
-        "timestamp": row.get("时间戳间隔(结果)", "").strip().upper(),
-        "center": row.get("数据居中(结果)", "").strip().upper(),
-    }
-    if checks["frame"] == "FAIL":
-        return "frame"
-    if checks["range"] == "FAIL":
-        return "range"
-    if checks["acc"] == "FAIL":
-        return "acc_fail"
-    if checks["acc"] == "WARNING":
-        return "acc_warning"
-    if checks["timestamp"] == "FAIL":
-        return "timestamp"
-    if checks["center"] == "FAIL":
-        return "center"
-    if (
-        row.get("心率金标(结果)", "").strip().upper() == "FAIL"
-        or row.get("血氧金标(结果)", "").strip().upper() == "FAIL"
-    ):
-        return "reference"
-    if checks["frame"] == "WARNING":
-        return "frame_warning"
-    accuracy_category = row.get("准确度标定分类", "").strip()
-    if accuracy_category:
-        return _safe_category_name(accuracy_category)
+    category, _ = _primary_match(row)
+    if category:
+        return category
     if status == "FAIL":
         return _fallback_check_category(row) or "total_fail"
     return "normal"

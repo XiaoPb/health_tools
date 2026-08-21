@@ -11,6 +11,7 @@ from health_tools.api.check_operation import (
     _compile_scene_regex,
     _save_compact_report,
     _scene_for_path,
+    _sort_category,
     primary_issue,
 )
 from health_tools.commands.check import _save_report_csv
@@ -877,3 +878,14 @@ def test_primary_issue_uses_accuracy_before_ipd():
         "Ipd转换(结果)": "FAIL",
     }
     assert primary_issue(row) == "Online ±5准确度低"
+
+
+def test_primary_issue_and_sort_share_accuracy_priority_descriptor():
+    row = {
+        "总异常(结果)": "FAIL",
+        "准确度标定分类": "accuracy_online_low",
+        "准确度标定说明": "Online ±5准确度低",
+        "Ipd转换(结果)": "FAIL",
+    }
+    assert primary_issue(row) == "Online ±5准确度低"
+    assert _sort_category(row) == "accuracy_online_low"
