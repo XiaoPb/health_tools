@@ -1202,7 +1202,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 None,
             )
 
-    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+    from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
     total = len(files)
     ctx.check_cancelled("files", _batch("check", items))
@@ -1213,18 +1213,19 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     effective_workers = min(request.workers, max(1, total))
     window = max(1, effective_workers * 2)
     executor = ThreadPoolExecutor(max_workers=effective_workers)
-    pending = {}
+    pending: Dict[Future, Tuple[int, Path]] = {}
     file_iter = enumerate(files)
 
     def submit_available() -> None:
         while len(pending) < window:
-            index, path = next(file_iter, (None, None))
-            if index is None:
+            try:
+                index, path = next(file_iter)
+            except StopIteration:
                 break
             pending[executor.submit(check_one, path)] = (index, path)
 
     submit_available()
-    completed_records = {}
+    completed_records: Dict[int, Tuple[Path, Any, Any, Any, Any, Any, bool]] = {}
     try:
         completed = 0
         while pending:
