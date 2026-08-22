@@ -5,7 +5,11 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from health_tools.api.check_operation import _sort_report
+from health_tools.api.check_operation import (
+    _discover_check_inputs,
+    _is_check_report_csv,
+    _sort_report,
+)
 from health_tools.commands.check import _sort_report_files
 
 
@@ -18,6 +22,26 @@ def _write_report(path: Path, rows: list[list[str]]) -> None:
 def _read_csv(path: Path) -> list[list[str]]:
     with open(path, newline="", encoding="utf-8-sig") as f:
         return list(csv.reader(f))
+
+
+def test_check_report_header_detection_ignores_file_name(tmp_path):
+    full = tmp_path / "renamed_full.csv"
+    compact = tmp_path / "renamed_compact.csv"
+    source = tmp_path / "source.csv"
+    _write_report(
+        full,
+        [["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项", "文件相对路径"]],
+    )
+    _write_report(
+        compact,
+        [["文件名", "场景分类", "文件相对路径", "芯片", "检查项", "状态", "通道", "说明"]],
+    )
+    _write_report(source, [["文件名", "芯片", "TimeStamp", "FRAME_ID"]])
+
+    assert _is_check_report_csv(full)
+    assert _is_check_report_csv(compact)
+    assert not _is_check_report_csv(source)
+    assert _discover_check_inputs(tmp_path) == [source]
 
 
 def test_sort_report_moves_files_and_keeps_relative_paths(tmp_path):

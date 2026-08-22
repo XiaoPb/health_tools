@@ -46,6 +46,41 @@ SORT_CATEGORIES = (
     "normal",
 )
 
+_FULL_REPORT_HEADER = {
+    "文件名",
+    "芯片",
+    "总异常(结果)",
+    "场景分类",
+    "主要异常项",
+    "文件相对路径",
+}
+_COMPACT_REPORT_HEADER = {
+    "文件名",
+    "场景分类",
+    "文件相对路径",
+    "芯片",
+    "检查项",
+    "状态",
+    "通道",
+}
+
+
+def _is_check_report_csv(path: Path) -> bool:
+    """按表头识别 check 完整报告和 compact 报告。"""
+    try:
+        with path.open("r", newline="", encoding="utf-8-sig") as handle:
+            header = {column.strip() for column in next(csv.reader(handle))}
+    except (OSError, UnicodeError, csv.Error, StopIteration):
+        return False
+    return _FULL_REPORT_HEADER.issubset(header) or _COMPACT_REPORT_HEADER.issubset(header)
+
+
+def _discover_check_inputs(target: Path) -> List[Path]:
+    """发现待检查 CSV，并排除 check 自身的完整/compact 报告。"""
+    if target.is_file():
+        return [] if _is_check_report_csv(target) else [target]
+    return sorted(path for path in target.rglob("*.csv") if not _is_check_report_csv(path))
+
 
 def _compact_report_path(report_path: Path) -> Path:
     """根据完整报告路径生成对应的精简报告路径。"""
@@ -760,11 +795,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     target = _require_path(request.input_path)
     scene_pattern = _compile_scene_regex(request.scene_regex)
     base = target.parent if target.is_file() else target
-    files = (
-        [target]
-        if target.is_file()
-        else sorted(path for path in target.rglob("*.csv") if path.name != "check_report.csv")
-    )
+    files = _discover_check_inputs(target)
     checks = (
         set(request.checks.split(","))
         if request.checks

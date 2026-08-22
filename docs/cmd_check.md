@@ -49,6 +49,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 ## 输出与异常汇总
 
 - 普通检查模式使用进度条显示并行处理进度。
+- 扫描输入目录时会按表头识别并忽略 check 自身生成的完整报告和 compact 报告，即使报告已改名也不会再次进入统计；其它 CSV 仍按普通输入处理。
 - 默认先输出“检查处理结果”汇总，按无法识别芯片、规则加载失败、读取失败、空文件、列结构不符合规则等原因统计。
 - `-v/--verbose` 会显示跳过文件明细和每个检查项的详情。
 - 有可检查文件时生成 `check_report.csv`；如果启用 ACC 且存在 Ipd FAIL，会额外生成 `ipd_detail_<文件名>.csv`。
