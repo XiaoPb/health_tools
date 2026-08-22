@@ -125,17 +125,17 @@ def test_check_sort_summary_uses_mark_order_without_category_prefix(monkeypatch,
         """version: '1.0'
 accuracy:
   enabled: true
-      marks:
-        - id: online_low
-          left: online.within_5
-          operator: lt
-          threshold: 80
+  marks:
+    - id: online_low
+      left: online.within_5
+      operator: lt
+      threshold: 80
       category: online_low
       label: Online 准确度低
-        - id: comp_low
-          left: comp.within_5
-          operator: lt
-          threshold: 70
+    - id: comp_low
+      left: comp.within_5
+      operator: lt
+      threshold: 70
       category: comp_low
       label: Comp 准确度低
 """,
