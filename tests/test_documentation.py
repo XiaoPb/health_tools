@@ -94,6 +94,18 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     assert "不会在同一次调用中重新检查" in command_doc
 
 
+def test_check_documentation_describes_bounded_parallel_scheduling():
+    command_doc = (DOCS_DIR / "cmd_check.md").read_text(encoding="utf-8")
+
+    for statement in (
+        "在途任务窗口最多为 `workers * 2`",
+        "按输入顺序汇总报告",
+        "取消操作会停止提交新文件",
+        "不保证线性提速",
+    ):
+        assert statement in command_doc
+
+
 def test_current_documentation_has_no_broken_local_links():
     markdown_files = [ROOT / "README.md", ROOT / "CHANGELOG.md", *DOCS_DIR.glob("*.md")]
     link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
