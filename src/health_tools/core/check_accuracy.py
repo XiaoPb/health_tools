@@ -31,9 +31,7 @@ def _metric_value(result: CheckAccuracyResult, path: str) -> Optional[float]:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def accuracy_mark_value(
-    result: CheckAccuracyResult, mark: AccuracyMarkRule
-) -> Optional[float]:
+def accuracy_mark_value(result: CheckAccuracyResult, mark: AccuracyMarkRule) -> Optional[float]:
     """返回标定规则实际与 threshold 比较的数值。"""
     left = _metric_value(result, mark.left)
     if left is None:

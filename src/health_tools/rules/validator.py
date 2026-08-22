@@ -324,7 +324,9 @@ class RuleValidator:
         }
         methods_set = set(methods) if isinstance(methods, list) else default_methods
         threshold_names = {
-            t.get("name") for t in thresholds if isinstance(thresholds, list) and isinstance(t, dict)
+            t.get("name")
+            for t in thresholds
+            if isinstance(thresholds, list) and isinstance(t, dict)
         }
         known_metrics = methods_set | {str(name) for name in threshold_names if name}
         operators = {"lt", "lte", "gt", "gte", "diff_gte", "diff_gt", "ratio_lt", "ratio_lte"}
@@ -338,14 +340,28 @@ class RuleValidator:
                     errors.append(f"{prefix} 缺少有效的 '{field}'")
             if not RuleValidator._is_finite(mark.get("threshold")):
                 errors.append(f"{prefix}.threshold 必须是有限数")
-            if "right" not in mark and mark.get("operator") in {"diff_gte", "diff_gt", "ratio_lt", "ratio_lte"}:
+            if "right" not in mark and mark.get("operator") in {
+                "diff_gte",
+                "diff_gt",
+                "ratio_lt",
+                "ratio_lte",
+            }:
                 errors.append(f"{prefix}.right 是二元运算必填项")
             legacy = set(mark) & {"comparison", "metric", "min", "min_gap"}
             if legacy:
                 errors.append(f"{prefix} 包含已废弃的旧字段: {', '.join(sorted(legacy))}")
             unknown = set(mark) - {
-                "id", "left", "operator", "right", "threshold", "category", "label",
-                "comparison", "metric", "min", "min_gap",
+                "id",
+                "left",
+                "operator",
+                "right",
+                "threshold",
+                "category",
+                "label",
+                "comparison",
+                "metric",
+                "min",
+                "min_gap",
             }
             if unknown:
                 errors.append(f"{prefix} 包含未知字段: {', '.join(sorted(unknown))}")
@@ -368,7 +384,9 @@ class RuleValidator:
             for name, path in (("left", left), ("right", right)):
                 if path is None:
                     continue
-                if not isinstance(path, str) or not re.fullmatch(r"(?:online|comp)\.[A-Za-z0-9_.-]+", path):
+                if not isinstance(path, str) or not re.fullmatch(
+                    r"(?:online|comp)\.[A-Za-z0-9_.-]+", path
+                ):
                     errors.append(f"{prefix}.{name} 必须是 online.<metric> 或 comp.<metric>")
                 elif path.split(".", 1)[1] not in known_metrics:
                     errors.append(

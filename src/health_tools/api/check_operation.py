@@ -7,7 +7,7 @@ import math
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 
@@ -15,6 +15,7 @@ from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import RequestValidationError
 from health_tools.api.models import (
     BatchResult,
+    CheckAccuracyResult,
     CheckRequest,
     CheckResult,
     ItemResult,
@@ -612,9 +613,10 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
             if mark:
                 from health_tools.core.check_accuracy import accuracy_mark_value
 
+                accuracy_result = cast(CheckAccuracyResult, accuracy)
                 source, metric = mark.left.split(".", 1)
-                values = getattr(accuracy, source, None) or {}
-                metric_value = accuracy_mark_value(accuracy, mark)
+                values = getattr(accuracy_result, source, None) or {}
+                metric_value = accuracy_mark_value(accuracy_result, mark)
                 writer.writerow(
                     {
                         "文件名": report.file_path.name,
@@ -628,9 +630,7 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                         "总数": (values.get("samples", "") if values else ""),
                         "异常占比": _format_compact_percent(metric_value),
                         "说明": mark.label,
-                        "比较对象": (
-                            "Online vs Comp" if mark.right else "Ref"
-                        ),
+                        "比较对象": ("Online vs Comp" if mark.right else "Ref"),
                         "准确度指标": format_metric_name(metric),
                         "准确度阈值": mark.threshold,
                     }
