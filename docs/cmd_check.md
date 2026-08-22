@@ -59,6 +59,14 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - Online/Comp 准确度沿用 offline 的共同有效边界规则：三列共同确定首尾边界，边界内 0 保留，NaN/Inf 在比较时过滤；全 0 Comp 不参与 Comp vs Ref。
 - 准确度是否启用、列名、指标、阈值、边界和标定优先级全部由 `-r/--rule` 的 `accuracy` 块声明；CLI 不再提供准确度策略参数。未加载规则文件时不执行准确度统计。
 
+`accuracy.marks` 统一使用声明式条件：`left`/`right` 为 `online.<metric>` 或
+`comp.<metric>`，`operator` 支持 `lt/lte/gt/gte`、`diff_gte/diff_gt`、
+`ratio_lt/ratio_lte`，并用有限数 `threshold` 判定。差值按 `right - left` 计算，比例按
+`left / right` 计算；二元运算必须提供 `right`，指标缺失或比例除数为 0 时不命中。
+mark 引用的指标必须由 `accuracy.methods` 或非空 `accuracy.thresholds` 项声明；旧的
+`comparison/metric/min/min_gap` 格式不兼容，校验时会直接报错。多条 mark 按 YAML 顺序匹配，
+第一条命中项决定主要异常说明和分拣目录。
+
 启用准确度时，`check_report.csv` 的列顺序固定为：文件名、芯片、总异常结果、场景分类、主要异常项；随后为每个
 `checks` 检查项的“状态/摘要”列，以及 ACC 证据列（启用 ACC 时）；最后部分的核心列顺序为：
 
