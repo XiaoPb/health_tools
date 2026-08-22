@@ -1094,7 +1094,11 @@ class DataChecker:
         if not acc_cols:
             return report
 
-        acc_df = df[acc_cols].apply(pd.to_numeric, errors="coerce")
+        context = getattr(self, "_check_context", None)
+        if context is not None and context.frame is df:
+            acc_df = context.numeric(tuple(acc_cols))
+        else:
+            acc_df = df[acc_cols].apply(pd.to_numeric, errors="coerce")
 
         self._check_acc_all_zero(acc_df, frame_ids, report)
         per_ch_static = self._check_acc_static(
