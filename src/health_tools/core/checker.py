@@ -224,8 +224,8 @@ class DataChecker:
 
     @staticmethod
     def _is_all_zero_channel(series: pd.Series) -> bool:
-        """判断通道有效值是否全为0，用于跳过预留数据列。"""
-        numeric = pd.to_numeric(series, errors="coerce").dropna()
+        """判断已转换数值通道的有效值是否全为0。"""
+        numeric = series.dropna()
         return not numeric.empty and bool((numeric == 0).all())
 
     def _filter_reserved_zero_channels(
@@ -235,7 +235,7 @@ class DataChecker:
         active_cols: List[str] = []
         skipped_cols: List[str] = []
         for col in columns:
-            if self._is_all_zero_channel(df[col]):
+            if self._is_all_zero_channel(self._numeric_series(df, col)):
                 skipped_cols.append(col)
             else:
                 active_cols.append(col)
@@ -687,15 +687,16 @@ class DataChecker:
         threshold_ratio: float = 1.0,
         expected_base_ms: Optional[float] = None,
         _intervals_ms: Optional[pd.Series] = None,
+        _parse_error: str = "",
     ) -> CheckResult:
         """检查相邻时间戳间隔是否稳定。"""
         if timestamp_column not in df.columns:
             return CheckResult("时间戳间隔", False, f"未找到时间戳列: {timestamp_column}")
 
-        if _intervals_ms is None:
+        if _intervals_ms is None and not _parse_error:
             intervals_ms, error = self._parse_timestamp_intervals_ms(df[timestamp_column])
         else:
-            intervals_ms, error = _intervals_ms, ""
+            intervals_ms, error = _intervals_ms, _parse_error
         if error:
             return CheckResult("时间戳间隔", False, error)
 

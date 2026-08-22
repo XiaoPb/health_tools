@@ -221,9 +221,9 @@ class _FileCheckContext:
     _numeric_columns: Dict[Tuple[str, ...], pd.DataFrame] = field(default_factory=dict)
     _timestamp_analysis: Dict[str, Tuple[Optional[pd.Series], str]] = field(default_factory=dict)
     _sample_positions: Dict[Tuple[float, str], np.ndarray] = field(default_factory=dict)
-    _sample_frames: Dict[Tuple[str, str, Optional[str], float, Tuple[int, ...]], pd.DataFrame] = (
-        field(default_factory=dict)
-    )
+    _sample_frames: Dict[
+        Tuple[str, str, str, Optional[str], float, Tuple[int, ...]], pd.DataFrame
+    ] = field(default_factory=dict)
 
     @classmethod
     def create(cls, path: Path, chip: str, chip_rule: Any, frame: pd.DataFrame, checker: Any):
@@ -308,6 +308,7 @@ class _FileCheckContext:
         comp_column: Optional[str],
     ) -> pd.DataFrame:
         key = (
+            timestamp_column,
             ref_column,
             online_column,
             comp_column,
@@ -1059,7 +1060,8 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     ms_tolerance=request.timestamp_ms,
                     threshold_ratio=request.timestamp_fail_ratio,
                     expected_base_ms=request.timestamp_base_ms,
-                    _intervals_ms=timestamp_intervals if not timestamp_error else None,
+                    _intervals_ms=timestamp_intervals,
+                    _parse_error=timestamp_error,
                 )
                 report.results.append(timestamp_result)
             ref_enabled = request.checks is None or "ref" in checks
@@ -1226,10 +1228,18 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
 
     submit_available()
     completed_records: Dict[int, Tuple[Path, Any, Any, Any, Any, Any, bool]] = {}
+
+    def completed_batch() -> BatchResult:
+        completed_items = list(items)
+        completed_items.extend(
+            record[1] for _, record in sorted(completed_records.items()) if not record[-1]
+        )
+        return _batch("check", completed_items)
+
     try:
         completed = 0
         while pending:
-            ctx.check_cancelled("files", _batch("check", items))
+            ctx.check_cancelled("files", completed_batch())
             done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
             for future in done:
                 index, path = pending.pop(future)
@@ -1248,8 +1258,9 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 message = "忽略check报告" if ignored else "完成"
                 ctx.emit(ProgressEvent("check", "files", completed, total, message, str(path)))
             # 收集已完成任务后再补充窗口，保证待处理 Future 数量有界。
+            ctx.check_cancelled("files", completed_batch())
             submit_available()
-        ctx.check_cancelled("files", _batch("check", items))
+        ctx.check_cancelled("files", completed_batch())
     except BaseException:
         for future in pending:
             future.cancel()
