@@ -9,7 +9,7 @@ from health_tools.api.check_operation import (
     _save_compact_report,
     _save_report,
 )
-from health_tools.api.models import CheckAccuracyResult, CheckRequest
+from health_tools.api.models import CheckAccuracyResult, CheckRequest, ItemResult, ItemStatus
 from health_tools.core.check_accuracy import calculate_check_accuracy, match_accuracy_mark
 from health_tools.core.checker import CheckResult as ItemCheckResult
 from health_tools.core.checker import FileCheckReport
@@ -191,6 +191,29 @@ def test_check_report_places_scene_and_primary_issue_after_total(tmp_path) -> No
     ]
     assert row[header.index("Online ±5BPM准确度")] == "66.67%"
     assert header[-1] == "文件相对路径"
+
+
+def test_check_report_includes_skipped_and_failed_items_with_reason_only(tmp_path) -> None:
+    output = tmp_path / "check_report.csv"
+    items = (
+        ItemResult(ItemStatus.SKIP, str(tmp_path / "missing.csv"), reason="无法识别芯片"),
+        ItemResult(ItemStatus.FAIL, str(tmp_path / "broken.csv"), reason="处理失败"),
+    )
+
+    _save_report([], {}, output, tmp_path, False, items)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [row["总异常(结果)"] for row in rows] == ["SKIP", "FAIL"]
+    assert rows[0]["主要异常项"] == "跳过：无法识别芯片"
+    assert rows[1]["主要异常项"] == "失败：处理失败"
+    assert rows[0]["芯片"] == ""
+    assert rows[0]["文件相对路径"] == "missing.csv"
+    assert all(
+        value == ""
+        for key, value in rows[0].items()
+        if key.endswith("(结果)") and key != "总异常(结果)"
+    )
 
 
 def test_compact_report_includes_accuracy_mark_details(tmp_path) -> None:

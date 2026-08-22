@@ -3,19 +3,12 @@
 import csv
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import click
 from click.core import ParameterSource
 from rich.console import Console
 from rich.table import Table
-
-from health_tools.commands.accuracy_options import (
-    OrderedAccuracyMarksCommand,
-    parse_accuracy_min,
-    parse_accuracy_thresholds,
-    parse_online_comp_gap,
-)
 
 console = Console()
 
@@ -23,7 +16,7 @@ if TYPE_CHECKING:
     pass
 
 
-@click.command("check", cls=OrderedAccuracyMarksCommand)
+@click.command("check")
 @click.option("-i", "--input", "input_path", help="输入CSV文件或目录")
 @click.option("-r", "--rule", "rule_file", help="check 规则文件路径或内置规则名")
 @click.option("-c", "--chip", "chip_name", help="芯片型号 (如 gh3036, gh3220)，不指定则自动识别")
@@ -95,32 +88,6 @@ if TYPE_CHECKING:
     default=None,
     help="按文件相对路径提取场景的正则（需包含命名组 scene）",
 )
-@click.option("--accuracy/--no-accuracy", "accuracy_enabled", default=False, help="统计准确度")
-@click.option("--accuracy-ref-column", help="准确度金标列名")
-@click.option("--accuracy-online-column", help="Online 结果列名")
-@click.option("--accuracy-comp-column", help="Comp 结果列名")
-@click.option(
-    "--accuracy-thresholds",
-    callback=parse_accuracy_thresholds,
-    help="逗号分隔的准确度阈值；默认采用规则或 5,10,15",
-)
-@click.option(
-    "--accuracy-inclusive/--accuracy-strict",
-    default=False,
-    help="阈值命中使用 <=；默认严格使用 <",
-)
-@click.option(
-    "--accuracy-min",
-    multiple=True,
-    metavar="COMPARISON:METRIC:MIN:CATEGORY[:LABEL]",
-    help="标定 Online/Comp 准确度低于阈值的文件",
-)
-@click.option(
-    "--online-comp-gap",
-    multiple=True,
-    metavar="METRIC:MIN_GAP:CATEGORY[:LABEL]",
-    help="标定 Online 准确度低于 Comp 的文件",
-)
 @click.option(
     "-o",
     "--output",
@@ -164,14 +131,6 @@ def check_cmd(
     ref_warning_seconds: float,
     reference_detail_output: Optional[Path],
     scene_regex: Optional[str],
-    accuracy_enabled: bool,
-    accuracy_ref_column: Optional[str],
-    accuracy_online_column: Optional[str],
-    accuracy_comp_column: Optional[str],
-    accuracy_thresholds: Optional[Tuple[float, ...]],
-    accuracy_inclusive: bool,
-    accuracy_min: Tuple[str, ...],
-    online_comp_gap: Tuple[str, ...],
     output_path: Optional[str],
     sort_report: bool,
     report_path: Optional[str],
@@ -229,42 +188,13 @@ def check_cmd(
         "ref_warning_seconds", ref_warning_seconds, reference.warning_seconds, 10.0
     )
     scene_regex = effective("scene_regex", scene_regex, rule.scene_regex, None)
-    accuracy_enabled = effective("accuracy_enabled", accuracy_enabled, accuracy.enabled, False)
-    accuracy_ref_column = effective(
-        "accuracy_ref_column", accuracy_ref_column, accuracy.ref_column, "REF_RESULT0"
-    )
-    accuracy_online_column = effective(
-        "accuracy_online_column", accuracy_online_column, accuracy.online_column, "ALGO_RESULT0"
-    )
-    accuracy_comp_column = effective(
-        "accuracy_comp_column", accuracy_comp_column, accuracy.comp_column, "COMP_RESULT0"
-    )
-    accuracy_inclusive = effective(
-        "accuracy_inclusive", accuracy_inclusive, accuracy.inclusive, False
-    )
-
-    try:
-        ordered_mark_arguments = ctx.meta.get("accuracy_mark_arguments", ())
-        cli_marks = tuple(
-            (
-                parse_accuracy_min(value, index)
-                if name == "accuracy_min"
-                else parse_online_comp_gap(value, index)
-            )
-            for index, (name, value) in enumerate(ordered_mark_arguments)
-        )
-        categories = [mark.category for mark in cli_marks]
-        if len(categories) != len(set(categories)):
-            duplicate = next(category for category in categories if categories.count(category) > 1)
-            raise click.BadParameter(f"accuracy mark category 重复: {duplicate}")
-        mark_ids = [mark.id for mark in cli_marks]
-        if len(mark_ids) != len(set(mark_ids)) or any(
-            not mark_id.replace("_", "").replace("-", "").isalnum() for mark_id in mark_ids
-        ):
-            raise click.BadParameter("accuracy mark id 必须唯一且为安全的单段名称")
-    except click.BadParameter as exc:
-        raise click.UsageError(str(exc)) from exc
-    accuracy_marks = cli_marks if accuracy_min or online_comp_gap else accuracy.marks
+    accuracy_enabled = accuracy.enabled
+    accuracy_ref_column = accuracy.ref_column
+    accuracy_online_column = accuracy.online_column
+    accuracy_comp_column = accuracy.comp_column
+    accuracy_thresholds = None
+    accuracy_inclusive = accuracy.inclusive
+    accuracy_marks = accuracy.marks
 
     inferred_report_path = report_path
     if sort_report and inferred_report_path is None:

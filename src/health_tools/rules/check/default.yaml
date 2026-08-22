@@ -42,6 +42,12 @@ accuracy:
   thresholds: []
   inclusive: false
   marks:
+    - id: online_below_comp
+      comparison: online_below_comp
+      metric: within_5
+      min_gap: 10.0
+      label: Online低于Comp 10个百分点
+      category: accuracy_online_below_comp
     - id: online_within_5_low
       comparison: online
       metric: within_5
@@ -54,9 +60,3 @@ accuracy:
       min: 80.0
       label: Comp ±5准确度低
       category: accuracy_comp_low
-    - id: online_below_comp
-      comparison: online_below_comp
-      metric: within_5
-      min_gap: 10.0
-      label: Online低于Comp 10个百分点
-      category: accuracy_online_below_comp

@@ -546,8 +546,8 @@ def test_check_skips_csv_when_columns_do_not_match_rule(tmp_path):
 
     assert result.exit_code == 0
     assert "跳过（列结构不符合规则" in result.output
-    assert "无可检查的文件" in result.output
-    assert not (tmp_path / "check_report.csv").exists()
+    assert "检查报告已保存" in result.output
+    assert (tmp_path / "check_report.csv").exists()
 
 
 def test_check_help_center_ratio_default_is_five_percent():

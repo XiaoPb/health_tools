@@ -77,8 +77,6 @@ def test_check_cli_explicit_values_override_rule(monkeypatch, tmp_path):
             "--frame-ratio",
             "0.5",
             "--no-acc-axis",
-            "--no-accuracy",
-            "--accuracy-strict",
             "--workers",
             "8",
         ],
@@ -89,8 +87,8 @@ def test_check_cli_explicit_values_override_rule(monkeypatch, tmp_path):
     assert request.frame_ratio == 0.5
     assert request.chip_name == "gh3036"
     assert request.acc_axis is False
-    assert request.accuracy_enabled is False
-    assert request.accuracy_inclusive is False
+    assert request.accuracy_enabled is True
+    assert request.accuracy_inclusive is True
     assert request.workers == 8
 
 
@@ -119,50 +117,6 @@ def test_check_rule_fills_unspecified_policy_values(monkeypatch, tmp_path):
     assert request.accuracy_inclusive is True
     assert request.accuracy_marks[0].id == "online_low"
     assert request.workers == 8
-
-
-def test_check_cli_accuracy_marks_replace_rule_marks(monkeypatch, tmp_path):
-    captured = _capture_check_request(monkeypatch)
-    rule = _write_check_rule(tmp_path)
-
-    result = CliRunner().invoke(
-        check_cmd,
-        [
-            "-r",
-            str(rule),
-            "--accuracy-min",
-            "comp:within_5:70:accuracy_comp_low:Comp 准确度低",
-            "--online-comp-gap",
-            "within_5:10:accuracy_gap:Online低于Comp",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    marks = captured["request"].accuracy_marks
-    assert [mark.comparison for mark in marks] == ["comp", "online_below_comp"]
-    assert marks[0].min == 70.0
-    assert marks[1].min_gap == 10.0
-
-
-def test_check_cli_accuracy_marks_keep_reverse_interleaved_order(monkeypatch):
-    captured = _capture_check_request(monkeypatch)
-
-    result = CliRunner().invoke(
-        check_cmd,
-        [
-            "--online-comp-gap",
-            "within_5:10:first_gap",
-            "--accuracy-min",
-            "online:within_5:80:online_low",
-            "--online-comp-gap",
-            "within_10:15:second_gap",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    marks = captured["request"].accuracy_marks
-    assert [mark.category for mark in marks] == ["first_gap", "online_low", "second_gap"]
-    assert len({mark.id for mark in marks}) == 3
 
 
 def test_check_sort_summary_uses_mark_order_without_category_prefix(monkeypatch, tmp_path):
@@ -203,32 +157,6 @@ accuracy:
     assert result.exit_code == 0, result.output
     assert result.output.index("online_low=1") < result.output.index("comp_low=1")
     assert result.output.index("comp_low=1") < result.output.index("ipd=1")
-
-
-@pytest.mark.parametrize("category", ["../outside", "nested/path", r"nested\path", "has space"])
-def test_check_cli_accuracy_marks_reject_unsafe_category(category):
-    result = CliRunner().invoke(
-        check_cmd,
-        ["--accuracy-min", f"online:within_5:80:{category}"],
-    )
-
-    assert result.exit_code == 2
-    assert "安全的单段目录名" in result.output
-
-
-def test_check_cli_accuracy_marks_reject_duplicate_category_across_option_types():
-    result = CliRunner().invoke(
-        check_cmd,
-        [
-            "--accuracy-min",
-            "online:within_5:80:duplicate",
-            "--online-comp-gap",
-            "within_5:10:duplicate",
-        ],
-    )
-
-    assert result.exit_code == 2
-    assert "category 重复" in result.output
 
 
 def test_check_sort_infers_report_from_check_output_path(monkeypatch, tmp_path):
@@ -286,51 +214,18 @@ def test_check_sort_infers_report_for_extensionless_file(monkeypatch, tmp_path):
     assert captured["request"].report_path == tmp_path / "check_report.csv"
 
 
-def test_check_help_lists_rule_and_accuracy_options():
+def test_check_help_lists_rule_and_omits_accuracy_options():
     result = CliRunner().invoke(check_cmd, ["--help"])
 
     assert result.exit_code == 0
+    assert "--rule" in result.output
     for option in (
-        "--rule",
-        "--accuracy / --no-accuracy",
+        "--accuracy",
         "--accuracy-ref-column",
-        "--accuracy-online-column",
-        "--accuracy-comp-column",
         "--accuracy-thresholds",
-        "--accuracy-inclusive / --accuracy-strict",
         "--accuracy-min",
-        "--online-comp-gap",
     ):
-        assert option in result.output
-
-
-@pytest.mark.parametrize(
-    ("option", "value"),
-    [
-        ("--accuracy-min", "other:within_5:80:category"),
-        ("--accuracy-min", "online:within_5:not-a-number:category"),
-        ("--online-comp-gap", "within_5:10"),
-    ],
-)
-def test_check_rejects_invalid_accuracy_mark_options(option, value):
-    result = CliRunner().invoke(check_cmd, [option, value])
-
-    assert result.exit_code == 2
-    assert "Error:" in result.output
-
-
-@pytest.mark.parametrize(
-    ("option", "value"),
-    [
-        ("--accuracy-min", "online:within_5:-1:category"),
-        ("--online-comp-gap", "within_5:-1:category"),
-    ],
-)
-def test_check_rejects_negative_accuracy_mark_threshold(option, value):
-    result = CliRunner().invoke(check_cmd, [option, value])
-
-    assert result.exit_code == 2
-    assert "非负" in result.output
+        assert option not in result.output
 
 
 def test_load_check_rule_keeps_all_supported_parameters():
@@ -357,7 +252,7 @@ def test_load_check_rule_keeps_all_supported_parameters():
         "rmse",
         "correlation",
     )
-    assert rule.accuracy.marks[0].category == "accuracy_online_low"
+    assert rule.accuracy.marks[0].category == "accuracy_online_below_comp"
 
 
 def test_check_rule_models_keep_immutable_accuracy_mark_configuration():

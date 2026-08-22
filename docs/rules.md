@@ -230,12 +230,12 @@ accuracy:
   thresholds: []
   inclusive: false
   marks:
+    - {id: online_below_comp, comparison: online_below_comp, metric: within_5, min_gap: 10.0,
+       label: Online低于Comp 10个百分点, category: accuracy_online_below_comp}
     - {id: online_within_5_low, comparison: online, metric: within_5, min: 80.0,
        label: Online ±5准确度低, category: accuracy_online_low}
     - {id: comp_within_5_low, comparison: comp, metric: within_5, min: 80.0,
        label: Comp ±5准确度低, category: accuracy_comp_low}
-    - {id: online_below_comp, comparison: online_below_comp, metric: within_5, min_gap: 10.0,
-       label: Online低于Comp 10个百分点, category: accuracy_online_below_comp}
 ```
 
 ### check 字段说明
@@ -253,20 +253,20 @@ accuracy:
 | `scene_regex` | string | 从文件相对路径提取 `scene` 场景的正则 |
 | `accuracy` | object | Online/Comp vs Ref 准确度和标定规则，见下 |
 
-`accuracy.ref_column`、`online_column`、`comp_column` 是数据列名，不是列索引；命令行对应的
-`--accuracy-*-column` 显式传入时覆盖规则。`methods` 支持 `std`、`rmse`、`mae`、`mape`、
+`accuracy.ref_column`、`online_column`、`comp_column` 是数据列名，不是列索引；check CLI 不再
+覆盖这些准确度列配置。`methods` 支持 `std`、`rmse`、`mae`、`mape`、
 `bias`、`correlation`、`r2` 以及 `within_N`（例如 `within_5`、`within_12.5`）。
 `thresholds` 是自定义准确度指标列表，每项格式为 `{name: xxx, value: N}` 或
 `{name: xxx, percent: N}`，且只能二选一；`inclusive` 控制所有阈值边界是否使用 `<=`。
 `marks` 中 `id` 和 `category` 都必须唯一且为安全的单段目录名；`comparison` 为 `online` 或
 `comp` 时必须提供 `min`（0~100），为 `online_below_comp` 时必须提供非负 `min_gap`。
-命中后主要异常项按声明顺序显示，并以该 `category` 作为分拣目录名。
+命中后主要异常项按 `marks` 声明顺序选择，并以该 `category` 作为分拣目录名；需要提高某个准确度标定的优先级时，将对应项前移即可。
 
 ### check 规则与 CLI 合并
 
 业务策略采用“显式 CLI > YAML > 内置默认值”。`-c/--chip` 只有在命令行显式传入时覆盖 YAML；
-未传入则使用 YAML 的 `chip`。`--accuracy-min` 和 `--online-comp-gap` 可重复，命令行出现任意
-一条时整体替换 YAML 的 `accuracy.marks`。
+未传入则使用 YAML 的 `chip`。准确度相关配置不提供 CLI 覆盖项，统一使用 YAML 的 `accuracy`
+块，以保证指标、阈值和 `marks` 声明顺序来自同一份规则文件。
 
 以下字段禁止写入 check YAML：`input`、`output`、`sort`、`report`、`sort_output`、`workers`、
 `verbose` 以及 `rule` 本身。这些字段属于本次运行上下文；`--sort` 未显式给 `--report` 时，

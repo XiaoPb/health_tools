@@ -39,14 +39,6 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--ref-warning-seconds` | 金标异常起始警告窗口（秒），默认 10；窗口内异常为 WARNING，窗口外异常为 FAIL |
 | `--reference-detail-output` | 输出金标异常文件的秒采样 `time,ref,online,comp` 证据 CSV 目录 |
 | `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，未匹配时为 `default` |
-| `--accuracy/--no-accuracy` | 启用或禁用 Online/Comp 对 Ref 的准确度统计 |
-| `--accuracy-ref-column` | 准确度金标列名；覆盖规则中的 `accuracy.ref_column` |
-| `--accuracy-online-column` | Online 结果列名；覆盖规则中的 `accuracy.online_column` |
-| `--accuracy-comp-column` | Comp 结果列名；覆盖规则中的 `accuracy.comp_column` |
-| `--accuracy-thresholds` | 逗号分隔的 `within_N` 阈值，例如 `5,10,15` |
-| `--accuracy-inclusive/--accuracy-strict` | 准确度阈值使用 `<=` 或严格 `<`；默认严格 `<` |
-| `--accuracy-min` | 准确度标定：`comparison:metric:min:category[:label]`，可重复 |
-| `--online-comp-gap` | Online 低于 Comp 标定：`metric:min_gap:category[:label]`，可重复 |
 | `-o/--output` | 检查报告 CSV 输出路径，默认 `<path>/check_report.csv` |
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
 | `--report` | 分拣使用的检查报告路径 |
@@ -65,6 +57,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - 完整报告、对应的 `_compact` 精简报告以及分拣清单均包含 `场景分类` 列；未指定正则或未匹配时显示 `default`。
 - 主报告在 `总异常(结果)` 后依次追加 `场景分类`、`主要异常项`，以及 Online/Comp 对 Ref 的准确度样本数、MAE、RMSE、相关系数和各个 `within_N` 百分比列。准确度列缺失时输出 `-`；配置已启用但没有有效样本时样本数为 `0`、指标为 `-`，不把缺列误报为 0%。
 - Online/Comp 准确度沿用 offline 的共同有效边界规则：三列共同确定首尾边界，边界内 0 保留，NaN/Inf 在比较时过滤；全 0 Comp 不参与 Comp vs Ref。
+- 准确度是否启用、列名、指标、阈值、边界和标定优先级全部由 `-r/--rule` 的 `accuracy` 块声明；CLI 不再提供准确度策略参数。未加载规则文件时不执行准确度统计。
 
 启用准确度时，`check_report.csv` 的列顺序固定为：文件名、芯片、总异常结果、场景分类、主要异常项；随后为每个
 `checks` 检查项的“状态/摘要”列，以及 ACC 证据列（启用 ACC 时）；最后部分的核心列顺序为：

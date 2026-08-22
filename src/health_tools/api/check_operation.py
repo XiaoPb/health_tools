@@ -371,7 +371,14 @@ def _report_row_as_dict(
     return row, methods
 
 
-def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: bool) -> None:
+def _save_report(
+    reports,
+    acc_reports,
+    output: Path,
+    base: Path,
+    include_axis: bool,
+    items=(),
+) -> None:
     check_names = []
     for report in reports:
         for result in report.results:
@@ -410,6 +417,7 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
     leading_columns = ["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项"]
     output_header = leading_columns + [column for column in header if column not in leading_columns]
     output.parent.mkdir(parents=True, exist_ok=True)
+    report_paths = {report.file_path.resolve() for report in reports}
     with output.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow(output_header)
@@ -460,6 +468,30 @@ def _save_report(reports, acc_reports, output: Path, base: Path, include_axis: b
             row.extend([*_accuracy_mark_values(report), _relative_path(report.file_path, base)])
             row_by_name = dict(zip(header, row))
             writer.writerow([row_by_name[column] for column in output_header])
+        for item in items:
+            item_path = Path(item.input)
+            try:
+                resolved_path = item_path.resolve()
+            except OSError:
+                resolved_path = item_path
+            if resolved_path in report_paths:
+                continue
+            reason = item.reason or item.detail or "未知原因"
+            status = getattr(item.status, "value", str(item.status))
+            row_by_name = {
+                column: ""
+                for column in output_header
+                if column not in {"文件名", "总异常(结果)", "主要异常项", "文件相对路径"}
+            }
+            row_by_name.update(
+                {
+                    "文件名": item_path.name,
+                    "总异常(结果)": status,
+                    "主要异常项": f"{'跳过' if status == 'SKIP' else '失败'}：{reason}",
+                    "文件相对路径": _relative_path(item_path, base),
+                }
+            )
+            writer.writerow([row_by_name.get(column, "") for column in output_header])
 
 
 COMPACT_HEADER = [
@@ -997,12 +1029,12 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
         raise
     else:
         executor.shutdown(wait=True)
-    if not reports:
+    if not reports and not items:
         return CheckResult(_batch("check", items))
     report_path = request.output_path or (
         target.parent / "check_report.csv" if target.is_file() else target / "check_report.csv"
     )
-    _save_report(reports, acc_reports, report_path, base, request.acc_axis)
+    _save_report(reports, acc_reports, report_path, base, request.acc_axis, items)
     compact_report_path = _compact_report_path(report_path)
     _save_compact_report(reports, compact_report_path, base)
     artifacts = [report_path, compact_report_path]
