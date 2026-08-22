@@ -27,8 +27,8 @@ reference:
   hr_column: REF_RESULT0
   spo2_column: null
   sample_rate: 25.0
-  stale_seconds: 30.0
-  step_threshold: 15.0
+  stale_seconds: 35.0
+  step_threshold: 25.0
   warning_seconds: 10.0
 
 scene_regex: '(?P<scene>[^/\\]+)[/\\][^/\\]+.csv'
@@ -42,6 +42,18 @@ accuracy:
   thresholds: []
   inclusive: true
   marks:
+    - id: online_below_comp_10
+      comparison: online_below_comp_10
+      metric: within_5
+      min_gap: 10.0
+      label: Online低于Comp 10个百分点
+      category: accuracy_online_below_comp_10
+    - id: online_below_comp_5
+      comparison: online_below_comp_5
+      metric: within_5
+      min_gap: 5.0
+      label: Online低于Comp 5个百分点
+      category: accuracy_online_below_comp_5
     - id: online_within_5_low
       comparison: online
       metric: within_5
@@ -54,9 +66,4 @@ accuracy:
       min: 80.0
       label: Comp ±5准确度低
       category: accuracy_comp_low
-    - id: online_below_comp
-      comparison: online_below_comp
-      metric: within_5
-      min_gap: 10.0
-      label: Online低于Comp 10个百分点
-      category: accuracy_online_below_comp
+
