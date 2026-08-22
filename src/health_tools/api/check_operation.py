@@ -227,17 +227,17 @@ class _FileCheckContext:
 
     @classmethod
     def create(cls, path: Path, chip: str, chip_rule: Any, frame: pd.DataFrame, checker: Any):
-        def resolve(method_name: str, default):
+        def resolve(method_name: str, default, *, needs_frame: bool = False):
             method = getattr(checker, method_name, None)
             if method is None:
                 return default
-            return method(frame)
+            return method(frame) if needs_frame else method()
 
         data_columns = [
             column for column in resolve("_get_data_columns", []) if column in frame.columns
         ]
-        frame_column = resolve("_resolve_frame_column", "")
-        acc_columns = resolve("_resolve_acc_columns", [])
+        frame_column = resolve("_resolve_frame_column", "", needs_frame=True)
+        acc_columns = resolve("_resolve_acc_columns", [], needs_frame=True)
         ipd_columns = [
             column for column in resolve("_get_ipd_columns", []) if column in frame.columns
         ]
