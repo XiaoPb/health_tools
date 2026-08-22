@@ -499,7 +499,10 @@ class DataChecker:
         if column not in df.columns:
             return CheckResult(name, False, f"未找到金标列: {column}")
 
-        values = pd.to_numeric(df[column], errors="coerce")
+        # Sampling can preserve source row labels (for example 0, 25, 50 ...).
+        # All anomaly positions below are positional, so normalize both series
+        # to a contiguous index before using ``loc``.
+        values = pd.to_numeric(df[column], errors="coerce").reset_index(drop=True)
         total_count = int(len(values))
         finite = np.isfinite(values.to_numpy(dtype=float, na_value=np.nan))
         finite_values = values[finite]
@@ -530,7 +533,7 @@ class DataChecker:
         # 此时优先按同一行的 TimeStamp 真实跨度判断，避免把采样点数误标成秒数。
         timestamp = None
         if "time" in df.columns:
-            timestamp = pd.to_numeric(df["time"], errors="coerce")
+            timestamp = pd.to_numeric(df["time"], errors="coerce").reset_index(drop=True)
         if timestamp is not None:
             durations = []
             for _, run in valid_values.notna().groupby(groups):

@@ -121,6 +121,28 @@ def test_reference_static_duration_prefers_timestamp_span():
     assert result.channel_metrics["REF_HR"]["longest_static_seconds"] == 1.0
 
 
+def test_reference_warning_window_handles_sampled_non_contiguous_index():
+    frame = pd.DataFrame(
+        {
+            "time": [0, 2000, 4000],
+            "REF_HR": [80, 100, 100],
+        },
+        index=[0, 25, 50],
+    )
+
+    result = _checker().check_reference_data(
+        frame,
+        "REF_HR",
+        "hr",
+        sample_rate=1,
+        stale_seconds=10,
+        step_threshold=8,
+        warning_seconds=1,
+    )
+
+    assert result.status == "FAIL"
+
+
 def test_compact_report_contains_reference_metrics(tmp_path):
     result = _checker().check_reference_data(
         pd.DataFrame({"REF_HR": [80] * 126 + [90]}),
