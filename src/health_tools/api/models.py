@@ -34,6 +34,7 @@ class ConfigAction(str, Enum):
     SET_OFFLINE_DEFAULT = "set_offline_default"
     SCAN_OFFLINE = "scan_offline"
     REPLACE = "replace"
+    ADD_RULE = "add_rule"
 
 
 class RuleType(str, Enum):
@@ -384,6 +385,7 @@ class ConfigRequest:
     force: bool = False
     source: Optional[str] = None
     expected_revision: Optional[str] = None
+    rule_type: Optional[RuleType] = None
 
 
 @dataclass(frozen=True)

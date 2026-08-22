@@ -4,8 +4,10 @@ import click
 import pytest
 from click.testing import CliRunner
 
+from health_tools import config as config_module
 from health_tools.cli import main
 from health_tools.commands.accuracy_options import accuracy_options
+from health_tools.commands.config import config_cmd
 from health_tools.commands.plot import _parse_time_range
 
 
@@ -43,6 +45,25 @@ def test_cli_version():
     result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
     assert "ghealth_tool" in result.output
+
+
+def test_cfg_add_chip_rule_subcommand(monkeypatch, tmp_path):
+    config_dir = tmp_path / ".ghealth_tools"
+    monkeypatch.setattr(config_module, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(config_module, "CONFIG_FILE", config_dir / "config.yaml")
+    monkeypatch.setattr(config_module, "DEFAULT_RULES_DIR", config_dir / "rules")
+    monkeypatch.setattr(config_module, "_config_cache", None)
+    config_module.save_config({"rules_dir": str(config_dir / "rules")})
+    source = tmp_path / "custom.yaml"
+    source.write_text(
+        "version: '1'\nchip: custom\ncsv: {header_row: 0, data_start_row: 1}\ncolumns: [TIME]\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(config_cmd, ["add", "--chip", str(source)])
+
+    assert result.exit_code == 0, result.output
+    assert (config_dir / "rules" / "chip" / "custom.yaml").exists()
 
 
 def test_cli_parse_help():

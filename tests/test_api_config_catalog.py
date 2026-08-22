@@ -13,6 +13,7 @@ from health_tools.api import (
     run_config,
     run_offline_catalog,
 )
+from health_tools.api.models import RuleType
 from health_tools.core.offline import EXE_NAME, OfflineConfig
 
 
@@ -104,6 +105,55 @@ def test_existing_config_action_remains_compatible_and_atomic(
     assert result.config["rules_dir"] == str(tmp_path / "rules")
     assert result.changed_paths == (isolated_config,)
     assert result.revision is not None
+
+
+def test_config_add_rule_copies_to_user_rule_directory(isolated_config: Path, tmp_path: Path):
+    rules_dir = tmp_path / "rules"
+    config_module.save_config({"rules_dir": str(rules_dir)})
+    source = tmp_path / "custom.yaml"
+    source.write_text(
+        "version: '1'\nchip: custom\ncsv: {header_row: 0, data_start_row: 1}\ncolumns: [TIME]\n",
+        encoding="utf-8",
+    )
+
+    result = run_config(
+        ConfigRequest(ConfigAction.ADD_RULE, value=str(source), rule_type=RuleType.CHIP)
+    )
+
+    destination = rules_dir / "chip" / "custom.yaml"
+    assert destination.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+    assert result.changed_paths == (destination,)
+
+
+def test_config_add_rule_rejects_existing_destination_without_force(
+    isolated_config: Path, tmp_path: Path
+):
+    rules_dir = tmp_path / "rules"
+    config_module.save_config({"rules_dir": str(rules_dir)})
+    source = tmp_path / "custom.yaml"
+    source.write_text(
+        "version: '1'\nchip: custom\ncsv: {header_row: 0, data_start_row: 1}\ncolumns: [TIME]\n",
+        encoding="utf-8",
+    )
+    destination = rules_dir / "chip" / "custom.yaml"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("original\n", encoding="utf-8")
+
+    with pytest.raises(RequestValidationError, match="规则文件已存在"):
+        run_config(ConfigRequest(ConfigAction.ADD_RULE, value=str(source), rule_type=RuleType.CHIP))
+
+    assert destination.read_text(encoding="utf-8") == "original\n"
+
+
+def test_config_add_rule_requires_one_rule_type(isolated_config: Path, tmp_path: Path):
+    source = tmp_path / "custom.yaml"
+    source.write_text(
+        "version: '1'\nchip: custom\ncsv: {header_row: 0, data_start_row: 1}\ncolumns: [TIME]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RequestValidationError, match="规则类型"):
+        run_config(ConfigRequest(ConfigAction.ADD_RULE, value=str(source)))
 
 
 def test_set_offline_path_persists_absolute_path(

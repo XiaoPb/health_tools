@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
@@ -262,6 +263,49 @@ def run_config(
         )
         save_offline_config(cfg.tools_path, versions)
         changed.append(CONFIG_FILE)
+    elif request.action == ConfigAction.ADD_RULE:
+        if not request.value:
+            raise RequestValidationError("添加规则需要源文件路径")
+        if request.rule_type is None:
+            raise RequestValidationError("添加规则需要指定规则类型")
+        if request.rule_type.value not in {
+            "chip",
+            "parse",
+            "classify",
+            "convert",
+            "evaluate",
+            "analysis",
+            "check",
+        }:
+            raise RequestValidationError(f"不支持添加 {request.rule_type.value} 规则")
+        source_path = Path(request.value).expanduser().resolve()
+        if not source_path.is_file():
+            raise RequestValidationError(f"规则文件不存在: {source_path}")
+        if source_path.suffix.lower() not in {".yaml", ".yml"}:
+            raise RequestValidationError("规则文件必须是 .yaml 或 .yml")
+        try:
+            with source_path.open("r", encoding="utf-8") as handle:
+                document = yaml.safe_load(handle)
+        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            raise RequestValidationError(f"规则文件读取失败: {exc}") from exc
+        from health_tools.rules.validator import RuleValidator
+
+        errors = RuleValidator.validate(document, request.rule_type.value)
+        if errors:
+            raise RequestValidationError("规则校验失败: " + "; ".join(errors))
+        config = load_config()
+        from health_tools.config import DEFAULT_RULES_DIR
+
+        rules_dir = Path(config.get("rules_dir", str(DEFAULT_RULES_DIR))).expanduser()
+        destination = rules_dir / request.rule_type.value / source_path.name
+        if destination.exists() and not request.force:
+            raise RequestValidationError(f"规则文件已存在: {destination}，如需覆盖请使用 --force")
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination)
+        except OSError as exc:
+            raise OperationError(f"复制规则文件失败: {exc}") from exc
+        changed.append(destination)
     elif request.action == ConfigAction.REPLACE:
         from health_tools.config import ConfigRevisionConflict, replace_config_document
 
