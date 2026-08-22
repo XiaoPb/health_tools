@@ -41,7 +41,7 @@ def test_check_report_header_detection_ignores_file_name(tmp_path):
     assert _is_check_report_csv(full)
     assert _is_check_report_csv(compact)
     assert not _is_check_report_csv(source)
-    assert _discover_check_inputs(tmp_path) == [source]
+    assert _discover_check_inputs(tmp_path) == sorted([compact, full, source])
 
 
 def test_sort_report_moves_files_and_keeps_relative_paths(tmp_path):

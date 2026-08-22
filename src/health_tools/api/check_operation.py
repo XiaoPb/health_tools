@@ -76,10 +76,17 @@ def _is_check_report_csv(path: Path) -> bool:
 
 
 def _discover_check_inputs(target: Path) -> List[Path]:
-    """发现待检查 CSV，并排除 check 自身的完整/compact 报告。"""
+    """发现待检查 CSV；报告识别延后到文件读取失败时执行。"""
     if target.is_file():
-        return [] if _is_check_report_csv(target) else [target]
-    return sorted(path for path in target.rglob("*.csv") if not _is_check_report_csv(path))
+        return [target]
+    return sorted(target.rglob("*.csv"))
+
+
+def _is_failed_check_report(item: ItemResult, path: Path) -> bool:
+    """仅对失败/跳过文件识别 check 完整报告和 compact 报告。"""
+    if item.status not in {ItemStatus.SKIP, ItemStatus.FAIL}:
+        return False
+    return _is_check_report_csv(path)
 
 
 def _compact_report_path(report_path: Path) -> Path:
@@ -1050,6 +1057,11 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             ctx.check_cancelled("files", _batch("check", items))
             path = futures[future]
             item, report, acc, ipd_detail, evidence = future.result()
+            if _is_failed_check_report(item, path):
+                ctx.emit(
+                    ProgressEvent("check", "files", completed, total, "忽略check报告", str(path))
+                )
+                continue
             items.append(item)
             if report is not None:
                 reports.append(report)
