@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     "--scene-regex",
     type=str,
     default=None,
-    help="按文件相对路径提取场景的正则（需包含命名组 scene）",
+    help="按文件相对路径提取场景、姓名和手别的正则（scene 必需，name/hand 可选）",
 )
 @click.option(
     "-o",
@@ -579,7 +579,7 @@ def _save_report_csv(
                 ]
             )
 
-    header.extend(["场景分类", "文件相对路径"])
+    header.extend(["场景分类", "姓名", "手别", "文件相对路径"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -627,6 +627,8 @@ def _save_report_csv(
             row.extend(
                 [
                     getattr(report, "scene", "default"),
+                    getattr(report, "name", "default"),
+                    getattr(report, "hand", "default"),
                     _relative_report_path(report.file_path, base_dir),
                 ]
             )

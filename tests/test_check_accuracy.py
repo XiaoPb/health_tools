@@ -248,6 +248,8 @@ def test_check_report_places_scene_and_primary_issue_after_total(tmp_path) -> No
         tmp_path / "sample.csv",
         "gh3036",
         scene="rest",
+        name="zhangsan",
+        hand="left",
         results=[ItemCheckResult("帧完整性", True, "正常")],
         accuracy_result=CheckAccuracyResult(
             online={"samples": 3, "mae": 2.0, "rmse": 3.0, "correlation": 0.9, "within_5": 66.666},
@@ -260,8 +262,17 @@ def test_check_report_places_scene_and_primary_issue_after_total(tmp_path) -> No
 
     with output.open(newline="", encoding="utf-8-sig") as handle:
         header, row = list(csv.reader(handle))
-    assert header[:5] == ["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项"]
-    assert header[5:9] == [
+    assert header[:7] == [
+        "文件名",
+        "芯片",
+        "总异常(结果)",
+        "场景分类",
+        "姓名",
+        "手别",
+        "主要异常项",
+    ]
+    assert row[3:7] == ["rest", "zhangsan", "left", "Online准确度低"]
+    assert header[7:11] == [
         "帧完整性(结果)",
         "帧完整性(说明)",
         "Online准确度样本数",

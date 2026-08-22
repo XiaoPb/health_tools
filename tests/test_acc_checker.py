@@ -628,6 +628,9 @@ class TestCheckResultStatus:
         report = FileCheckReport(
             file_path=tmp_path / "acc.csv",
             chip="gh3220",
+            scene="motion",
+            name="lisi",
+            hand="right",
             results=[
                 CheckResult(
                     "ACC异常",
@@ -648,6 +651,9 @@ class TestCheckResultStatus:
         assert rows[0]["异常数"] == "16"
         assert rows[0]["总数"] == "100"
         assert rows[0]["异常占比"] == "16.00%"
+        assert rows[0]["场景分类"] == "motion"
+        assert rows[0]["姓名"] == "lisi"
+        assert rows[0]["手别"] == "right"
 
     def test_report_acc_frame_list_is_forced_to_text(self):
         anomaly = type(
@@ -658,11 +664,39 @@ class TestCheckResultStatus:
         assert _anomaly_fields(anomaly)[2] == "'72994,73001,206654"
 
     def test_scene_regex_uses_named_group_and_defaults(self):
+        pattern = _compile_scene_regex(
+            r"(?P<scene>[^/\\]+)[/\\](?P<name>[^/\\_]+)_[^/\\_]+_" r"(?P<hand>[^/\\_]+)_[^/\\]+.csv"
+        )
+
+        assert _scene_for_path(pattern, "rest/zhangsan_device_left_sample.csv") == (
+            "rest",
+            "zhangsan",
+            "left",
+        )
+        assert _scene_for_path(pattern, r"motion\lisi_device_right_sample.csv") == (
+            "motion",
+            "lisi",
+            "right",
+        )
+        assert _scene_for_path(pattern, "other/sample.csv") == (
+            "default",
+            "default",
+            "default",
+        )
+        assert _scene_for_path(None, "subject01_rest/sample.csv") == (
+            "default",
+            "default",
+            "default",
+        )
+
+    def test_scene_regex_keeps_optional_groups_backward_compatible(self):
         pattern = _compile_scene_regex(r"subject\d+_(?P<scene>rest|motion)_")
 
-        assert _scene_for_path(pattern, "subject01_rest_sample.csv") == "rest"
-        assert _scene_for_path(pattern, "other/sample.csv") == "default"
-        assert _scene_for_path(None, "subject01_rest/sample.csv") == "default"
+        assert _scene_for_path(pattern, "subject01_rest_sample.csv") == (
+            "rest",
+            "default",
+            "default",
+        )
 
     def test_scene_regex_requires_named_scene_group(self):
         with pytest.raises(Exception, match="命名捕获组"):
@@ -722,7 +756,13 @@ class TestCheckResultStatus:
         assert result.abnormal_ratio == pytest.approx(10 / 14 * 100)
 
     def test_csv_report_writes_total_and_three_state_status(self, tmp_path):
-        report = FileCheckReport(file_path=tmp_path / "data.csv", chip="gh3220", scene="rest")
+        report = FileCheckReport(
+            file_path=tmp_path / "data.csv",
+            chip="gh3220",
+            scene="rest",
+            name="zhangsan",
+            hand="left",
+        )
         result = DataChecker._build_result(
             name="帧完整性",
             abnormal_count=1,
@@ -739,8 +779,24 @@ class TestCheckResultStatus:
         with open(output, newline="", encoding="utf-8-sig") as f:
             rows = list(csv.reader(f))
 
-        assert rows[0][:5] == ["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项"]
-        assert rows[1][:5] == ["data.csv", "gh3220", "PASS", "rest", "首帧非0"]
+        assert rows[0][:7] == [
+            "文件名",
+            "芯片",
+            "总异常(结果)",
+            "场景分类",
+            "姓名",
+            "手别",
+            "主要异常项",
+        ]
+        assert rows[1][:7] == [
+            "data.csv",
+            "gh3220",
+            "PASS",
+            "rest",
+            "zhangsan",
+            "left",
+            "首帧非0",
+        ]
         assert rows[0][-1] == "文件相对路径"
         assert rows[1][-1] == "data.csv"
         assert "场景分类" in rows[0]

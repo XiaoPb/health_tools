@@ -414,13 +414,18 @@ def _compile_scene_regex(pattern: Optional[str]):
     return compiled
 
 
-def _scene_for_path(compiled, relative_path: str) -> str:
+def _scene_for_path(compiled, relative_path: str) -> Tuple[str, str, str]:
     if compiled is None:
-        return "default"
+        return "default", "default", "default"
     match = compiled.search(relative_path)
     if not match:
-        return "default"
-    return match.group("scene") or "default"
+        return "default", "default", "default"
+    groups = match.groupdict()
+    return (
+        groups.get("scene") or "default",
+        groups.get("name") or "default",
+        groups.get("hand") or "default",
+    )
 
 
 def _anomaly_fields(anomaly) -> List[object]:
@@ -549,6 +554,8 @@ def _report_row_as_dict(
         row.update(dict(zip(acc_names, fields)))
     methods = _accuracy_methods([report])
     row["场景分类"] = report.scene
+    row["姓名"] = report.name
+    row["手别"] = report.hand
     row["主要异常项"] = primary_issue(
         {
             **{k: str(v) for k, v in row.items()},
@@ -619,11 +626,19 @@ def _save_report(
                     header.extend(
                         [f"ACC{kind}{axis}次数", f"ACC{kind}{axis}最长帧", f"ACC{kind}{axis}前10帧"]
                     )
-    header.extend(["场景分类", "主要异常项"])
+    header.extend(["场景分类", "姓名", "手别", "主要异常项"])
     header.extend(_accuracy_header("Online", methods))
     header.extend(_accuracy_header("Comp", methods))
     header.extend(["准确度标定分类", "准确度标定说明", "文件相对路径"])
-    leading_columns = ["文件名", "芯片", "总异常(结果)", "场景分类", "主要异常项"]
+    leading_columns = [
+        "文件名",
+        "芯片",
+        "总异常(结果)",
+        "场景分类",
+        "姓名",
+        "手别",
+        "主要异常项",
+    ]
     output_header = leading_columns + [column for column in header if column not in leading_columns]
     output.parent.mkdir(parents=True, exist_ok=True)
     report_paths = {report.file_path.resolve() for report in reports}
@@ -663,6 +678,8 @@ def _save_report(
             row.extend(
                 [
                     report.scene,
+                    report.name,
+                    report.hand,
                     primary_issue(
                         {
                             **{k: str(v) for k, v in zip(header, row)},
@@ -706,6 +723,8 @@ def _save_report(
 COMPACT_HEADER = [
     "文件名",
     "场景分类",
+    "姓名",
+    "手别",
     "文件相对路径",
     "芯片",
     "检查项",
@@ -780,6 +799,8 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                         {
                             "文件名": report.file_path.name,
                             "场景分类": report.scene,
+                            "姓名": report.name,
+                            "手别": report.hand,
                             "文件相对路径": _relative_path(report.file_path, base),
                             "芯片": report.chip,
                             "检查项": result.name,
@@ -829,6 +850,8 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                     {
                         "文件名": report.file_path.name,
                         "场景分类": report.scene,
+                        "姓名": report.name,
+                        "手别": report.hand,
                         "文件相对路径": _relative_path(report.file_path, base),
                         "芯片": report.chip,
                         "检查项": "准确度标定",
@@ -1033,10 +1056,13 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     None,
                 )
             relative_path = _relative_path(path, base)
+            scene, name, hand = _scene_for_path(scene_pattern, relative_path)
             report = FileCheckReport(
                 file_path=path,
                 chip=chip,
-                scene=_scene_for_path(scene_pattern, relative_path),
+                scene=scene,
+                name=name,
+                hand=hand,
             )
             # Keep the local name for report code readable while all column
             # resolution now goes through the file-scoped context.

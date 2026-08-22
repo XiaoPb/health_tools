@@ -38,7 +38,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--ref-step-threshold` | 金标相邻值阶跃阈值，默认 8；绝对变化严格大于该值判定阶跃 |
 | `--ref-warning-seconds` | 金标异常起始警告窗口（秒），默认 10；窗口内异常为 WARNING，窗口外异常为 FAIL |
 | `--reference-detail-output` | 输出金标异常文件的秒采样 `time,ref,online,comp` 证据 CSV 目录 |
-| `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，未匹配时为 `default` |
+| `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，可包含 `(?P<name>...)` 和 `(?P<hand>...)`，未匹配或可选组缺失时为 `default` |
 | `-o/--output` | 检查报告 CSV 输出路径，默认 `<path>/check_report.csv` |
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
 | `--report` | 分拣使用的检查报告路径 |
@@ -68,8 +68,8 @@ python tests/benchmarks/bench_check_performance.py --files 100,500,1000 --worker
 - 有可检查文件时生成 `check_report.csv`；如果启用 ACC 且存在 Ipd FAIL，会额外生成 `ipd_detail_<文件名>.csv`。
 - 同目录生成精简报告，文件名在完整报告主名后追加 `_compact`（例如 `custom.csv` 对应 `custom_compact.csv`），仅保留 `WARNING`/`FAIL` 检查项的通道长表，便于后续分析程序直接读取。所有占比统一按百分比显示并保留两位小数（如 `16.00%`）；ACC 行同时包含异常帧数和总帧数。AGC 证据同时包含变化次数、有效相邻对数和变化占比，避免用 PPG 通道样本数误算调光比例。
 - 完整报告中的 ACC 异常帧列表以文本形式写入（前置 `'`），避免 Excel 自动识别为货币或科学计数格式；金标异常时间戳使用普通整数文本显示。
-- 完整报告、对应的 `_compact` 精简报告以及分拣清单均包含 `场景分类` 列；未指定正则或未匹配时显示 `default`。
-- 主报告在 `总异常(结果)` 后依次追加 `场景分类`、`主要异常项`，以及 Online/Comp 对 Ref 的准确度样本数、MAE、RMSE、相关系数和各个 `within_N` 百分比列。准确度列缺失时输出 `-`；配置已启用但没有有效样本时样本数为 `0`、指标为 `-`，不把缺列误报为 0%。
+- 完整报告和对应的 `_compact` 精简报告均在 `场景分类` 后包含 `姓名`、`手别` 列；未指定正则、未匹配或可选命名组缺失时显示 `default`。分拣清单继续保留 `场景分类` 列。
+- 主报告在 `总异常(结果)` 后依次追加 `场景分类`、`姓名`、`手别`、`主要异常项`，以及 Online/Comp 对 Ref 的准确度样本数、MAE、RMSE、相关系数和各个 `within_N` 百分比列。准确度列缺失时输出 `-`；配置已启用但没有有效样本时样本数为 `0`、指标为 `-`，不把缺列误报为 0%。
 - Online/Comp 准确度沿用 offline 的共同有效边界规则：三列共同确定首尾边界，边界内 0 保留，NaN/Inf 在比较时过滤；全 0 Comp 不参与 Comp vs Ref。
 - 准确度是否启用、列名、指标、阈值、边界和标定优先级全部由 `-r/--rule` 的 `accuracy` 块声明；CLI 不再提供准确度策略参数。未加载规则文件时不执行准确度统计。
 
@@ -99,7 +99,7 @@ mark 引用的指标必须由 `accuracy.methods` 或非空 `accuracy.thresholds`
 `comparison/metric/min/min_gap` 格式不兼容，校验时会直接报错。多条 mark 按 YAML 顺序匹配，
 第一条命中项决定主要异常说明和分拣目录。
 
-启用准确度时，`check_report.csv` 的列顺序固定为：文件名、芯片、总异常结果、场景分类、主要异常项；随后为每个
+启用准确度时，`check_report.csv` 的列顺序固定为：文件名、芯片、总异常结果、场景分类、姓名、手别、主要异常项；随后为每个
 `checks` 检查项的“状态/摘要”列，以及 ACC 证据列（启用 ACC 时）；最后部分的核心列顺序为：
 
 ```text
@@ -269,8 +269,8 @@ ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-ratio 20 --t
 # 指定期望时间基准；实际间隔中位数偏离 40ms 超过20%时 FAIL
 ghealth_tool check -i data/ --check-timestamp timestamp --timestamp-base-ms 40
 
-# 从相对路径提取场景
-ghealth_tool check -i data/ --scene-regex "subject\\d+_(?P<scene>rest|motion)_"
+# 从相对路径提取场景、姓名和手别
+ghealth_tool check -i data/ --scene-regex "(?P<scene>[^/\\\\]+)(?:/|\\\\)(?P<name>[^/\\\\_]+)_[^/\\\\_]+_(?P<hand>[^/\\\\_]+)_[^/\\\\]+.csv"
 
 # 把 ACC 单轴异常也计入结果
 ghealth_tool check -i data/ --checks acc --acc-axis

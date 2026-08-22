@@ -48,6 +48,8 @@ class FileCheckReport:
     results: List[CheckResult] = field(default_factory=list)
     accuracy_result: Optional["CheckAccuracyResult"] = None
     accuracy_methods: Tuple[str, ...] = ()
+    name: str = "default"
+    hand: str = "default"
 
     @property
     def all_passed(self) -> bool:
