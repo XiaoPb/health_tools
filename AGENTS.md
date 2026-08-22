@@ -23,11 +23,19 @@ python -c "import health_tools; print(health_tools.__file__)"
 
 如果 pytest 在初始化阶段出现 `pytestqt` 加载失败或 `QtCore` 的 DLL 异常（例如
 `ImportError: DLL load failed while importing QtCore`），这通常是当前环境没有可用的 Qt
-运行库，并非业务测试失败。先禁用 pytest 自动加载插件再运行测试：
+运行库，并非业务测试失败。本项目未使用 pytest-qt，已在 `pyproject.toml` 中持久化禁用
+该插件：
+
+```toml
+[tool.pytest.ini_options]
+addopts = "-p no:pytest-qt"
+```
+
+注意插件注册名是 `pytest-qt`（带连字符），不是 Python 模块名 `pytestqt`。临时命令如下：
 
 ```bash
 # Linux/macOS
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest
+pytest -p no:pytest-qt
 
 # Windows PowerShell
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD="1"

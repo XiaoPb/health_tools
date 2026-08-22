@@ -89,6 +89,7 @@ ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-p no:pytest-qt"
 
 [tool.coverage.run]
 source = ["health_tools"]
