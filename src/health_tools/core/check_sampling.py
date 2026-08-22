@@ -14,13 +14,19 @@ def normalize_frame_rate(sample_rate: float) -> int:
 
 
 def predict_sample_rate_from_timestamp(
-    frame: pd.DataFrame, *, timestamp_column: str
+    frame: pd.DataFrame,
+    *,
+    timestamp_column: str,
+    intervals_ms: Optional[pd.Series] = None,
 ) -> Optional[int]:
     """根据毫秒时间戳间隔估算原始采样率。"""
-    if timestamp_column not in frame.columns:
+    if intervals_ms is None and timestamp_column not in frame.columns:
         return None
-    timestamp = pd.to_numeric(frame[timestamp_column], errors="coerce")
-    intervals = timestamp.diff().to_numpy(dtype=float)
+    if intervals_ms is None:
+        timestamp = pd.to_numeric(frame[timestamp_column], errors="coerce")
+        intervals = timestamp.diff().to_numpy(dtype=float)
+    else:
+        intervals = intervals_ms.to_numpy(dtype=float)
     intervals = intervals[np.isfinite(intervals) & (intervals > 0)]
     if intervals.size == 0:
         return None

@@ -219,6 +219,11 @@ class _FileCheckContext:
     ipd_columns: List[str]
     agc_columns: List[str]
     _numeric_columns: Dict[Tuple[str, ...], pd.DataFrame] = field(default_factory=dict)
+    _timestamp_analysis: Dict[str, Tuple[Optional[pd.Series], str]] = field(default_factory=dict)
+    _sample_positions: Dict[Tuple[float, str], np.ndarray] = field(default_factory=dict)
+    _sample_frames: Dict[Tuple[str, str, Optional[str], float, Tuple[int, ...]], pd.DataFrame] = (
+        field(default_factory=dict)
+    )
 
     @classmethod
     def create(cls, path: Path, chip: str, chip_rule: Any, frame: pd.DataFrame, checker: Any):
@@ -263,6 +268,65 @@ class _FileCheckContext:
         if cached is None:
             cached = self.frame.loc[:, list(key)].apply(pd.to_numeric, errors="coerce")
             self._numeric_columns[key] = cached
+        return cached
+
+    def timestamp_analysis(self, column: str) -> Tuple[Optional[pd.Series], str]:
+        """解析并缓存时间戳间隔，供检查和采样率预测共同使用。"""
+        cached = self._timestamp_analysis.get(column)
+        if cached is None:
+            parser = getattr(self.checker, "_parse_timestamp_intervals_ms", None)
+            if parser is None:
+                # Test doubles and compatible checker implementations may not
+                # expose the private parser; defer parsing to their public check.
+                cached = (None, "")
+                self._timestamp_analysis[column] = cached
+                return cached
+            cached = parser(self.frame[column])
+            self._timestamp_analysis[column] = cached
+        return cached
+
+    def sample_positions(self, *, sample_rate: float, online_column: str) -> np.ndarray:
+        key = (float(sample_rate), online_column)
+        cached = self._sample_positions.get(key)
+        if cached is None:
+            from health_tools.core.check_sampling import build_sample_positions
+
+            cached = build_sample_positions(
+                self.frame, sample_rate=sample_rate, online_column=online_column
+            )
+            self._sample_positions[key] = cached
+        return cached
+
+    def sample_frame(
+        self,
+        *,
+        positions: np.ndarray,
+        sample_rate: float,
+        timestamp_column: str,
+        ref_column: str,
+        online_column: str,
+        comp_column: Optional[str],
+    ) -> pd.DataFrame:
+        key = (
+            ref_column,
+            online_column,
+            comp_column,
+            float(sample_rate),
+            tuple(int(value) for value in np.asarray(positions, dtype=np.int64)),
+        )
+        cached = self._sample_frames.get(key)
+        if cached is None:
+            from health_tools.core.check_sampling import sample_check_seconds
+
+            cached = sample_check_seconds(
+                self.frame,
+                positions=positions,
+                timestamp_column=timestamp_column,
+                ref_column=ref_column,
+                online_column=online_column,
+                comp_column=comp_column,
+            )
+            self._sample_frames[key] = cached
         return cached
 
 
@@ -923,12 +987,6 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     def check_one(
         path: Path,
     ) -> Tuple[ItemResult, Optional[Any], Optional[Any], Optional[Any], Optional[Any]]:
-        from health_tools.core.check_sampling import (
-            build_sample_positions,
-            predict_sample_rate_from_timestamp,
-            sample_check_seconds,
-        )
-
         chip = request.chip_name or _detect_chip(path)
         if not chip:
             return (
@@ -989,7 +1047,11 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             if "agc" in checks:
                 report.results.append(checker.check_agc_changes(frame))
             timestamp_result = None
+            timestamp_intervals = None
             if request.timestamp_column:
+                timestamp_intervals, timestamp_error = file_context.timestamp_analysis(
+                    request.timestamp_column
+                )
                 timestamp_result = checker.check_timestamp_interval(
                     frame,
                     request.timestamp_column,
@@ -997,6 +1059,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     ms_tolerance=request.timestamp_ms,
                     threshold_ratio=request.timestamp_fail_ratio,
                     expected_base_ms=request.timestamp_base_ms,
+                    _intervals_ms=timestamp_intervals if not timestamp_error else None,
                 )
                 report.results.append(timestamp_result)
             ref_enabled = request.checks is None or "ref" in checks
@@ -1004,22 +1067,26 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             sampling_online = request.accuracy_online_column or "ALGO_RESULT0"
             sampling_rate = request.ref_sample_rate
             if timestamp_result is not None and timestamp_result.status == "FAIL":
+                from health_tools.core.check_sampling import predict_sample_rate_from_timestamp
+
                 predicted_rate = predict_sample_rate_from_timestamp(
-                    frame, timestamp_column=request.timestamp_column or ""
+                    frame,
+                    timestamp_column=request.timestamp_column or "",
+                    intervals_ms=timestamp_intervals,
                 )
                 if predicted_rate is not None:
                     sampling_rate = float(predicted_rate)
             if (
                 ref_enabled and (request.ref_hr_column or request.ref_spo2_column)
             ) or request.accuracy_enabled:
-                sample_positions = build_sample_positions(
-                    frame, sample_rate=sampling_rate, online_column=sampling_online
+                sample_positions = file_context.sample_positions(
+                    sample_rate=sampling_rate, online_column=sampling_online
                 )
             evidence_frame = None
             if ref_enabled and request.ref_hr_column:
-                reference_frame = sample_check_seconds(
-                    frame,
+                reference_frame = file_context.sample_frame(
                     positions=sample_positions,
+                    sample_rate=sampling_rate,
                     timestamp_column=request.timestamp_column or "TimeStamp",
                     ref_column=request.ref_hr_column,
                     online_column=sampling_online,
@@ -1037,9 +1104,9 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     )
                 )
             if ref_enabled and request.ref_spo2_column:
-                reference_frame = sample_check_seconds(
-                    frame,
+                reference_frame = file_context.sample_frame(
                     positions=sample_positions,
+                    sample_rate=sampling_rate,
                     timestamp_column=request.timestamp_column or "TimeStamp",
                     ref_column=request.ref_spo2_column,
                     online_column=sampling_online,
@@ -1076,9 +1143,9 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 from health_tools.models.rules import CheckAccuracyRule
 
                 accuracy_methods = _resolve_accuracy_methods(request)
-                accuracy_frame = sample_check_seconds(
-                    frame,
+                accuracy_frame = file_context.sample_frame(
                     positions=sample_positions,
+                    sample_rate=sampling_rate,
                     timestamp_column=request.timestamp_column or "TimeStamp",
                     ref_column=request.accuracy_ref_column or "REF_RESULT0",
                     online_column=request.accuracy_online_column or "ALGO_RESULT0",
@@ -1109,9 +1176,9 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 for result in report.results
             )
             if request.reference_detail_output is not None and reference_abnormal:
-                evidence_frame = sample_check_seconds(
-                    frame,
+                evidence_frame = file_context.sample_frame(
                     positions=sample_positions,
+                    sample_rate=sampling_rate,
                     timestamp_column=request.timestamp_column or "TimeStamp",
                     ref_column=request.accuracy_ref_column
                     or request.ref_hr_column

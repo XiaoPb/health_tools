@@ -686,12 +686,16 @@ class DataChecker:
         ms_tolerance: Optional[float] = None,
         threshold_ratio: float = 1.0,
         expected_base_ms: Optional[float] = None,
+        _intervals_ms: Optional[pd.Series] = None,
     ) -> CheckResult:
         """检查相邻时间戳间隔是否稳定。"""
         if timestamp_column not in df.columns:
             return CheckResult("时间戳间隔", False, f"未找到时间戳列: {timestamp_column}")
 
-        intervals_ms, error = self._parse_timestamp_intervals_ms(df[timestamp_column])
+        if _intervals_ms is None:
+            intervals_ms, error = self._parse_timestamp_intervals_ms(df[timestamp_column])
+        else:
+            intervals_ms, error = _intervals_ms, ""
         if error:
             return CheckResult("时间戳间隔", False, error)
 
