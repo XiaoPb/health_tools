@@ -47,6 +47,17 @@ def classify_exception(exc: BaseException, default: str = REASON_PROCESS_FAILED)
     return default or REASON_UNKNOWN
 
 
+def format_exception_detail(exc: BaseException) -> str:
+    """保留异常类型和原始消息，便于报告定位具体失败位置。"""
+    message = str(exc).strip()
+    if isinstance(exc, KeyError) and exc.args:
+        missing = exc.args[0]
+        message = f"缺少列或索引: {missing!r}"
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
+
+
 def normalize_reason(reason: Optional[str]) -> str:
     """将空原因归一化为未知异常。"""
     if not reason:

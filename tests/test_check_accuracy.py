@@ -294,6 +294,24 @@ def test_check_report_includes_skipped_and_failed_items_with_reason_only(tmp_pat
     )
 
 
+def test_check_report_includes_failure_detail_after_reason(tmp_path) -> None:
+    output = tmp_path / "check_report.csv"
+    items = (
+        ItemResult(
+            ItemStatus.FAIL,
+            str(tmp_path / "broken.csv"),
+            reason="CSV格式错误",
+            detail="ParserError: Expected 4 fields in line 3, saw 5",
+        ),
+    )
+
+    _save_report([], {}, output, tmp_path, False, items)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["主要异常项"] == "失败：CSV格式错误：ParserError: Expected 4 fields in line 3, saw 5"
+
+
 def test_compact_report_includes_accuracy_mark_details(tmp_path) -> None:
     mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "accuracy_low", "Online准确度低")
     report = FileCheckReport(

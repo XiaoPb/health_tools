@@ -13,6 +13,7 @@ from rich.table import Table
 from health_tools.utils.errors import (
     REASON_PROCESS_FAILED,
     classify_exception,
+    format_exception_detail,
     normalize_reason,
 )
 
@@ -120,7 +121,7 @@ class ResultCollector:
             input_path,
             reason=classify_exception(exc, default=default_reason),
             output=output,
-            detail=str(exc),
+            detail=format_exception_detail(exc),
         )
 
     def count(self, status: str) -> int:
@@ -152,7 +153,7 @@ def result_from_exception(
         input=_path_text(input_path),
         output=_path_text(output),
         reason=classify_exception(exc, default=default_reason),
-        detail=str(exc),
+        detail=format_exception_detail(exc),
     )
 
 

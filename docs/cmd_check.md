@@ -59,6 +59,24 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 - Online/Comp 准确度沿用 offline 的共同有效边界规则：三列共同确定首尾边界，边界内 0 保留，NaN/Inf 在比较时过滤；全 0 Comp 不参与 Comp vs Ref。
 - 准确度是否启用、列名、指标、阈值、边界和标定优先级全部由 `-r/--rule` 的 `accuracy` 块声明；CLI 不再提供准确度策略参数。未加载规则文件时不执行准确度统计。
 
+### 读取与处理异常
+
+失败或跳过文件会进入完整报告；`主要异常项` 会同时写入中文原因和底层错误详情，格式为
+`失败：原因：详细信息` 或 `跳过：原因：详细信息`。常见原因包括：
+
+| 原因 | 典型触发条件 | 报告中的详细信息 |
+|---|---|---|
+| `读取失败` | 文件不存在、路径不可读 | 文件系统异常类型和原始消息 |
+| `格式不对` | CSV 解析失败、字段数量不一致 | `ParserError` 及行号、字段数等信息 |
+| `列缺失` | 代码访问了不存在的列，或 `usecols` 不匹配 | 缺失列名或索引；不会只显示笼统的“列缺失” |
+| `列结构不符合规则` | CSV 可读取，但缺少帧号、ACC、Ipd/Rawdata、时间戳或金标列 | 具体缺少的逻辑列列表 |
+| `文件为空` | 空文件、只有表头或无可合并数据 | 空数据原因 |
+| `处理失败` | 检查过程中的未分类异常 | 异常类型和原始错误消息 |
+
+解析器抛出的异常会保留异常类型；例如 `ParserError: Expected 4 fields in line 3, saw 5`、
+`KeyError: 缺少列或索引: 'REF_RESULT0'`。批量检查默认按原因汇总，使用 `-v/--verbose`
+可查看逐文件的原因和详情，完整报告始终保留详情。
+
 `accuracy.marks` 统一使用声明式条件：`left`/`right` 为 `online.<metric>` 或
 `comp.<metric>`，`operator` 支持 `lt/lte/gt/gte`、`diff_gte/diff_gt`、
 `ratio_lt/ratio_lte`，并用有限数 `threshold` 判定。差值按 `right - left` 计算，比例按

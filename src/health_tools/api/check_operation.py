@@ -24,7 +24,11 @@ from health_tools.api.models import (
 )
 from health_tools.api.operations import _batch, _context, _load_rule, _require_path
 from health_tools.utils.accuracy import format_metric_name, resolve_accuracy_methods
-from health_tools.utils.errors import REASON_PROCESS_FAILED, classify_exception
+from health_tools.utils.errors import (
+    REASON_PROCESS_FAILED,
+    classify_exception,
+    format_exception_detail,
+)
 
 SORT_CATEGORIES = (
     "frame",
@@ -192,6 +196,15 @@ def _relative_path(path: Path, base: Optional[Path]) -> str:
         return path.resolve().relative_to(base.resolve()).as_posix()
     except ValueError:
         return path.name
+
+
+def _item_issue(item: ItemResult) -> str:
+    """合并分类原因和底层异常详情，避免报告只显示笼统原因。"""
+    reason = (item.reason or "未知原因").strip()
+    detail = (item.detail or "").strip()
+    if not detail or detail == reason or detail in reason:
+        return reason
+    return f"{reason}：{detail}"
 
 
 def _compile_scene_regex(pattern: Optional[str]):
@@ -477,7 +490,7 @@ def _save_report(
                 resolved_path = item_path
             if resolved_path in report_paths:
                 continue
-            reason = item.reason or item.detail or "未知原因"
+            reason = _item_issue(item)
             status = getattr(item.status, "value", str(item.status))
             row_by_name = {
                 column: ""
@@ -986,7 +999,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                     ItemStatus.FAIL,
                     str(path),
                     reason=classify_exception(exc, REASON_PROCESS_FAILED),
-                    detail=str(exc),
+                    detail=format_exception_detail(exc),
                 ),
                 None,
                 None,

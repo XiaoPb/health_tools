@@ -1,6 +1,13 @@
 from rich.console import Console
 
-from health_tools.utils.errors import REASON_EMPTY_FILE, REASON_RULE_MISMATCH
+from health_tools.utils.errors import (
+    REASON_BAD_FORMAT,
+    REASON_EMPTY_FILE,
+    REASON_MISSING_COLUMN,
+    REASON_RULE_MISMATCH,
+    classify_exception,
+    format_exception_detail,
+)
 from health_tools.utils.reporting import ResultCollector, print_summary
 
 
@@ -49,3 +56,12 @@ def test_print_summary_shows_file_details_when_verbose(capsys):
     output = capsys.readouterr().out
     assert "bad.csv" in output
     assert "No columns" in output
+
+
+def test_exception_classification_preserves_specific_error_detail():
+    assert classify_exception(KeyError("REF_RESULT0")) == REASON_MISSING_COLUMN
+    assert "REF_RESULT0" in format_exception_detail(KeyError("REF_RESULT0"))
+
+    decode_error = UnicodeDecodeError("utf-8", b"\\xff", 0, 1, "invalid start byte")
+    assert classify_exception(decode_error) == REASON_BAD_FORMAT
+    assert "UnicodeDecodeError" in format_exception_detail(decode_error)
