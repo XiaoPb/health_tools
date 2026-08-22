@@ -52,9 +52,9 @@ accuracy:
   inclusive: true
   marks:
     - id: online_low
-      comparison: online
-      metric: within_5
-      min: 80
+      left: online.within_5
+      operator: lt
+      threshold: 80
       category: accuracy_online_low
       label: Online 准确度低
 """,
@@ -127,15 +127,15 @@ accuracy:
   enabled: true
   marks:
     - id: online_low
-      comparison: online
-      metric: within_5
-      min: 80
+      left: online.within_5
+      operator: lt
+      threshold: 80
       category: online_low
       label: Online 准确度低
     - id: comp_low
-      comparison: comp
-      metric: within_5
-      min: 70
+      left: comp.within_5
+      operator: lt
+      threshold: 70
       category: comp_low
       label: Comp 准确度低
 """,
@@ -258,11 +258,11 @@ def test_load_check_rule_keeps_all_supported_parameters():
 def test_check_rule_models_keep_immutable_accuracy_mark_configuration():
     mark = AccuracyMarkRule(
         id="online_within_5_low",
-        comparison="online",
-        metric="within_5",
+        left="online.within_5",
+        operator="lt",
+        threshold=80.0,
         category="accuracy_online_low",
         label="Online ±5准确度低",
-        min=80.0,
     )
     accuracy = CheckAccuracyRule(
         enabled=True,
@@ -341,6 +341,107 @@ def test_check_rule_reports_malformed_check_items_without_crashing():
     assert "checks[1]" in message
 
 
+def test_check_rule_loads_declarative_accuracy_mark(tmp_path):
+    rule_path = tmp_path / "declarative.yaml"
+    rule_path.write_text(
+        """version: '1.0'
+accuracy:
+  enabled: true
+  methods: [mae, within_5]
+  thresholds:
+    - {name: within_3, value: 3}
+  marks:
+    - id: online_below_comp
+      left: online.within_5
+      operator: diff_gte
+      right: comp.within_5
+      threshold: 10
+      category: accuracy_online_below_comp
+      label: Online低于Comp 10个百分点
+    - id: online_within_3_low
+      left: online.within_3
+      operator: lt
+      threshold: 80
+      category: accuracy_online_within_3_low
+      label: Online自定义准确度低
+""",
+        encoding="utf-8",
+    )
+
+    rule = RuleLoader.load_check_rule(str(rule_path))
+
+    assert rule.accuracy.marks == (
+        AccuracyMarkRule(
+            id="online_below_comp",
+            left="online.within_5",
+            operator="diff_gte",
+            right="comp.within_5",
+            threshold=10.0,
+            category="accuracy_online_below_comp",
+            label="Online低于Comp 10个百分点",
+        ),
+        AccuracyMarkRule(
+            id="online_within_3_low",
+            left="online.within_3",
+            operator="lt",
+            threshold=80.0,
+            category="accuracy_online_within_3_low",
+            label="Online自定义准确度低",
+        ),
+    )
+
+
+def test_check_rule_rejects_legacy_accuracy_mark_fields():
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "accuracy": {
+                "methods": ["within_5"],
+                "marks": [
+                    {
+                        "id": "legacy",
+                        "comparison": "online",
+                        "metric": "within_5",
+                        "min": 80,
+                        "category": "legacy",
+                        "label": "旧格式",
+                    }
+                ],
+            },
+        },
+        "check",
+    )
+
+    message = " ".join(errors)
+    assert "旧字段" in message
+    assert "comparison" in message
+
+
+@pytest.mark.parametrize("path", ["online.rmse", "comp.within_3"])
+def test_check_rule_rejects_mark_metric_not_produced_by_methods_or_thresholds(path):
+    errors = RuleValidator.validate(
+        {
+            "version": "1.0",
+            "accuracy": {
+                "methods": ["mae", "within_5"],
+                "marks": [
+                    {
+                        "id": "unknown_metric",
+                        "left": path,
+                        "operator": "lt",
+                        "threshold": 80,
+                        "category": "unknown_metric",
+                        "label": "未知指标",
+                    }
+                ],
+            },
+        },
+        "check",
+    )
+
+    assert "未由 accuracy.methods 或 accuracy.thresholds 声明" in " ".join(errors)
+
+
 def test_check_rule_rejects_unsafe_accuracy_mark_id():
     errors = RuleValidator.validate(
         {
@@ -350,11 +451,11 @@ def test_check_rule_rejects_unsafe_accuracy_mark_id():
                 "marks": [
                     {
                         "id": "../bad",
-                        "comparison": "online",
-                        "metric": "within_5",
+                        "left": "online.within_5",
+                        "operator": "lt",
+                        "threshold": 80,
                         "category": "accuracy_online_low",
                         "label": "Online 准确度低",
-                        "min": 80,
                     }
                 ],
             },

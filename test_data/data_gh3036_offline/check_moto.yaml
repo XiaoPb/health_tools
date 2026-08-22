@@ -39,31 +39,31 @@ accuracy:
   online_column: ALGO_RESULT0
   comp_column: REF_RESULT1
   methods: [mae, within_5, within_10, within_15]
-  thresholds: []
   inclusive: true
   marks:
     - id: online_below_comp_10
-      comparison: online_below_comp_10
-      metric: within_5
-      min_gap: 10.0
+      left: online.within_5
+      operator: diff_gte
+      right: comp.within_5
+      threshold: 10.0
       label: Online低于Comp 10个百分点
       category: accuracy_online_below_comp_10
     - id: online_below_comp_5
-      comparison: online_below_comp_5
-      metric: within_5
-      min_gap: 5.0
+      left: online.within_5
+      operator: diff_gte
+      right: comp.within_5
+      threshold: 5.0
       label: Online低于Comp 5个百分点
       category: accuracy_online_below_comp_5
     - id: online_within_5_low
-      comparison: online
-      metric: within_5
-      min: 80.0
+      left: online.within_5
+      operator: lt
+      threshold: 80.0
       label: Online ±5准确度低
       category: accuracy_online_low
     - id: comp_within_5_low
-      comparison: comp
-      metric: within_5
-      min: 80.0
+      left: comp.within_5
+      operator: lt
+      threshold: 80.0
       label: Comp ±5准确度低
       category: accuracy_comp_low
-

@@ -222,12 +222,12 @@ class AccuracyMarkRule:
     """check 准确度标定条件。"""
 
     id: str
-    comparison: str
-    metric: str
+    left: str
+    operator: str
+    threshold: float
     category: str
     label: str
-    min: Optional[float] = None
-    min_gap: Optional[float] = None
+    right: Optional[str] = None
 
 
 @dataclass(frozen=True)

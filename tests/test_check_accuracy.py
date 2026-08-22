@@ -144,15 +144,16 @@ def test_accuracy_marks_use_rule_order_and_percentage_point_gap() -> None:
     result = CheckAccuracyResult(online={"within_5": 70.0}, comp={"within_5": 85.0})
     marks = (
         AccuracyMarkRule(
-            "online_low", "online", "within_5", "accuracy_online_low", "Online ±5准确度低", min=80
+            "online_low", "online.within_5", "lt", 80, "accuracy_online_low", "Online ±5准确度低"
         ),
         AccuracyMarkRule(
             "online_gap",
-            "online_below_comp",
-            "within_5",
+            "online.within_5",
+            "diff_gte",
+            10,
             "accuracy_online_below_comp",
             "Online低于Comp 10个百分点",
-            min_gap=10,
+            right="comp.within_5",
         ),
     )
     assert match_accuracy_mark(result, marks).id == "online_low"
@@ -160,12 +161,89 @@ def test_accuracy_marks_use_rule_order_and_percentage_point_gap() -> None:
 
 def test_accuracy_mark_minimum_is_strictly_below_threshold() -> None:
     result = CheckAccuracyResult(online={"within_5": 80.0})
-    mark = AccuracyMarkRule("low", "online", "within_5", "low", "低", min=80)
+    mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "low", "低")
     assert match_accuracy_mark(result, (mark,)) is None
 
 
+@pytest.mark.parametrize(
+    "mark, expected",
+    [
+        (AccuracyMarkRule("lt", "online.mae", "lt", 8, "lt", "lt"), False),
+        (AccuracyMarkRule("lte", "online.mae", "lte", 8, "lte", "lte"), True),
+        (AccuracyMarkRule("gt", "online.mae", "gt", 7, "gt", "gt"), True),
+        (AccuracyMarkRule("gte", "online.mae", "gte", 8, "gte", "gte"), True),
+        (
+            AccuracyMarkRule(
+                "diff_gte",
+                "online.within_5",
+                "diff_gte",
+                15,
+                "diff_gte",
+                "diff_gte",
+                right="comp.within_5",
+            ),
+            True,
+        ),
+        (
+            AccuracyMarkRule(
+                "diff_gt",
+                "online.within_5",
+                "diff_gt",
+                15,
+                "diff_gt",
+                "diff_gt",
+                right="comp.within_5",
+            ),
+            False,
+        ),
+        (
+            AccuracyMarkRule(
+                "ratio_lt",
+                "online.within_5",
+                "ratio_lt",
+                0.9,
+                "ratio_lt",
+                "ratio_lt",
+                right="comp.within_5",
+            ),
+            True,
+        ),
+        (
+            AccuracyMarkRule(
+                "ratio_lte",
+                "online.within_5",
+                "ratio_lte",
+                70 / 85,
+                "ratio_lte",
+                "ratio_lte",
+                right="comp.within_5",
+            ),
+            True,
+        ),
+    ],
+)
+def test_declarative_accuracy_mark_operators(mark, expected) -> None:
+    result = CheckAccuracyResult(online={"mae": 8.0, "within_5": 70.0}, comp={"within_5": 85.0})
+
+    assert (match_accuracy_mark(result, (mark,)) is mark) is expected
+
+
+def test_declarative_ratio_mark_does_not_match_zero_or_missing_right_value() -> None:
+    mark = AccuracyMarkRule(
+        "ratio", "online.within_5", "ratio_lt", 0.9, "ratio", "比例低", right="comp.within_5"
+    )
+
+    assert match_accuracy_mark(CheckAccuracyResult(online={"within_5": 70}), (mark,)) is None
+    assert (
+        match_accuracy_mark(
+            CheckAccuracyResult(online={"within_5": 70}, comp={"within_5": 0}), (mark,)
+        )
+        is None
+    )
+
+
 def test_check_report_places_scene_and_primary_issue_after_total(tmp_path) -> None:
-    mark = AccuracyMarkRule("low", "online", "within_5", "accuracy_low", "Online准确度低", min=80)
+    mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "accuracy_low", "Online准确度低")
     report = FileCheckReport(
         tmp_path / "sample.csv",
         "gh3036",
@@ -217,7 +295,7 @@ def test_check_report_includes_skipped_and_failed_items_with_reason_only(tmp_pat
 
 
 def test_compact_report_includes_accuracy_mark_details(tmp_path) -> None:
-    mark = AccuracyMarkRule("low", "online", "within_5", "accuracy_low", "Online准确度低", min=80)
+    mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "accuracy_low", "Online准确度低")
     report = FileCheckReport(
         tmp_path / "sample.csv",
         "gh3036",
@@ -235,6 +313,37 @@ def test_compact_report_includes_accuracy_mark_details(tmp_path) -> None:
     assert rows[0]["状态"] == "WARNING"
     assert rows[0]["说明"] == "Online准确度低"
     assert rows[0]["准确度指标"] == "±5BPM"
+
+
+def test_compact_report_uses_declarative_ratio_value(tmp_path) -> None:
+    mark = AccuracyMarkRule(
+        "ratio",
+        "online.within_5",
+        "ratio_lt",
+        0.9,
+        "accuracy_ratio_low",
+        "Online低于Comp的90%",
+        right="comp.within_5",
+    )
+    report = FileCheckReport(
+        tmp_path / "ratio.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "within_5": 60.0},
+            comp={"samples": 3, "within_5": 80.0},
+            matched_mark=mark,
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["异常数"] == "0.75"
+    assert row["异常占比"] == "0.75%"
+    assert row["比较对象"] == "Online vs Comp"
+    assert row["准确度阈值"] == "0.9"
 
 
 def test_check_report_uses_resolved_accuracy_methods(tmp_path) -> None:

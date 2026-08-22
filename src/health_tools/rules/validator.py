@@ -314,14 +314,57 @@ class RuleValidator:
         ids = set()
         categories = set()
         safe_category = re.compile(r"^[A-Za-z0-9_-]+$")
+        default_methods = {
+            "mae",
+            "within_5",
+            "within_10",
+            "within_15",
+            "rmse",
+            "correlation",
+        }
+        methods_set = set(methods) if isinstance(methods, list) else default_methods
+        threshold_names = {
+            t.get("name")
+            for t in thresholds
+            if isinstance(thresholds, list) and isinstance(t, dict)
+        }
+        known_metrics = methods_set | {str(name) for name in threshold_names if name}
+        operators = {"lt", "lte", "gt", "gte", "diff_gte", "diff_gt", "ratio_lt", "ratio_lte"}
         for index, mark in enumerate(marks):
             prefix = f"marks[{index}]"
             if not isinstance(mark, dict):
                 errors.append(f"{prefix} 必须是映射")
                 continue
-            for field in ("id", "comparison", "metric", "category", "label"):
+            for field in ("id", "left", "operator", "category", "label"):
                 if not isinstance(mark.get(field), str) or not mark[field].strip():
                     errors.append(f"{prefix} 缺少有效的 '{field}'")
+            if not RuleValidator._is_finite(mark.get("threshold")):
+                errors.append(f"{prefix}.threshold 必须是有限数")
+            if "right" not in mark and mark.get("operator") in {
+                "diff_gte",
+                "diff_gt",
+                "ratio_lt",
+                "ratio_lte",
+            }:
+                errors.append(f"{prefix}.right 是二元运算必填项")
+            legacy = set(mark) & {"comparison", "metric", "min", "min_gap"}
+            if legacy:
+                errors.append(f"{prefix} 包含已废弃的旧字段: {', '.join(sorted(legacy))}")
+            unknown = set(mark) - {
+                "id",
+                "left",
+                "operator",
+                "right",
+                "threshold",
+                "category",
+                "label",
+                "comparison",
+                "metric",
+                "min",
+                "min_gap",
+            }
+            if unknown:
+                errors.append(f"{prefix} 包含未知字段: {', '.join(sorted(unknown))}")
             mark_id = mark.get("id")
             category = mark.get("category")
             if isinstance(mark_id, str) and mark_id in ids:
@@ -336,21 +379,25 @@ class RuleValidator:
                 categories.add(category)
                 if not safe_category.fullmatch(category):
                     errors.append(f"{prefix}.category 必须是安全的单段目录名")
-            comparison = mark.get("comparison")
-            if isinstance(comparison, str) and comparison in {"online", "comp"}:
-                if "min" not in mark or "min_gap" in mark:
-                    errors.append(f"{prefix} comparison={comparison} 需要 min 且不能有 min_gap")
-                elif not RuleValidator._is_percent(mark["min"]):
-                    errors.append(f"{prefix}.min 必须是 0 到 100 的有限数")
-            elif isinstance(comparison, str) and comparison == "online_below_comp":
-                if "min_gap" not in mark or "min" in mark:
+            left = mark.get("left")
+            right = mark.get("right")
+            for name, path in (("left", left), ("right", right)):
+                if path is None:
+                    continue
+                if not isinstance(path, str) or not re.fullmatch(
+                    r"(?:online|comp)\.[A-Za-z0-9_.-]+", path
+                ):
+                    errors.append(f"{prefix}.{name} 必须是 online.<metric> 或 comp.<metric>")
+                elif path.split(".", 1)[1] not in known_metrics:
                     errors.append(
-                        f"{prefix} comparison=online_below_comp 需要 min_gap 且不能有 min"
+                        f"{prefix}.{name} 指标 {path.split('.', 1)[1]} "
+                        "未由 accuracy.methods 或 accuracy.thresholds 声明"
                     )
-                elif not RuleValidator._is_non_negative_finite(mark["min_gap"]):
-                    errors.append(f"{prefix}.min_gap 必须是非负有限数")
-            elif isinstance(comparison, str) and comparison:
-                errors.append(f"{prefix}.comparison 仅支持 online、comp、online_below_comp")
+            operator = mark.get("operator")
+            if operator not in operators:
+                errors.append(f"{prefix}.operator 仅支持: {', '.join(sorted(operators))}")
+            elif operator in {"lt", "lte", "gt", "gte"} and right is not None:
+                errors.append(f"{prefix}.right 只能用于二元运算")
         return errors
 
     @staticmethod
@@ -359,6 +406,12 @@ class RuleValidator:
             return False
         number = float(cast(Union[int, float], value))
         return math.isfinite(number) and number >= 0
+
+    @staticmethod
+    def _is_finite(value: object) -> bool:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        return math.isfinite(float(value))
 
     @staticmethod
     def _is_percent(value: object) -> bool:
