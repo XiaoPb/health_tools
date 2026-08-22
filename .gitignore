@@ -87,3 +87,4 @@ memory/
 AGENTS.md
 .agents/skills
 .worktrees/
+.codegraph/
