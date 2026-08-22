@@ -98,7 +98,8 @@ def test_check_documentation_describes_bounded_parallel_scheduling():
     command_doc = (DOCS_DIR / "cmd_check.md").read_text(encoding="utf-8")
 
     for statement in (
-        "在途任务窗口最多为 `workers * 2`",
+        "文件检查线程最多为 32 个",
+        "在途任务窗口最多为 `实际生效线程数 * 2`",
         "按输入顺序汇总报告",
         "取消操作会停止提交新文件",
         "不保证线性提速",

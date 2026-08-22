@@ -48,6 +48,8 @@ SORT_CATEGORIES = (
     "normal",
 )
 
+_MAX_FILE_WORKERS = 32
+
 _FULL_REPORT_HEADER = {
     "文件名",
     "芯片",
@@ -1212,7 +1214,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
 
     # 限制同时在途的文件任务数量，避免大批量输入一次性创建数千个 Future。
     # 空输入也保留至少一个 worker/window，维持原有边界行为。
-    effective_workers = min(request.workers, max(1, total))
+    effective_workers = min(request.workers, max(1, total), _MAX_FILE_WORKERS)
     window = max(1, effective_workers * 2)
     executor = ThreadPoolExecutor(max_workers=effective_workers)
     pending: Dict[Future, Tuple[int, Path]] = {}

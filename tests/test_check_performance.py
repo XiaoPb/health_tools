@@ -122,6 +122,51 @@ def test_run_check_uses_bounded_pending_window(monkeypatch, tmp_path):
     assert tracker["max_pending"] <= 4
 
 
+def test_run_check_caps_requested_workers_for_large_batches(monkeypatch, tmp_path):
+    """超大 workers 请求不应创建超过硬上限的文件检查线程。"""
+    paths = [tmp_path / f"sample-{index}.csv" for index in range(40)]
+    tracker = {"max_workers": 0}
+
+    class FakeCSVHandler:
+        def __init__(self, _rule):
+            pass
+
+        def read(self, _path):
+            return {}, pd.DataFrame({"PPG": [1.0], "FRAME_ID": [0]})
+
+    class FakeChecker:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def check_data_range(self, *_args, **_kwargs):
+            return CheckResult("数据范围", True, "通过")
+
+    class TrackingExecutor(ThreadPoolExecutor):
+        def __init__(self, max_workers, *args, **kwargs):
+            tracker["max_workers"] = max_workers
+            super().__init__(max_workers, *args, **kwargs)
+
+    monkeypatch.setattr(check_operation, "_discover_check_inputs", lambda _target: paths)
+    monkeypatch.setattr(check_operation, "_detect_chip", lambda _path: "gh3036")
+    monkeypatch.setattr(check_operation, "_rule_mismatch", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        "health_tools.rules.loader.RuleLoader.load_chip_rule",
+        staticmethod(lambda _name: SimpleNamespace()),
+    )
+    monkeypatch.setattr("health_tools.utils.csv_handler.CSVHandler", FakeCSVHandler)
+    monkeypatch.setattr("health_tools.core.checker.DataChecker", FakeChecker)
+    monkeypatch.setattr("concurrent.futures.ThreadPoolExecutor", TrackingExecutor)
+    monkeypatch.setattr(check_operation, "_save_report", lambda *args, **kwargs: None)
+    monkeypatch.setattr(check_operation, "_save_compact_report", lambda *args, **kwargs: None)
+
+    result = check_operation.run_check(
+        CheckRequest(input_path=tmp_path, checks="range", chip_name="gh3036", workers=2310)
+    )
+
+    assert result.batch.ok_count == len(paths)
+    assert tracker["max_workers"] <= 32
+
+
 def test_run_check_cancel_keeps_completed_items_without_submitting_more(monkeypatch, tmp_path):
     """完成一个文件后取消时应保留结果，且不再补充待处理任务。"""
     paths = [tmp_path / f"sample-{index}.csv" for index in range(4)]
