@@ -168,6 +168,9 @@ class DataChecker:
 
     def _get_data_columns(self) -> List[str]:
         """获取原始数据列名：优先check_columns.data，其次从columns匹配"""
+        context = getattr(self, "_check_context", None)
+        if context is not None:
+            return list(context.data_columns)
         explicit = self.chip_rule.check_columns.get("data")
         if explicit:
             return explicit
@@ -182,8 +185,18 @@ class DataChecker:
             return expand_columns(["CH{0-15}"]) + expand_columns(["CH{16-31}"])
         return []
 
+    def _numeric_series(self, df: pd.DataFrame, column: str) -> pd.Series:
+        """Return a per-file cached numeric series when check operation provides one."""
+        context = getattr(self, "_check_context", None)
+        if context is not None and context.frame is df:
+            return context.numeric((column,))[column]
+        return pd.to_numeric(df[column], errors="coerce")
+
     def _get_ipd_columns(self) -> List[str]:
         """获取Ipd列名：优先check_columns.ipd，其次从columns匹配"""
+        context = getattr(self, "_check_context", None)
+        if context is not None:
+            return list(context.ipd_columns)
         explicit = self.chip_rule.check_columns.get("ipd")
         if explicit:
             return explicit
@@ -196,6 +209,9 @@ class DataChecker:
 
     def _get_agc_columns(self) -> List[str]:
         """获取AGC_INFO列名：优先check_columns.agc，其次从columns匹配"""
+        context = getattr(self, "_check_context", None)
+        if context is not None:
+            return list(context.agc_columns)
         explicit = self.chip_rule.check_columns.get("agc")
         if explicit:
             return explicit
@@ -271,7 +287,7 @@ class DataChecker:
         total_abnormal = 0
 
         for col in data_cols:
-            col_data = pd.to_numeric(df[col], errors="coerce").dropna()
+            col_data = self._numeric_series(df, col).dropna()
             if col_data.empty:
                 continue
             total_cells += len(col_data)
@@ -309,7 +325,7 @@ class DataChecker:
         if not frame_col:
             return CheckResult("帧完整性", False, "未找到帧号列")
 
-        frame_ids = pd.to_numeric(df[frame_col], errors="coerce").dropna().astype(int)
+        frame_ids = self._numeric_series(df, frame_col).dropna().astype(int)
         if frame_ids.empty:
             return CheckResult("帧完整性", False, "FRAME_ID 列无有效数据")
 
@@ -395,7 +411,7 @@ class DataChecker:
         center_high = 0.85 * full_scale
 
         for col in data_cols:
-            col_data = pd.to_numeric(df[col], errors="coerce").dropna()
+            col_data = self._numeric_series(df, col).dropna()
             if col_data.empty:
                 continue
             total_cells += len(col_data)
@@ -455,7 +471,7 @@ class DataChecker:
         """统计 AGC_INFO 相邻有效样本的调光变化次数。"""
         metrics: Dict[str, Dict[str, float]] = {}
         for column in (name for name in self._get_agc_columns() if name in df.columns):
-            values = pd.to_numeric(df[column], errors="coerce")
+            values = self._numeric_series(df, column)
             valid_pairs = values.notna() & values.shift().notna()
             changes = valid_pairs & values.ne(values.shift())
             pair_count = int(valid_pairs.sum())
@@ -502,7 +518,7 @@ class DataChecker:
         # Sampling can preserve source row labels (for example 0, 25, 50 ...).
         # All anomaly positions below are positional, so normalize both series
         # to a contiguous index before using ``loc``.
-        values = pd.to_numeric(df[column], errors="coerce").reset_index(drop=True)
+        values = self._numeric_series(df, column).reset_index(drop=True)
         total_count = int(len(values))
         finite = np.isfinite(values.to_numpy(dtype=float, na_value=np.nan))
         finite_values = values[finite]
@@ -858,8 +874,8 @@ class DataChecker:
             if ipd_col not in df.columns or raw_col not in df.columns:
                 continue
 
-            ipd_data = pd.to_numeric(df[ipd_col], errors="coerce")
-            raw_data = pd.to_numeric(df[raw_col], errors="coerce")
+            ipd_data = self._numeric_series(df, ipd_col)
+            raw_data = self._numeric_series(df, raw_col)
             if self._is_all_zero_channel(ipd_data) or self._is_all_zero_channel(raw_data):
                 skipped_count += 1
                 continue
@@ -950,8 +966,8 @@ class DataChecker:
             ipd_col = ipd_cols[i]
             agc_col = agc_cols[i] if i < len(agc_cols) else None
 
-            raw_data = pd.to_numeric(df[raw_col], errors="coerce")
-            ipd_data = pd.to_numeric(df[ipd_col], errors="coerce")
+            raw_data = self._numeric_series(df, raw_col)
+            ipd_data = self._numeric_series(df, ipd_col)
             gain_k = self._extract_gain_k_series(df, agc_cols, i, gain_map)
 
             expected = (raw_data - offset) / full_scale * vref * 1e6 / (tia_ratio * gain_k) * 1000
@@ -982,7 +998,7 @@ class DataChecker:
         if ch_index >= len(agc_cols) or agc_cols[ch_index] not in df.columns:
             return pd.Series(default_gain, index=df.index)
 
-        agc_data = pd.to_numeric(df[agc_cols[ch_index]], errors="coerce")
+        agc_data = self._numeric_series(df, agc_cols[ch_index])
         gain_codes = (agc_data.fillna(0).astype(int)) & 0x0F
 
         def _map_gain(code: int) -> float:
@@ -1013,6 +1029,9 @@ class DataChecker:
 
     def _resolve_acc_columns(self, df: pd.DataFrame) -> List[str]:
         """解析ACC列名：优先使用规则文件指定，否则自动检测"""
+        context = getattr(self, "_check_context", None)
+        if context is not None:
+            return list(context.acc_columns)
         acc_map = self.chip_rule.acc_columns
         if acc_map:
             cols = [acc_map.get("x", ""), acc_map.get("y", ""), acc_map.get("z", "")]
@@ -1034,6 +1053,9 @@ class DataChecker:
 
     def _resolve_frame_column(self, df: pd.DataFrame) -> str:
         """解析帧号列名：优先使用规则文件指定，否则自动检测"""
+        context = getattr(self, "_check_context", None)
+        if context is not None:
+            return context.frame_column
         specified = self.chip_rule.frame_column
         if specified and specified in df.columns:
             return specified
@@ -1048,7 +1070,7 @@ class DataChecker:
         """获取帧号序列，无法识别帧号列时使用行索引"""
         frame_col = self._resolve_frame_column(df)
         if frame_col:
-            return pd.to_numeric(df[frame_col], errors="coerce").fillna(0).astype(int)
+            return self._numeric_series(df, frame_col).fillna(0).astype(int)
         return pd.Series(range(len(df)), index=df.index)
 
     def _get_acc_display_frames(self, df: pd.DataFrame) -> pd.Series:

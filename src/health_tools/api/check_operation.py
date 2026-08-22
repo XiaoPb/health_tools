@@ -6,10 +6,12 @@ import csv
 import math
 import re
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
+import pandas as pd
 
 from health_tools.api.context import ExecutionContext
 from health_tools.api.errors import RequestValidationError
@@ -198,6 +200,72 @@ def _detect_chip(csv_file: Path) -> Optional[str]:
     return None
 
 
+@dataclass
+class _FileCheckContext:
+    """单个文件检查的共享输入。
+
+    列解析结果在文件生命周期内固定；数值列按需转换并缓存，避免不同检查项
+    为同一列重复执行 ``to_numeric``。这些字段只供 check operation 内部使用。
+    """
+
+    path: Path
+    chip: str
+    chip_rule: Any
+    frame: pd.DataFrame
+    checker: Any
+    data_columns: List[str]
+    frame_column: str
+    acc_columns: List[str]
+    ipd_columns: List[str]
+    agc_columns: List[str]
+    _numeric_columns: Dict[Tuple[str, ...], pd.DataFrame] = field(default_factory=dict)
+
+    @classmethod
+    def create(cls, path: Path, chip: str, chip_rule: Any, frame: pd.DataFrame, checker: Any):
+        def resolve(method_name: str, default):
+            method = getattr(checker, method_name, None)
+            if method is None:
+                return default
+            return method(frame)
+
+        data_columns = [
+            column for column in resolve("_get_data_columns", []) if column in frame.columns
+        ]
+        frame_column = resolve("_resolve_frame_column", "")
+        acc_columns = resolve("_resolve_acc_columns", [])
+        ipd_columns = [
+            column for column in resolve("_get_ipd_columns", []) if column in frame.columns
+        ]
+        agc_columns = [
+            column for column in resolve("_get_agc_columns", []) if column in frame.columns
+        ]
+        context = cls(
+            path=path,
+            chip=chip,
+            chip_rule=chip_rule,
+            frame=frame,
+            checker=checker,
+            data_columns=data_columns,
+            frame_column=frame_column,
+            acc_columns=acc_columns,
+            ipd_columns=ipd_columns,
+            agc_columns=agc_columns,
+        )
+        # DataChecker's existing resolution methods remain source-compatible while
+        # using this file-scoped result for every subsequent check.
+        checker._check_context = context
+        return context
+
+    def numeric(self, columns: Tuple[str, ...]) -> pd.DataFrame:
+        """Return a lazily converted numeric view for the requested columns."""
+        key = tuple(columns)
+        cached = self._numeric_columns.get(key)
+        if cached is None:
+            cached = self.frame.loc[:, list(key)].apply(pd.to_numeric, errors="coerce")
+            self._numeric_columns[key] = cached
+        return cached
+
+
 def _rule_mismatch(
     checker,
     frame,
@@ -209,17 +277,35 @@ def _rule_mismatch(
     ref_spo2_column=None,
 ) -> str:
     missing = []
-    data_columns = [column for column in checker._get_data_columns() if column in frame.columns]
-    frame_column = checker._resolve_frame_column(frame)
+    cached = getattr(checker, "_check_context", None)
+    data_columns = (
+        cached.data_columns
+        if cached is not None and cached.frame is frame
+        else [column for column in checker._get_data_columns() if column in frame.columns]
+    )
+    frame_column = (
+        cached.frame_column
+        if cached is not None and cached.frame is frame
+        else checker._resolve_frame_column(frame)
+    )
     if ({"range", "center"} & checks) and not data_columns:
         missing.append("数据列")
     if "frame" in checks and not frame_column:
         missing.append("帧号列")
     if "ipd" in checks and chip.startswith("gh3036"):
-        ipd_columns = [column for column in checker._get_ipd_columns() if column in frame.columns]
+        ipd_columns = (
+            cached.ipd_columns
+            if cached is not None and cached.frame is frame
+            else [column for column in checker._get_ipd_columns() if column in frame.columns]
+        )
         if not ipd_columns or not data_columns:
             missing.append("Ipd/Rawdata列")
-    if require_acc and not checker._resolve_acc_columns(frame):
+    acc_columns = (
+        cached.acc_columns
+        if cached is not None and cached.frame is frame
+        else checker._resolve_acc_columns(frame)
+    )
+    if require_acc and not acc_columns:
         missing.append("ACC列")
     if timestamp_column and timestamp_column not in frame.columns:
         missing.append(f"时间戳列 {timestamp_column}")
@@ -866,9 +952,10 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             checker = DataChecker(
                 chip_rule, tolerance=request.tolerance, static_min=request.static_min
             )
+            file_context = _FileCheckContext.create(path, chip, chip_rule, frame, checker)
             mismatch = _rule_mismatch(
                 checker,
-                frame,
+                file_context.frame,
                 checks,
                 request.timestamp_column,
                 chip,
@@ -890,6 +977,9 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 chip=chip,
                 scene=_scene_for_path(scene_pattern, relative_path),
             )
+            # Keep the local name for report code readable while all column
+            # resolution now goes through the file-scoped context.
+            frame = file_context.frame
             if "range" in checks:
                 report.results.append(checker.check_data_range(frame, request.range_ratio))
             if "frame" in checks:
