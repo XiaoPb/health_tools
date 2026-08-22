@@ -451,11 +451,11 @@ def test_check_rule_rejects_unsafe_accuracy_mark_id():
                 "marks": [
                     {
                         "id": "../bad",
-                        "comparison": "online",
-                        "metric": "within_5",
+                        "left": "online.within_5",
+                        "operator": "lt",
+                        "threshold": 80,
                         "category": "accuracy_online_low",
                         "label": "Online 准确度低",
-                        "min": 80,
                     }
                 ],
             },

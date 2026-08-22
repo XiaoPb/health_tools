@@ -301,6 +301,37 @@ def test_compact_report_includes_accuracy_mark_details(tmp_path) -> None:
     assert rows[0]["准确度指标"] == "±5BPM"
 
 
+def test_compact_report_uses_declarative_ratio_value(tmp_path) -> None:
+    mark = AccuracyMarkRule(
+        "ratio",
+        "online.within_5",
+        "ratio_lt",
+        0.9,
+        "accuracy_ratio_low",
+        "Online低于Comp的90%",
+        right="comp.within_5",
+    )
+    report = FileCheckReport(
+        tmp_path / "ratio.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "within_5": 60.0},
+            comp={"samples": 3, "within_5": 80.0},
+            matched_mark=mark,
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["异常数"] == "0.75"
+    assert row["异常占比"] == "0.75%"
+    assert row["比较对象"] == "Online vs Comp"
+    assert row["准确度阈值"] == "0.9"
+
+
 def test_check_report_uses_resolved_accuracy_methods(tmp_path) -> None:
     report = FileCheckReport(
         tmp_path / "custom.csv",
