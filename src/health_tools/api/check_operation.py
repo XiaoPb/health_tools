@@ -1202,41 +1202,75 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 None,
             )
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     total = len(files)
     ctx.check_cancelled("files", _batch("check", items))
     ctx.emit(ProgressEvent("check", "files", 0, total, "开始"))
-    executor = ThreadPoolExecutor(max_workers=request.workers)
-    futures = {executor.submit(check_one, path): path for path in files}
+
+    # 限制同时在途的文件任务数量，避免大批量输入一次性创建数千个 Future。
+    # 空输入也保留至少一个 worker/window，维持原有边界行为。
+    effective_workers = min(request.workers, max(1, total))
+    window = max(1, effective_workers * 2)
+    executor = ThreadPoolExecutor(max_workers=effective_workers)
+    pending = {}
+    file_iter = enumerate(files)
+
+    def submit_available() -> None:
+        while len(pending) < window:
+            index, path = next(file_iter, (None, None))
+            if index is None:
+                break
+            pending[executor.submit(check_one, path)] = (index, path)
+
+    submit_available()
+    completed_records = {}
     try:
-        for completed, future in enumerate(as_completed(futures), 1):
+        completed = 0
+        while pending:
             ctx.check_cancelled("files", _batch("check", items))
-            path = futures[future]
-            item, report, acc, ipd_detail, evidence = future.result()
-            if _is_failed_check_report(item, path):
-                ctx.emit(
-                    ProgressEvent("check", "files", completed, total, "忽略check报告", str(path))
+            done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+            for future in done:
+                index, path = pending.pop(future)
+                item, report, acc, ipd_detail, evidence = future.result()
+                ignored = _is_failed_check_report(item, path)
+                completed += 1
+                completed_records[index] = (
+                    path,
+                    item,
+                    report,
+                    acc,
+                    ipd_detail,
+                    evidence,
+                    ignored,
                 )
-                continue
-            items.append(item)
-            if report is not None:
-                reports.append(report)
-            if acc is not None:
-                acc_reports[path] = acc
-            if ipd_detail is not None and not ipd_detail.empty:
-                ipd_details[path] = ipd_detail
-            if evidence is not None:
-                reference_details[path] = evidence
-            ctx.emit(ProgressEvent("check", "files", completed, total, "完成", str(path)))
+                message = "忽略check报告" if ignored else "完成"
+                ctx.emit(ProgressEvent("check", "files", completed, total, message, str(path)))
+            # 收集已完成任务后再补充窗口，保证待处理 Future 数量有界。
+            submit_available()
         ctx.check_cancelled("files", _batch("check", items))
     except BaseException:
-        for future in futures:
+        for future in pending:
             future.cancel()
         executor.shutdown(wait=False, cancel_futures=True)
         raise
     else:
         executor.shutdown(wait=True)
+
+    # 按输入顺序汇总，避免有界调度改变报告行及证据/明细文件顺序。
+    for index in sorted(completed_records):
+        path, item, report, acc, ipd_detail, evidence, ignored = completed_records[index]
+        if ignored:
+            continue
+        items.append(item)
+        if report is not None:
+            reports.append(report)
+        if acc is not None:
+            acc_reports[path] = acc
+        if ipd_detail is not None and not ipd_detail.empty:
+            ipd_details[path] = ipd_detail
+        if evidence is not None:
+            reference_details[path] = evidence
     if not reports and not items:
         return CheckResult(_batch("check", items))
     report_path = request.output_path or (
