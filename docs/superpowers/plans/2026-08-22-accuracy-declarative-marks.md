@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans (recommended) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 check 的准确度指标和标定条件都能通过 YAML 声明式扩展，支持新增比较类型、指标和阈值标准，同时保持现有 `online`、`comp`、`online_below_comp` 配置兼容。
+**Goal:** 让 check 的准确度指标和标定条件都能通过统一的 YAML 声明式语法扩展；本次直接切换规则格式，不兼容旧的 `comparison/min/min_gap` 标定写法。
 
-**Architecture:** 保留旧版 `AccuracyMarkRule` 输入作为兼容格式，在规则加载后归一化为统一的左值、右值、运算符和阈值条件。校验器负责拒绝无法安全解释的表达式，匹配器只执行白名单运算，不执行 YAML 中的任意 Python 表达式。报告仍按 `marks` 的声明顺序选择首个命中项。
+**Architecture:** 将 `AccuracyMarkRule` 收敛为统一的左值、右值、运算符和阈值条件，不再保留旧字段或兼容转换。校验器负责拒绝无法安全解释的表达式，匹配器只执行白名单运算，不执行 YAML 中的任意 Python 表达式。报告仍按 `marks` 的声明顺序选择首个命中项。
 
 **Tech Stack:** Python 3.9+, dataclasses, PyYAML, pandas, pytest, Ruff, mypy。
 
@@ -19,7 +19,7 @@ comparison: online_below_comp_10
 comparison: online_below_comp_5
 ```
 
-当前校验器只允许 `online`、`comp`、`online_below_comp`，因此该文件会返回：
+当前校验器只允许 `online`、`comp`、`online_below_comp`，因此该文件中的两个比较类型会被拒绝：
 
 ```text
 marks[0].comparison 仅支持 online、comp、online_below_comp
@@ -32,23 +32,11 @@ marks[1].comparison 仅支持 online、comp、online_below_comp
 - `accuracy.thresholds`：按固定值或参考值百分比计算自定义命名指标。
 - `accuracy.marks`：只能对 Online/Comp 单项指标下限，或 Online 与 Comp 的指标差值进行标定。
 
-因此，新增统计指标大多可以直接通过 YAML 完成；新增比较关系或判定标准目前不能仅靠 YAML 完成，需要扩展规则模型、校验器、加载器和匹配器。
+因此，新增统计指标大多可以直接通过 YAML 完成；新增比较关系或判定标准需要扩展规则模型、校验器、加载器和匹配器，并一次性迁移现有规则文件。
 
 ## 目标 YAML 语法
 
-保留旧写法：
-
-```yaml
-marks:
-  - id: online_below_comp_10
-    comparison: online_below_comp
-    metric: within_5
-    min_gap: 10
-    label: Online低于Comp 10个百分点
-    category: accuracy_online_below_comp_10
-```
-
-新增推荐写法：
+统一写法：
 
 ```yaml
 marks:
@@ -117,7 +105,7 @@ def test_check_moto_rule_reports_unsupported_comparison():
 
 - [ ] **Step 1: 为 `AccuracyMarkRule` 增加归一化字段**
 
-保留现有字段 `comparison`、`metric`、`min`、`min_gap`，新增可选字段 `left`、`operator`、`right`、`threshold`，并规定旧字段和新字段不能混用。
+将 `AccuracyMarkRule` 改为只包含 `left`、`operator`、`right`、`threshold` 等统一字段；删除 `comparison`、`metric`、`min`、`min_gap` 字段，不提供旧规则兼容转换。
 
 ```python
 @dataclass(frozen=True)
@@ -137,26 +125,17 @@ class AccuracyMarkRule:
 
 - [ ] **Step 2: 严格校验字段组合**
 
-在 `RuleValidator._validate_check_accuracy` 中允许旧格式三种 `comparison`，并允许新格式 `left/operator/right/threshold`。`left`、`right` 使用 `online.<metric>` 或 `comp.<metric>` 格式；二元运算必须有 `right`；运算符只能是 `lt/lte/gt/gte/diff_gte/diff_gt/ratio_lt/ratio_lte`；阈值必须是有限数；禁止未知字段、空路径和新旧字段混用。
+在 `RuleValidator._validate_check_accuracy` 中只允许 `left/operator/right/threshold` 新格式。`left`、`right` 使用 `online.<metric>` 或 `comp.<metric>` 格式；二元运算必须有 `right`；运算符只能是 `lt/lte/gt/gte/diff_gte/diff_gt/ratio_lt/ratio_lte`；阈值必须是有限数；禁止 `comparison`、`metric`、`min`、`min_gap` 及其它未知字段。
 
 - [ ] **Step 3: 加载新旧两种格式为同一模型**
 
-在 `RuleLoader.load_check_rule` 中把旧格式映射为等价条件：
-
-```text
-online + min       -> left=online.metric, operator=lt, threshold=min
-comp + min         -> left=comp.metric, operator=lt, threshold=min
-online_below_comp  -> left=online.metric, operator=diff_gte,
-                      right=comp.metric, threshold=min_gap
-```
-
-新格式直接构造对应字段，并保留原字段用于报告显示和兼容调用方。
+在 `RuleLoader.load_check_rule` 中直接读取新格式字段并构造 `AccuracyMarkRule`。遇到旧字段时返回明确的规则迁移错误，不尝试自动转换。
 
 - [ ] **Step 4: 运行规则测试**
 
 运行：`pytest tests/test_check_rules.py -q`
 
-预期：旧格式和新格式均通过校验、加载后字段一致，非法运算符和非法路径被拒绝。
+预期：新格式通过校验和加载，旧格式明确失败，非法运算符和非法路径被拒绝。
 
 ### Task 3: 实现白名单条件匹配器
 
@@ -184,7 +163,7 @@ def _matches_declarative_mark(result: CheckAccuracyResult, mark: AccuracyMarkRul
 
 - [ ] **Step 3: 保留旧匹配行为并统一入口**
 
-让 `match_accuracy_mark()` 统一调用新条件匹配；只含旧字段的对象走兼容转换，确保现有报告、sort 分类和 `marks` 顺序行为不变。
+让 `match_accuracy_mark()` 只调用新条件匹配；旧字段对象不再作为有效输入。确保报告、sort 分类和 `marks` 顺序行为不变。
 
 - [ ] **Step 4: 运行准确度测试**
 
@@ -216,7 +195,7 @@ def _matches_declarative_mark(result: CheckAccuracyResult, mark: AccuracyMarkRul
 
 - [ ] **Step 2: 更新规则文档**
 
-在 `docs/rules.md` 明确区分 `methods`、`thresholds`、`marks` 的职责，记录旧格式兼容范围、新格式字段、白名单运算符、缺失值和除零行为，以及 `marks` 顺序决定优先级。同步删除或修正文档中仍描述已删除 check CLI 准确度参数的段落。
+在 `docs/rules.md` 明确区分 `methods`、`thresholds`、`marks` 的职责，记录新格式字段、白名单运算符、缺失值和除零行为，以及 `marks` 顺序决定优先级；明确旧格式已废弃且不兼容。同步删除或修正文档中仍描述已删除 check CLI 准确度参数的段落。
 
 - [ ] **Step 3: 增加完整 YAML 校验测试**
 
@@ -252,8 +231,8 @@ git commit -m "feat: 扩展check准确度声明式标定规则" -m "Co-Authored-
 
 ## 自审结论
 
-- 已覆盖当前 YAML 中两个不支持的比较类型及修复方式。
-- 保留现有 YAML 写法，避免已有规则立即失效。
+- 已覆盖当前 YAML 中两个不支持的比较类型及迁移方式。
+- 明确不兼容旧 YAML，避免模型中长期保留两套规则语义。
 - 新增规则仅允许白名单字段和运算，未引入任意表达式执行风险。
 - `methods`、`thresholds` 和 `marks` 的职责清晰分离，新增统计指标与新增判定关系分别处理。
 - 未把输入/输出路径或运行参数放入 YAML，符合当前 check 规则约定。
