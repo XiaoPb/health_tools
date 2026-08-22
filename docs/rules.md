@@ -227,14 +227,13 @@ accuracy:
   online_column: ALGO_RESULT0
   comp_column: COMP_RESULT0
   methods: [mae, within_5, within_10, within_15, rmse, correlation]
-  thresholds: []
   inclusive: false
   marks:
-    - {id: online_below_comp, comparison: online_below_comp, metric: within_5, min_gap: 10.0,
+    - {id: online_below_comp, left: online.within_5, operator: diff_gte, right: comp.within_5, threshold: 10.0,
        label: Online低于Comp 10个百分点, category: accuracy_online_below_comp}
-    - {id: online_within_5_low, comparison: online, metric: within_5, min: 80.0,
+    - {id: online_within_5_low, left: online.within_5, operator: lt, threshold: 80.0,
        label: Online ±5准确度低, category: accuracy_online_low}
-    - {id: comp_within_5_low, comparison: comp, metric: within_5, min: 80.0,
+    - {id: comp_within_5_low, left: comp.within_5, operator: lt, threshold: 80.0,
        label: Comp ±5准确度低, category: accuracy_comp_low}
 ```
 
@@ -258,8 +257,11 @@ accuracy:
 `bias`、`correlation`、`r2` 以及 `within_N`（例如 `within_5`、`within_12.5`）。
 `thresholds` 是自定义准确度指标列表，每项格式为 `{name: xxx, value: N}` 或
 `{name: xxx, percent: N}`，且只能二选一；`inclusive` 控制所有阈值边界是否使用 `<=`。
-`marks` 中 `id` 和 `category` 都必须唯一且为安全的单段目录名；`comparison` 为 `online` 或
-`comp` 时必须提供 `min`（0~100），为 `online_below_comp` 时必须提供非负 `min_gap`。
+`marks` 中 `id` 和 `category` 都必须唯一且为安全的单段目录名。每项使用 `left`、`operator`、
+`right`、`threshold` 声明条件：路径格式为 `online.<metric>` 或 `comp.<metric>`；单值运算支持
+`lt/lte/gt/gte`，差值运算支持 `diff_gte/diff_gt`，比例运算支持 `ratio_lt/ratio_lte`。
+二元运算必须提供 `right`；缺失指标或除零时不命中。旧的 `comparison/metric/min/min_gap`
+格式不再兼容。
 命中后主要异常项按 `marks` 声明顺序选择，并以该 `category` 作为分拣目录名；需要提高某个准确度标定的优先级时，将对应项前移即可。
 
 ### check 规则与 CLI 合并

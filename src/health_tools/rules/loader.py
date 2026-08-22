@@ -286,12 +286,12 @@ class RuleLoader:
         marks = tuple(
             AccuracyMarkRule(
                 id=str(mark["id"]),
-                comparison=str(mark["comparison"]),
-                metric=str(mark["metric"]),
+                left=str(mark["left"]),
+                operator=str(mark["operator"]),
+                right=str(mark["right"]) if mark.get("right") is not None else None,
+                threshold=float(mark["threshold"]),
                 category=str(mark["category"]),
                 label=str(mark["label"]),
-                min=float(mark["min"]) if "min" in mark else None,
-                min_gap=float(mark["min_gap"]) if "min_gap" in mark else None,
             )
             for mark in accuracy_data.get("marks", [])
         )

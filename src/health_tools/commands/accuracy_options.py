@@ -81,9 +81,9 @@ def parse_accuracy_min(value: str, index: int = 0):
     label = parts[4] if len(parts) == 5 and parts[4] else f"{comparison} {metric}准确度低"
     return AccuracyMarkRule(
         id=_mark_id(index),
-        comparison=comparison,
-        metric=metric,
-        min=threshold,
+        left=f"{comparison}.{metric}",
+        operator="lt",
+        threshold=threshold,
         category=category,
         label=label,
     )
@@ -104,9 +104,10 @@ def parse_online_comp_gap(value: str, index: int = 0):
     label = parts[3] if len(parts) == 4 and parts[3] else f"Online低于Comp {threshold:g}个百分点"
     return AccuracyMarkRule(
         id=_mark_id(index),
-        comparison="online_below_comp",
-        metric=metric,
-        min_gap=threshold,
+        left=f"online.{metric}",
+        operator="diff_gte",
+        right=f"comp.{metric}",
+        threshold=threshold,
         category=category,
         label=label,
     )

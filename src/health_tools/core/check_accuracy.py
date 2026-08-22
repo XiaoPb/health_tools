@@ -14,19 +14,56 @@ def match_accuracy_mark(
 ) -> Optional[AccuracyMarkRule]:
     """按规则声明顺序匹配首个准确度标定。"""
     for mark in marks:
-        if mark.comparison in {"online", "comp"}:
-            metrics = getattr(result, mark.comparison)
-            value = metrics.get(mark.metric) if metrics is not None else None
-            if value is not None and mark.min is not None and value < mark.min:
-                return mark
-        elif mark.comparison == "online_below_comp":
-            if result.online is None or result.comp is None or mark.min_gap is None:
-                continue
-            online = result.online.get(mark.metric)
-            comp = result.comp.get(mark.metric)
-            if online is not None and comp is not None and comp - online >= mark.min_gap:
-                return mark
+        if _matches_declarative_mark(result, mark):
+            return mark
     return None
+
+
+def _metric_value(result: CheckAccuracyResult, path: str) -> Optional[float]:
+    try:
+        source, metric = path.split(".", 1)
+    except ValueError:
+        return None
+    values = getattr(result, source, None)
+    if not values:
+        return None
+    value = values.get(metric)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def accuracy_mark_value(
+    result: CheckAccuracyResult, mark: AccuracyMarkRule
+) -> Optional[float]:
+    """返回标定规则实际与 threshold 比较的数值。"""
+    left = _metric_value(result, mark.left)
+    if left is None:
+        return None
+    right = _metric_value(result, mark.right) if mark.right else None
+    if mark.operator in {"lt", "lte", "gt", "gte"}:
+        return left
+    if right is None:
+        return None
+    if mark.operator in {"diff_gte", "diff_gt"}:
+        return right - left
+    if mark.operator in {"ratio_lt", "ratio_lte"}:
+        return None if right == 0 else left / right
+    return None
+
+
+def _matches_declarative_mark(result: CheckAccuracyResult, mark: AccuracyMarkRule) -> bool:
+    value = accuracy_mark_value(result, mark)
+    if value is None:
+        return False
+    threshold = mark.threshold
+    if mark.operator in {"lt", "ratio_lt"}:
+        return value < threshold
+    if mark.operator in {"lte", "ratio_lte"}:
+        return value <= threshold
+    if mark.operator in {"gt", "diff_gt"}:
+        return value > threshold
+    if mark.operator in {"gte", "diff_gte"}:
+        return value >= threshold
+    return False
 
 
 def calculate_check_accuracy(frame: pd.DataFrame, config: CheckAccuracyRule) -> CheckAccuracyResult:
