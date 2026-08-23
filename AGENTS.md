@@ -57,6 +57,14 @@ git commit -m "docs: description" -m "Co-Authored-By: Codex Opus 4.6 <noreply@an
 提交类型：`feat:` 新功能、`fix:` 修复、`refactor:` 重构、`docs:` 文档、`test:` 测试、
 `chore:` 维护。不要跳过 Co-Authored-By，也不要使用 `git add .` 混入无关文件。
 
+以下内容只保留在本地，禁止加入 Git：
+
+- 新增的计划、规格和临时设计文档，尤其是 `docs/superpowers/`、`.trae/documents/` 和 `memory/`。
+- `.gitignore` 已忽略的目录和文件，例如 `test_data/`、`.worktrees/`、`.codegraph/`、`output/`、`plots/` 等。
+- 不得使用 `git add -f`、`git add --force` 或其他方式绕过忽略规则；不要为了提交而修改或删除这些本地文件。
+
+提交前必须用 `git status --short`、`git diff --cached --name-only` 和 `git ls-files` 检查暂存区，确认上述路径没有被加入；若发现已跟踪的忽略文件，使用 `git rm --cached` 移除索引但保留本地文件，并单独提交该清理。
+
 ## 架构
 
 入口为 `ghealth_tool` -> `src/health_tools/cli.py`。主要模块：
