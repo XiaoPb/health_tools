@@ -39,7 +39,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--ref-warning-seconds` | 金标异常起始警告窗口（秒），默认 10；窗口内异常为 WARNING，窗口外异常为 FAIL |
 | `--reference-detail-output` | 输出金标异常文件的秒采样 `time,ref,online,comp` 证据 CSV 目录 |
 | `--scene-regex` | 按文件相对路径提取场景；正则需包含 `(?P<scene>...)`，可包含 `(?P<name>...)` 和 `(?P<hand>...)`，未匹配或可选组缺失时为 `default` |
-| `-o/--output` | 检查报告 CSV 输出路径，默认 `<path>/check_report.csv` |
+| `-o/--output` | 检查报告输出路径，支持 .csv 或 .xlsx；.xlsx 时生成多工作表报告且不生成报告 CSV，默认 `<path>/check_report.csv` |
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
 | `--report` | 分拣使用的检查报告路径 |
 | `--sort-output` | 分拣输出目录 |
@@ -67,6 +67,15 @@ issue_priority: [accuracy, frame_warning]
 - 扫描输入目录时会先按普通 CSV 处理；仅当文件读取或规则校验失败/跳过时，才按表头识别并忽略 check 自身生成的完整报告和 compact 报告，即使报告已改名也不会进入统计；其它 CSV 仍按普通输入处理。
 - 默认先输出“检查处理结果”汇总，按无法识别芯片、规则加载失败、读取失败、空文件、列结构不符合规则等原因统计。
 - `-v/--verbose` 会显示跳过文件明细和每个检查项的详情。
+
+### XLSX 报告
+
+`-o/--output` 后缀为 `.xlsx` 时只生成一个多工作表工作簿，包含 `总表`、`分类说明`、
+按异常优先级排列的异常分类表、最后一张 `精简总表`；不再生成 CSV 报告
+（`check_report.csv` 与 `check_report_compact.csv` 均不会出现）。分类说明列为
+`优先级`、`异常类别`、`文件数`、`占比`、`判断条件`、`场景分类占比`、`人员占比`、
+`说明信息`。分类表顺序沿用 `issue_priority`，准确度 category 沿用 `accuracy.marks`
+声明顺序。
 
 ### 性能基准
 
@@ -230,7 +239,9 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 
 ## 分拣报告
 
-`--sort` 模式读取 `check_report.csv`，按异常优先级为每个文件选择**唯一**分类；文件命中一个分类后只移动一次，并保留原始 `文件相对路径`：
+`--sort` 只接受 CSV 检查报告；传入 `.xlsx` 报告会报错“分拣需要 CSV 检查报告；请传入
+.csv 报告，XLSX 暂不支持分拣”。`--sort` 模式读取 `check_report.csv`，按异常优先级为
+每个文件选择**唯一**分类；文件命中一个分类后只移动一次，并保留原始 `文件相对路径`：
 
 1. 按 `issue_priority` 顺序选择首个命中的类别；未配置时使用内置默认顺序：帧 FAIL、范围 FAIL、ACC FAIL、
    时间戳 FAIL、帧 WARNING、金标 FAIL、ACC WARNING、居中 FAIL、准确度标定。
@@ -265,6 +276,9 @@ normal_files.csv
 ```bash
 # 检查目录下所有 CSV
 ghealth_tool check -i data/ -c gh3036
+
+# 输出多工作表 XLSX 报告（总表、分类说明、按异常优先级的分类表、精简总表），不生成 CSV
+ghealth_tool check -i data/input.csv -o check_report.xlsx
 
 # 仅检查 ACC 和帧完整性
 ghealth_tool chk -i data/ -c gh3036 --checks acc,frame

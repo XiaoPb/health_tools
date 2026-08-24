@@ -118,6 +118,13 @@ checked = run_check(
         issue_priority=("accuracy", "frame_warning"),
     )
 )
+# .xlsx 输出多工作表报告且不生成 CSV
+checked_xlsx = run_check(
+    CheckRequest(
+        input_path=Path("data"),
+        output_path=Path("reports/check_report.xlsx"),
+    )
+)
 offline = run_offline(
     OfflineRequest(input_path=Path("data"), chip_name="gh3036", workers=8)
 )

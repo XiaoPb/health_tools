@@ -46,3 +46,13 @@ CLI 显式参数通常覆盖规则或配置默认值。芯片结构来自 `--chi
 `analyze` 支持 `--check-report`、`--offline-result` 和可重复的 `--figure-dir`，用于在
 CSV 与跑库目录分离时直接生成报告；`--resume` 复用 `analysis_state.json` 中的完成阶段，
 `--restart` 清理分析工作区后重跑。
+
+### check XLSX 报告验证流程
+
+`check -o/--output` 后缀为 `.xlsx` 时只生成一个多工作表工作簿且不生成 CSV 报告。
+验证流程：
+
+- 用 openpyxl 检查工作表名称与顺序：`总表`、`分类说明`、按异常优先级排列的异常分类表
+  （仅实际命中的分类）、最后一张 `精简总表`。
+- 检查总表/精简总表行数与输入文件数一致。
+- 确认输出同目录没有 `.csv` / `_compact.csv` 伴随文件。

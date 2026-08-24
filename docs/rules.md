@@ -245,7 +245,7 @@ accuracy:
 | `version` / `description` | string | 规则版本与说明 |
 | `chip` | string | 默认芯片；命令行显式 `-c/--chip` 优先覆盖 |
 | `checks` | list | `range,ipd,frame,center,acc,agc,ref` 检查项；准确度由 `accuracy.enabled` 控制 |
-| `issue_priority` | list | 主要异常项与分拣类别优先级。支持 `frame_fail`、`range_fail`、`acc_fail`、`timestamp_fail`、`frame_warning`、`reference_fail`、`acc_warning`、`center_fail`、`accuracy`；显式顺序优先，未指定项按内置默认顺序追加 |
+| `issue_priority` | list | 主要异常项与分拣类别优先级。支持 `frame_fail`、`range_fail`、`acc_fail`、`timestamp_fail`、`frame_warning`、`reference_fail`、`acc_warning`、`center_fail`、`accuracy`；显式顺序优先，未指定项按内置默认顺序追加。XLSX 报告的分类表顺序沿用 `issue_priority`，准确度 category 沿用 `accuracy.marks` 声明顺序 |
 | `tolerance` / `static_min` | number | Ipd 误差容忍度（pA）与 ACC 静止最小连续帧数 |
 | `ratios` | object | `range/frame/center/ipd/acc` 异常比例阈值 |
 | `acc_axis` | bool | 是否把 ACC 单轴异常计入结果 |

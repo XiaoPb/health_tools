@@ -79,6 +79,9 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     ):
         assert keyword in command_doc or keyword in rules_doc
 
+    for keyword in (".xlsx", "总表", "分类说明", "精简总表", "不再生成 CSV", "分拣需要 CSV 检查报告"):
+        assert keyword in command_doc or keyword in rules_doc
+
     assert "validate custom_rules/check/custom.yaml" in skill_workflows
     assert "accuracy.ref_column" in skill_workflows
     assert "accuracy.online_column" in skill_workflows
