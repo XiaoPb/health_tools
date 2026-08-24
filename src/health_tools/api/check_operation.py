@@ -9,7 +9,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -26,6 +26,7 @@ from health_tools.api.models import (
     ProgressEvent,
 )
 from health_tools.api.operations import _batch, _context, _load_rule, _require_path
+from health_tools.models.rules import normalize_check_issue_priority
 from health_tools.utils.accuracy import format_metric_name, resolve_accuracy_methods
 from health_tools.utils.errors import (
     REASON_PROCESS_FAILED,
@@ -106,40 +107,57 @@ TRAILING_CHECK_CATEGORIES = {
 }
 
 
-# 主要异常与分拣共用的优先级事实来源；表项按优先级从高到低排列。
-PRIMARY_RULES = (
-    ("帧完整性(结果)", "FAIL", "frame", "帧不完整"),
-    ("数据范围(结果)", "FAIL", "range", "数据范围异常"),
-    ("ACC异常(结果)", "FAIL", "acc_fail", "ACC异常"),
-    ("ACC异常(结果)", "WARNING", "acc_warning", "ACC警告"),
-    ("时间戳间隔(结果)", "FAIL", "timestamp", "时间戳异常"),
-    ("数据居中(结果)", "FAIL", "center", "数据未居中"),
-    ("心率金标(结果)", "FAIL", "reference", "金标异常"),
-    ("血氧金标(结果)", "FAIL", "reference", "金标异常"),
-    ("帧完整性(结果)", "WARNING", "frame_warning", "首帧非0"),
-    ("准确度标定分类", "__PRESENT__", "__accuracy__", ""),
-    ("AGC变化(结果)", "FAIL", "agc", "AGC异常"),
-    ("AGC调光(结果)", "FAIL", "agc", "AGC异常"),
-    ("Ipd转换(结果)", "FAIL", "ipd", "Ipd转换异常"),
-)
+# 主要异常与分拣共用的稳定 ID 映射；优先级顺序由规则中的 issue_priority 决定。
+PRIMARY_RULES = {
+    "frame_fail": (("帧完整性(结果)",), "FAIL", "frame", "帧不完整"),
+    "range_fail": (("数据范围(结果)",), "FAIL", "range", "数据范围异常"),
+    "acc_fail": (("ACC异常(结果)",), "FAIL", "acc_fail", "ACC异常"),
+    "timestamp_fail": (("时间戳间隔(结果)",), "FAIL", "timestamp", "时间戳异常"),
+    "frame_warning": (("帧完整性(结果)",), "WARNING", "frame_warning", "首帧非0"),
+    "reference_fail": (("心率金标(结果)", "血氧金标(结果)"), "FAIL", "reference", "金标异常"),
+    "acc_warning": (("ACC异常(结果)",), "WARNING", "acc_warning", "ACC警告"),
+    "center_fail": (("数据居中(结果)",), "FAIL", "center", "数据未居中"),
+    "accuracy": (("准确度标定分类",), "__PRESENT__", "__accuracy__", ""),
+    "agc_change_fail": (("AGC变化(结果)",), "FAIL", "agc", "AGC异常"),
+    "agc_adjust_fail": (("AGC调光(结果)",), "FAIL", "agc", "AGC异常"),
+    "ipd_fail": (("Ipd转换(结果)",), "FAIL", "ipd", "Ipd转换异常"),
+}
+_TRAILING_PRIMARY_RULE_IDS = ("agc_change_fail", "agc_adjust_fail", "ipd_fail")
 
 
-def _primary_match(row: Dict[str, str]) -> Tuple[str, str]:
+def _primary_match(
+    row: Dict[str, str], issue_priority: Optional[Sequence[str]] = None
+) -> Tuple[str, str]:
     """返回报告行的统一优先级匹配结果（目录分类、中文摘要）。"""
-    for column, expected, category, label in PRIMARY_RULES:
+
+    def match_rule(rule_id: str) -> Optional[Tuple[str, str]]:
+        rule = PRIMARY_RULES.get(rule_id)
+        if rule is None:
+            return None
+        columns, expected, category, label = rule
         if expected == "__PRESENT__":
-            value = row.get(column, "").strip()
+            value = row.get(columns[0], "").strip()
             if value:
                 return _safe_category_name(value), row.get("准确度标定说明", "").strip() or value
-            continue
-        if row.get(column, "").strip().upper() == expected:
+            return None
+        if any(row.get(column, "").strip().upper() == expected for column in columns):
             return category, label
+        return None
+
+    for rule_id in normalize_check_issue_priority(issue_priority):
+        matched = match_rule(rule_id)
+        if matched:
+            return matched
+    for rule_id in _TRAILING_PRIMARY_RULE_IDS:
+        matched = match_rule(rule_id)
+        if matched:
+            return matched
     return "", ""
 
 
-def primary_issue(row: Dict[str, str]) -> str:
+def primary_issue(row: Dict[str, str], issue_priority: Optional[Sequence[str]] = None) -> str:
     """按统一优先级返回报告行的主要异常中文摘要。"""
-    _, label = _primary_match(row)
+    _, label = _primary_match(row, issue_priority)
     if label:
         return label
     failed = sorted(
@@ -181,10 +199,10 @@ def _fallback_check_category(row: Dict[str, str]) -> str:
     return ""
 
 
-def _sort_category(row: Dict[str, str]) -> str:
+def _sort_category(row: Dict[str, str], issue_priority: Optional[Sequence[str]] = None) -> str:
     """按异常优先级为单个报告行选择唯一分拣目录。"""
     status = row.get("总异常(结果)", "").strip().upper()
-    category, _ = _primary_match(row)
+    category, _ = _primary_match(row, issue_priority)
     if category:
         return category
     if status == "FAIL":

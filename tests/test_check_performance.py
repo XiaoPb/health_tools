@@ -45,6 +45,23 @@ def test_primary_issue_and_sort_category_keep_primary_rules_order():
     assert check_operation._sort_category(accuracy_row) == "accuracy_online_low"
 
 
+def test_primary_issue_and_sort_category_accept_custom_issue_priority():
+    row = {
+        "帧完整性(结果)": "FAIL",
+        "数据范围(结果)": "FAIL",
+        "总异常(结果)": "FAIL",
+    }
+    assert check_operation.primary_issue(row, ["range_fail", "frame_fail"]) == "数据范围异常"
+    assert check_operation._sort_category(row, ["range_fail", "frame_fail"]) == "range"
+
+
+@pytest.mark.parametrize("column", ["心率金标(结果)", "血氧金标(结果)"])
+def test_primary_issue_matches_either_reference_result_column(column):
+    row = {"总异常(结果)": "FAIL", column: "FAIL"}
+    assert check_operation.primary_issue(row, ["reference_fail"]) == "金标异常"
+    assert check_operation._sort_category(row, ["reference_fail"]) == "reference"
+
+
 class _TrackingExecutor(ThreadPoolExecutor):
     def __init__(self, *args, tracker, **kwargs):
         super().__init__(*args, **kwargs)
