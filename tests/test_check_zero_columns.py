@@ -1,5 +1,12 @@
 """检查任务全零尾部通道裁剪测试。"""
 
+from types import SimpleNamespace
+
+import pandas as pd
+
+from health_tools.api.check_operation import _rule_mismatch
+from health_tools.core.checker import DataChecker
+from health_tools.models.rules import ChipRule
 from health_tools.utils.csv_handler import CSVHandler
 
 
@@ -41,6 +48,44 @@ def test_drop_trailing_zero_columns_keeps_frame_acc_and_gaps_before_last_active(
     assert "ACCX" in reduced.columns
 
 
+def test_checks_pass_when_zero_data_and_ipd_columns_were_trimmed():
+    frame = pd.DataFrame({"FRAME_ID": [0, 1]})
+    rule = ChipRule(
+        chip="gh3036",
+        csv={"info_row": 0, "header_row": 1, "data_start_row": 2, "delimiter": ","},
+        columns=["FRAME_ID", "Rawdata1", "Ipd1"],
+        check_columns={"data": ["Rawdata1"], "ipd": ["Ipd1"]},
+    )
+    checker = DataChecker(rule)
+    checker._check_context = SimpleNamespace(
+        frame=frame,
+        data_columns=[],
+        ipd_columns=[],
+        agc_columns=[],
+        acc_columns=[],
+        frame_column="FRAME_ID",
+        excluded_zero_data_columns=["Rawdata1"],
+        excluded_zero_ipd_columns=["Ipd1"],
+    )
+
+    mismatch = _rule_mismatch(
+        checker,
+        frame,
+        {"range", "center", "ipd"},
+        timestamp_column=None,
+        chip="gh3036",
+        require_acc=False,
+    )
+    range_result = checker.check_data_range(frame)
+    centering_result = checker.check_data_centering(frame)
+    ipd_result = checker.check_ipd_conversion(frame)
+
+    assert mismatch == ""
+    assert range_result.status == "PASS"
+    assert centering_result.status == "PASS"
+    assert ipd_result.status == "PASS"
+
+
 def test_drop_trailing_zero_columns_scans_only_first_500_data_rows(tmp_path):
     source = tmp_path / "sample_501_rows.csv"
     columns = ["FRAME_ID"] + [f"ALGO_RESULT{i}" for i in range(8)]
@@ -70,3 +115,5 @@ def test_drop_trailing_zero_columns_scans_only_first_500_data_rows(tmp_path):
     assert "ALGO_RESULT4" in reduced.columns
     assert "ALGO_RESULT6" in reduced.columns
     assert "ALGO_RESULT7" not in reduced.columns
+    assert len(reduced) == 501
+    assert reduced["FRAME_ID"].iloc[-1] == 500
