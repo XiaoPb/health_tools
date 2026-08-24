@@ -1,14 +1,18 @@
-"""check 报告 XLSX 分类聚合的纯数据接口。
+"""check 报告 XLSX 的分类聚合与工作簿写出。
 
-本模块只负责分类聚合与统计，不涉及 Excel 写出；工作簿写出由后续任务在
-``write_check_workbook`` 中实现。分类语义与 ``check_operation`` 的主要异常
-匹配保持一致，但为独立实现：必须按状态列匹配，不能从 主要异常项 文本反推。
-未命中任何规则的报告行不进入任何分类表，只保留在总表中（分类说明与 category
-表只覆盖 issue_priority 命中的行）。
+分类语义与 ``check_operation`` 的主要异常匹配保持一致，但为独立实现：必须按
+状态列匹配，不能从 主要异常项 文本反推。未命中任何规则的报告行不进入任何分类
+表，只保留在总表中（分类说明与 category 表只覆盖 issue_priority 命中的行）。
+``write_check_workbook`` 基于这些聚合结果写出固定顺序的多工作表 XLSX 报告。
 """
 
 from collections import Counter
-from typing import Dict, List, Sequence, Tuple, TypedDict
+from pathlib import Path
+from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple, TypedDict
+
+from openpyxl import Workbook  # type: ignore[import-untyped]
+from openpyxl.styles import Alignment  # type: ignore[import-untyped]
+from openpyxl.utils import get_column_letter  # type: ignore[import-untyped]
 
 # 稳定异常组标识到 (状态列, 期望值, 目录分类) 的映射；匹配顺序由调用方传入的
 # issue_priority 决定。reference 组的两个状态列按 OR 语义匹配。
@@ -26,6 +30,32 @@ _ROW_RULES: Dict[str, Tuple[Tuple[str, ...], str, str]] = {
 # 稳定异常组标识到目录分类的映射；与 _ROW_RULES 中的 category 保持一致，
 # 供 expand_issue_category_order 按优先级展开分类顺序使用。
 _ISSUE_CATEGORY: Dict[str, str] = {rule_id: rule[2] for rule_id, rule in _ROW_RULES.items()}
+
+# 目录分类到稳定异常组标识的反向映射，供分类说明表的 优先级 列使用；准确度
+# 标记分类不在其中，写表时统一回退为 "accuracy"。
+_ISSUE_ID_BY_CATEGORY: Dict[str, str] = {
+    category: rule_id for rule_id, category in _ISSUE_CATEGORY.items()
+}
+
+# Excel 工作表名非法字符（openpyxl 与 Excel 均不允许）。
+_SHEET_ILLEGAL_CHARS = frozenset("[]:*?/\\")
+
+# 分类说明表的固定列。
+_CATEGORY_SUMMARY_COLUMNS: Tuple[str, ...] = (
+    "优先级",
+    "异常类别",
+    "文件数",
+    "占比",
+    "判断条件",
+    "场景分类占比",
+    "人员占比",
+    "说明信息",
+)
+
+# Excel 工作表名最大长度与保留名（Excel 不允许名为 History 的工作表）。
+_SHEET_TITLE_MAX_LENGTH = 31
+_SHEET_TITLE_FALLBACK = "sheet"
+_SHEET_RESERVED_NAMES = frozenset({"History"})
 
 
 class CategorySummary(TypedDict):
@@ -145,3 +175,172 @@ def _count_field(rows: Sequence[Dict[str, str]], column: str) -> Counter:
         value = str(row.get(column, "") or "").strip()
         counter[value if value else "default"] += 1
     return counter
+
+
+def _safe_sheet_title(title: str, used_names: Set[str]) -> str:
+    """把原始标题转换为合法的 Excel 工作表名。
+
+    替换非法字符 ``[ ] : * ? / \\`` 为 ``_``，去除首尾空白，截断到 31 字符；
+    结果为空时回退为 "sheet"。与已用名称冲突或命中保留名 "History" 时按创建
+    顺序追加稳定后缀 ``_2``、``_3``……（首个占用原名的除外），保证重复运行
+    结果一致。调用方负责把返回值加入 ``used_names``。
+    """
+    sanitized = "".join("_" if ch in _SHEET_ILLEGAL_CHARS else ch for ch in title).strip()
+    base = sanitized[:_SHEET_TITLE_MAX_LENGTH] if sanitized else _SHEET_TITLE_FALLBACK
+    candidate = base
+    counter = 1
+    while candidate in _SHEET_RESERVED_NAMES or candidate in used_names:
+        counter += 1
+        suffix = f"_{counter}"
+        candidate = base[: _SHEET_TITLE_MAX_LENGTH - len(suffix)] + suffix
+    return candidate
+
+
+def _column_union(rows: Sequence[Mapping[str, object]]) -> List[str]:
+    """按首见顺序求所有行键的并集，作为工作表列头。"""
+    columns: List[str] = []
+    seen: Set[str] = set()
+    for row in rows:
+        for key in row:
+            if key not in seen:
+                seen.add(key)
+                columns.append(key)
+    return columns
+
+
+def _write_data_sheet(
+    wb: Workbook,
+    title: str,
+    columns: Sequence[str],
+    data_rows: Sequence[Sequence[object]],
+    number_formats: Optional[Mapping[int, str]] = None,
+) -> None:
+    """创建数据工作表并写入列头与数据行，统一设置冻结、筛选、列宽与换行。
+
+    列宽采用启发式：列头与数据前 20 行内容的 ``min(max(len(str(value))) + 2, 60)``。
+    ``number_formats`` 为 {1 起始列序号: 数字格式}，仅对数据行生效。
+    """
+    ws = wb.create_sheet(title=title)
+    if columns:
+        ws.append(list(columns))
+        for row in data_rows:
+            ws.append(list(row))
+    ws.freeze_panes = "A2"
+    if columns:
+        last_column = get_column_letter(len(columns))
+        ws.auto_filter.ref = f"A1:{last_column}{ws.max_row}"
+        for index, column in enumerate(columns, start=1):
+            sample = [column]
+            sample.extend(
+                str(row[index - 1]) if index - 1 < len(row) else "" for row in data_rows[:20]
+            )
+            ws.column_dimensions[get_column_letter(index)].width = min(
+                max(len(value) for value in sample) + 2, 60
+            )
+    if number_formats:
+        for row_index in range(2, ws.max_row + 1):
+            for column_index, number_format in number_formats.items():
+                ws.cell(row=row_index, column=column_index).number_format = number_format
+    for row_index in range(1, ws.max_row + 1):
+        for column_index in range(1, ws.max_column + 1):
+            ws.cell(row=row_index, column=column_index).alignment = Alignment(
+                wrap_text=True, vertical="top"
+            )
+
+
+def write_check_workbook(
+    output: Path,
+    rows: Sequence[Dict[str, str]],
+    compact_rows: Sequence[Dict[str, object]],
+    issue_priority: Sequence[str],
+    accuracy_categories: Sequence[str] = (),
+    category_descriptions: Optional[Mapping[str, Tuple[str, str]]] = None,
+) -> None:
+    """写出固定顺序的多工作表 check XLSX 报告。
+
+    固定顺序：总表 → 分类说明 → （每个实际命中分类一张表，按
+    ``expand_issue_category_order`` 顺序）→ 精简总表。
+
+    - 总表：全部行与全部列（首见顺序并集，缺键补空串），首行为列头。
+    - 分类说明：每类一行统计，列为 ``_CATEGORY_SUMMARY_COLUMNS``。
+    - 分类表：仅含 ``_row_category`` 命中该分类的行，列与总表一致。
+    - 精简总表：原样写出 ``compact_rows`` 的列头与内容。
+
+    空输入仍会生成 总表/分类说明/精简总表，分类表只覆盖实际命中的分类。
+    """
+    category_descriptions = category_descriptions or {}
+    total_columns = _column_union(rows)
+    categories = expand_issue_category_order(issue_priority, rows, accuracy_categories)
+    rows_by_category = {
+        category: [row for row in rows if _row_category(row, issue_priority) == category]
+        for category in categories
+    }
+
+    wb = Workbook()
+    wb.remove(wb.active)  # 移除默认空表，按固定顺序重建
+    # 预占三个固定工作表名，避免分类表与它们重名（openpyxl 会自动改名破坏固定名）。
+    used_names: Set[str] = {"总表", "分类说明", "精简总表"}
+
+    # 总表
+    _write_data_sheet(
+        wb,
+        "总表",
+        total_columns,
+        [[row.get(column, "") for column in total_columns] for row in rows],
+    )
+
+    # 分类说明
+    summary_rows: List[List[object]] = []
+    for category in categories:
+        condition, explanation = category_descriptions.get(category, ("", ""))
+        summary = build_category_summary(
+            rows_by_category[category],
+            category,
+            condition,
+            explanation,
+            total_count=len(rows),
+        )
+        summary_rows.append(
+            [
+                _ISSUE_ID_BY_CATEGORY.get(category, "accuracy"),
+                category,
+                summary["count"],
+                summary["ratio"],
+                condition,
+                summary["scene_distribution"],
+                summary["person_distribution"],
+                explanation,
+            ]
+        )
+    _write_data_sheet(
+        wb,
+        "分类说明",
+        _CATEGORY_SUMMARY_COLUMNS,
+        summary_rows,
+        number_formats={3: "0", 4: "0.00%"},
+    )
+
+    # 分类表（每个实际命中的 category 一张，标题经 _safe_sheet_title 清洗）
+    for category in categories:
+        title = _safe_sheet_title(category, used_names)
+        used_names.add(title)
+        _write_data_sheet(
+            wb,
+            title,
+            total_columns,
+            [
+                [row.get(column, "") for column in total_columns]
+                for row in rows_by_category[category]
+            ],
+        )
+
+    # 精简总表（始终最后）
+    compact_columns = _column_union(compact_rows)
+    _write_data_sheet(
+        wb,
+        "精简总表",
+        compact_columns,
+        [[row.get(column, "") for column in compact_columns] for row in compact_rows],
+    )
+
+    wb.save(output)
