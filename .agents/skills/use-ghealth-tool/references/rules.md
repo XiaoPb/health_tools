@@ -34,8 +34,12 @@
 - classify 的目标路径相对于输出目录，不要写绝对路径。
 - evaluate 的列索引命令行参数是 1-based；规则默认优先使用列名。
 - check 规则可以声明 `chip`、`timestamp.column`、`reference.hr_column/spo2_column`、
-  `accuracy.ref_column/online_column/comp_column`、检查阈值和准确度标定；显式 `-c/--chip`
-  覆盖规则芯片。
+  `accuracy.ref_column/online_column/comp_column`、检查阈值、`issue_priority` 和准确度标定；
+  显式 `-c/--chip` 覆盖规则芯片。
+- `issue_priority` 控制主要异常项和分拣类别顺序，支持 `frame_fail`、`range_fail`、`acc_fail`、
+  `timestamp_fail`、`frame_warning`、`reference_fail`、`acc_warning`、`center_fail`、`accuracy`。
+  显式列表按声明顺序优先，未列项按内置默认顺序追加；`accuracy` 类别内部再按
+  `accuracy.marks` 声明顺序选择具体标定。
 - 执行 check 前确认 `accuracy.ref_column`、`accuracy.online_column`、`accuracy.comp_column`
   都存在于实际 CSV 表头；Comp 列全为 0 时跳过 Comp vs Ref 准确度统计。
 - check YAML 不写 `input`、`output`、`sort`、`report`、`sort_output`、`workers`、`verbose` 或

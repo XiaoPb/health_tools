@@ -88,10 +88,33 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     assert "主要异常项" in command_doc
     assert "准确度标定分类" in command_doc
     assert "准确度标定说明" in command_doc
+    assert "issue_priority" in command_doc
+    assert "列表中的项目按声明顺序优先" in command_doc
     assert "文件相对路径" in command_doc
     assert "`accuracy.comp_column` 可以省略" in command_doc
     assert "读取既有 check 报告" in command_doc
     assert "不会在同一次调用中重新检查" in command_doc
+    assert "issue_priority" in rules_doc
+    assert "显式顺序优先，未指定项按内置默认顺序追加" in rules_doc
+
+
+def test_default_check_rule_documents_issue_priority_order():
+    default_rule = (ROOT / "src" / "health_tools" / "rules" / "check" / "default.yaml").read_text(
+        encoding="utf-8"
+    )
+    expected = [
+        "frame_fail",
+        "range_fail",
+        "acc_fail",
+        "timestamp_fail",
+        "frame_warning",
+        "reference_fail",
+        "acc_warning",
+        "center_fail",
+        "accuracy",
+    ]
+    positions = [default_rule.index(item) for item in expected]
+    assert positions == sorted(positions)
 
 
 def test_check_documentation_describes_bounded_parallel_scheduling():

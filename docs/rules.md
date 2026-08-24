@@ -203,6 +203,7 @@ version: "1.0"
 description: 默认数据质量、准确度与分拣规则
 chip: gh3036
 checks: [range, ipd, frame, center, acc, agc, ref]
+issue_priority: [frame_fail, range_fail, acc_fail, timestamp_fail, frame_warning, reference_fail, acc_warning, center_fail, accuracy]
 tolerance: 50
 static_min: 5
 ratios: {range: 1.0, frame: 1.0, center: 5.0, ipd: 1.0, acc: 1.0}
@@ -244,6 +245,7 @@ accuracy:
 | `version` / `description` | string | 规则版本与说明 |
 | `chip` | string | 默认芯片；命令行显式 `-c/--chip` 优先覆盖 |
 | `checks` | list | `range,ipd,frame,center,acc,agc,ref` 检查项；准确度由 `accuracy.enabled` 控制 |
+| `issue_priority` | list | 主要异常项与分拣类别优先级。支持 `frame_fail`、`range_fail`、`acc_fail`、`timestamp_fail`、`frame_warning`、`reference_fail`、`acc_warning`、`center_fail`、`accuracy`；显式顺序优先，未指定项按内置默认顺序追加 |
 | `tolerance` / `static_min` | number | Ipd 误差容忍度（pA）与 ACC 静止最小连续帧数 |
 | `ratios` | object | `range/frame/center/ipd/acc` 异常比例阈值 |
 | `acc_axis` | bool | 是否把 ACC 单轴异常计入结果 |
@@ -262,7 +264,9 @@ accuracy:
 `lt/lte/gt/gte`，差值运算支持 `diff_gte/diff_gt`，比例运算支持 `ratio_lt/ratio_lte`。
 二元运算必须提供 `right`；缺失指标或除零时不命中。旧的 `comparison/metric/min/min_gap`
 格式不再兼容。
-命中后主要异常项按 `marks` 声明顺序选择，并以该 `category` 作为分拣目录名；需要提高某个准确度标定的优先级时，将对应项前移即可。
+命中后主要异常项先按 `issue_priority` 选择类别；其中 `accuracy` 再按 `marks` 声明顺序选择具体标定，
+并以该 `category` 作为分拣目录名。`issue_priority` 只需列出要调整的项，未列出的合法项会按内置默认顺序追加；
+需要提高某个准确度标定的优先级时，将 `accuracy` 前移，并在 `marks` 中调整声明顺序即可。
 
 ### check 规则与 CLI 合并
 

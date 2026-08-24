@@ -4,6 +4,8 @@ description: 默认数据质量、准确度与分拣规则
 # YAML 描述芯片、列语义和检查策略，不描述输入/输出和本次运行控制。
 chip: gh3036
 checks: [range, ipd, frame, center, acc, agc, ref]
+# 主要异常/分拣优先级：显式项按此顺序处理，未列项按内置默认顺序追加。
+issue_priority: [frame_fail, range_fail, acc_fail, timestamp_fail, frame_warning, reference_fail, acc_warning, center_fail, accuracy]
 tolerance: 50
 static_min: 5
 

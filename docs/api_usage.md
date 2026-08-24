@@ -110,7 +110,14 @@ evaluation = run_evaluate(
     EvaluateRequest(Path("results"), Path("reports"), eval_type="hr")
 )
 
-checked = run_check(CheckRequest(input_path=Path("data"), chip_name="gh3036"))
+checked = run_check(
+    CheckRequest(
+        input_path=Path("data"),
+        chip_name="gh3036",
+        # 显式项优先，未列出的项按默认顺序追加。
+        issue_priority=("accuracy", "frame_warning"),
+    )
+)
 offline = run_offline(
     OfflineRequest(input_path=Path("data"), chip_name="gh3036", workers=8)
 )

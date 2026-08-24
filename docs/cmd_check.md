@@ -46,6 +46,20 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `-w/--workers` | 请求的并行线程数，默认 1；文件检查线程最多为 32 个。未指定时单线程处理，适合大型 CSV；显式指定大于 1 的值才启用并行 |
 | `-v/--verbose` | 显示失败/跳过文件明细和检查项详情 |
 
+### 异常优先级
+
+check 规则可用顶层 `issue_priority` 控制 `主要异常项` 和 `--sort` 分拣类别的顺序。例如：
+
+```yaml
+issue_priority: [accuracy, frame_warning]
+```
+
+列表中的项目按声明顺序优先处理，未列出的合法项目会按内置默认顺序追加：
+`frame_fail`、`range_fail`、`acc_fail`、`timestamp_fail`、`frame_warning`、
+`reference_fail`、`acc_warning`、`center_fail`、`accuracy`。`accuracy` 类别内部继续按
+`accuracy.marks` 的声明顺序选择具体标定；因此上例会让准确度标定先于帧 WARNING，但不会改变 FAIL
+类别的默认追加顺序。
+
 ## 输出与异常汇总
 
 - 普通检查模式使用进度条显示并行处理进度。文件任务采用有界线程调度，实际生效线程数取请求值、文件数和 32 的最小值，在途任务窗口最多为 `实际生效线程数 * 2`，不会一次性为目录中的全部文件创建 Future；任务完成后按输入顺序汇总报告。
@@ -218,24 +232,19 @@ Comp准确度样本数, Comp MAE, Comp RMSE, Comp相关系数, Comp ±5准确度
 
 `--sort` 模式读取 `check_report.csv`，按异常优先级为每个文件选择**唯一**分类；文件命中一个分类后只移动一次，并保留原始 `文件相对路径`：
 
-1. `帧完整性(结果)=FAIL` → `abnormal/frame/`
-2. `数据范围(结果)=FAIL` → `abnormal/range/`
-3. `ACC异常(结果)=FAIL` → `abnormal/acc_fail/`
-4. `ACC异常(结果)=WARNING` → `abnormal/acc_warning/`
-5. `时间戳间隔(结果)=FAIL` → `abnormal/timestamp/`
-6. `数据居中(结果)=FAIL` → `abnormal/center/`
-7. `心率金标(结果)=FAIL` 或 `血氧金标(结果)=FAIL` → `abnormal/reference/`
-8. `帧完整性(结果)=WARNING` → `abnormal/frame_warning/`
-9. 准确度标定命中按规则声明顺序进入 `abnormal/<category>/`，例如
-   `accuracy_online_low`、`accuracy_online_below_comp`；其优先级低于帧警告，高于 Ipd 和其他扩展检查项。
-10. 低优先级检查项分别进入自身目录，例如 `Ipd转换(结果)=FAIL` → `abnormal/ipd/`；扩展
+1. 按 `issue_priority` 顺序选择首个命中的类别；未配置时使用内置默认顺序：帧 FAIL、范围 FAIL、ACC FAIL、
+   时间戳 FAIL、帧 WARNING、金标 FAIL、ACC WARNING、居中 FAIL、准确度标定。
+2. 准确度标定命中后按 `accuracy.marks` 声明顺序进入 `abnormal/<category>/`，例如
+   `accuracy_online_low`、`accuracy_online_below_comp`；未显式调整 `issue_priority` 时，准确度标定默认低于帧警告、
+   高于 Ipd 和其他扩展检查项。
+3. 低优先级检查项分别进入自身目录，例如 `Ipd转换(结果)=FAIL` → `abnormal/ipd/`；扩展
    报告中的未知检查项使用检查项名称作为目录名。
-11. 旧报告只有 `总异常(结果)=FAIL`、没有失败单项时 → `abnormal/total_fail/`
-12. 其余文件（包括只有数据范围、时间戳、数据居中、金标或 Ipd WARNING 的文件）→ `normal/`
+4. 旧报告只有 `总异常(结果)=FAIL`、没有失败单项时 → `abnormal/total_fail/`
+5. 其余文件（包括只有数据范围、时间戳、数据居中、金标或 Ipd WARNING 的文件）→ `normal/`
 
 例如 `sub/a.csv` 被判定为帧不完整时，目标路径为 `abnormal/frame/sub/a.csv`。如果同一文件同时有
-多项异常，只按上面的第一项分类；因此明确的 FAIL 分类优先于首帧警告，首帧警告优先于 Ipd
-等原低优先级检查项。
+多项异常，只按生效的 `issue_priority` 第一项分类；因此默认顺序下明确的 FAIL 分类优先于首帧警告，首帧警告
+优先于 Ipd 等原低优先级检查项。
 
 报告必须包含 `文件相对路径` 列；旧报告缺少具体检查项列时，会按可识别的列分类，只有总异常
 结果时进入 `abnormal/total_fail/`。分拣不会覆盖目标同名文件，源文件不存在、路径非法或目标
