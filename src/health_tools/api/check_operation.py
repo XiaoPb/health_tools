@@ -118,11 +118,12 @@ PRIMARY_RULES = {
     "acc_warning": (("ACC异常(结果)",), "WARNING", "acc_warning", "ACC警告"),
     "center_fail": (("数据居中(结果)",), "FAIL", "center", "数据未居中"),
     "accuracy": (("准确度标定分类",), "__PRESENT__", "__accuracy__", ""),
-    "agc_change_fail": (("AGC变化(结果)",), "FAIL", "agc", "AGC异常"),
-    "agc_adjust_fail": (("AGC调光(结果)",), "FAIL", "agc", "AGC异常"),
-    "ipd_fail": (("Ipd转换(结果)",), "FAIL", "ipd", "Ipd转换异常"),
 }
-_TRAILING_PRIMARY_RULE_IDS = ("agc_change_fail", "agc_adjust_fail", "ipd_fail")
+_TRAILING_PRIMARY_RULES = (
+    (("AGC变化(结果)",), "FAIL", "agc", "AGC异常"),
+    (("AGC调光(结果)",), "FAIL", "agc", "AGC异常"),
+    (("Ipd转换(结果)",), "FAIL", "ipd", "Ipd转换异常"),
+)
 
 
 def _primary_match(
@@ -130,8 +131,9 @@ def _primary_match(
 ) -> Tuple[str, str]:
     """返回报告行的统一优先级匹配结果（目录分类、中文摘要）。"""
 
-    def match_rule(rule_id: str) -> Optional[Tuple[str, str]]:
-        rule = PRIMARY_RULES.get(rule_id)
+    def match_rule(
+        rule: Optional[Tuple[Tuple[str, ...], str, str, str]]
+    ) -> Optional[Tuple[str, str]]:
         if rule is None:
             return None
         columns, expected, category, label = rule
@@ -145,11 +147,11 @@ def _primary_match(
         return None
 
     for rule_id in normalize_check_issue_priority(issue_priority):
-        matched = match_rule(rule_id)
+        matched = match_rule(PRIMARY_RULES.get(rule_id))
         if matched:
             return matched
-    for rule_id in _TRAILING_PRIMARY_RULE_IDS:
-        matched = match_rule(rule_id)
+    for rule in _TRAILING_PRIMARY_RULES:
+        matched = match_rule(rule)
         if matched:
             return matched
     return "", ""

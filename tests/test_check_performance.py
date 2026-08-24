@@ -55,6 +55,17 @@ def test_primary_issue_and_sort_category_accept_custom_issue_priority():
     assert check_operation._sort_category(row, ["range_fail", "frame_fail"]) == "range"
 
 
+def test_primary_issue_custom_accuracy_priority_beats_frame_failure():
+    row = {
+        "帧完整性(结果)": "FAIL",
+        "准确度标定分类": "accuracy_online_low",
+        "准确度标定说明": "online 偏低",
+        "总异常(结果)": "FAIL",
+    }
+    assert check_operation.primary_issue(row, ["accuracy"]) == "online 偏低"
+    assert check_operation._sort_category(row, ["accuracy"]) == "accuracy_online_low"
+
+
 @pytest.mark.parametrize("column", ["心率金标(结果)", "血氧金标(结果)"])
 def test_primary_issue_matches_either_reference_result_column(column):
     row = {"总异常(结果)": "FAIL", column: "FAIL"}
