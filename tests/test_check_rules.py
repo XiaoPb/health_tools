@@ -150,6 +150,7 @@ def test_check_sort_summary_uses_mark_order_without_category_prefix(monkeypatch,
     rule = tmp_path / "check.yaml"
     rule.write_text(
         """version: '1.0'
+issue_priority: [accuracy, frame_fail]
 accuracy:
   enabled: true
   marks:
@@ -172,7 +173,13 @@ accuracy:
     def fake_run_check(request, *, context=None):
         return CheckResult(
             BatchResult("check"),
-            sort_counts={"comp_low": 1, "online_low": 1, "ipd": 1, "skipped": 0},
+            sort_counts={
+                "comp_low": 1,
+                "online_low": 1,
+                "frame": 1,
+                "ipd": 1,
+                "skipped": 0,
+            },
         )
 
     monkeypatch.setattr("health_tools.api.run_check", fake_run_check)
@@ -183,7 +190,8 @@ accuracy:
 
     assert result.exit_code == 0, result.output
     assert result.output.index("online_low=1") < result.output.index("comp_low=1")
-    assert result.output.index("comp_low=1") < result.output.index("ipd=1")
+    assert result.output.index("comp_low=1") < result.output.index("frame=1")
+    assert result.output.index("frame=1") < result.output.index("ipd=1")
 
 
 def test_check_sort_infers_report_from_check_output_path(monkeypatch, tmp_path):

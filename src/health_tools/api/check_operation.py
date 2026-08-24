@@ -50,6 +50,43 @@ SORT_CATEGORIES = (
     "normal",
 )
 
+_ISSUE_CATEGORY_MAP = {
+    "frame_fail": "frame",
+    "range_fail": "range",
+    "acc_fail": "acc_fail",
+    "timestamp_fail": "timestamp",
+    "frame_warning": "frame_warning",
+    "reference_fail": "reference",
+    "acc_warning": "acc_warning",
+    "center_fail": "center",
+}
+_TRAILING_CATEGORY_ORDER = ("agc", "ipd", "total_fail", "normal")
+
+
+def issue_category_order(
+    issue_priority: Optional[Sequence[str]] = None, accuracy_marks: Sequence[Any] = ()
+) -> Tuple[str, ...]:
+    """返回检查结果汇总/分拣使用的类别顺序。
+
+    基础类别跟随规则中的 ``issue_priority``；``accuracy`` 项展开为准确度
+    marks 的声明顺序。AGC、Ipd 及兜底类别始终追加在末尾。
+    """
+    categories: List[str] = []
+    for issue_id in normalize_check_issue_priority(issue_priority):
+        if issue_id == "accuracy":
+            for mark in accuracy_marks:
+                category = str(getattr(mark, "category", "") or "").strip()
+                if category and category not in categories:
+                    categories.append(category)
+            continue
+        category = _ISSUE_CATEGORY_MAP.get(issue_id)
+        if category and category not in categories:
+            categories.append(category)
+    for category in _TRAILING_CATEGORY_ORDER:
+        if category not in categories:
+            categories.append(category)
+    return tuple(categories)
+
 _MAX_FILE_WORKERS = 32
 
 _FULL_REPORT_HEADER = {

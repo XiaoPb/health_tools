@@ -262,30 +262,15 @@ def check_cmd(
             if item.status.value == "SKIP":
                 console.print(f"[yellow]跳过（{item.reason}）: {Path(item.input).name}[/yellow]")
     if result.sort_counts:
-        category_order = (
-            "frame",
-            "range",
-            "acc_fail",
-            "acc_warning",
-            "timestamp",
-            "center",
-            "reference",
-            "frame_warning",
-        )
-        # 准确度标定分类由规则声明，名称不固定；按有效 marks 的声明顺序展示，
-        # 但整体位置固定在首帧警告之后、AGC/Ipd 之前。
-        accuracy_categories = [
-            mark.category for mark in accuracy_marks if mark.category in result.sort_counts
-        ]
-        trailing_categories = ("agc", "ipd", "total_fail", "normal")
-        known = set(category_order) | set(accuracy_categories) | set(trailing_categories)
+        from health_tools.api.check_operation import issue_category_order
+
+        category_order = issue_category_order(rule.issue_priority, accuracy_marks)
+        known = set(category_order)
         extra_categories = sorted(set(result.sort_counts) - known - {"skipped"})
         distribution = ", ".join(
             f"{category}={result.sort_counts.get(category, 0)}"
             for category in (
                 *category_order,
-                *accuracy_categories,
-                *trailing_categories,
                 *extra_categories,
             )
         )
