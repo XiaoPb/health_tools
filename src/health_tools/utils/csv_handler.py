@@ -11,7 +11,7 @@ from health_tools.models.rules import ChipRule
 from health_tools.utils.columns import expand_columns
 from health_tools.utils.file import detect_file_encoding
 
-MAX_CHUNK_SIZE = 50000
+TRAILING_ZERO_SCAN_ROWS = 500
 
 _CSV_INJECTION_PATTERN = re.compile(r"^[=+\-@\t\r]")
 
@@ -50,26 +50,23 @@ class CSVHandler:
         protected = set(protected_columns)
         families: Dict[str, List[Tuple[int, str]]] = {}
         last_active: Dict[str, int] = {}
-        chunks = pd.read_csv(**read_kwargs, chunksize=MAX_CHUNK_SIZE)
-        for chunk in chunks:
-            if not families:
-                for column in chunk.columns:
-                    if column in protected:
-                        continue
-                    matched = re.match(r"^(.*?)(\d+)$", str(column))
-                    if matched:
-                        families.setdefault(matched.group(1), []).append(
-                            (int(matched.group(2)), column)
-                        )
-            for prefix, columns in families.items():
-                for index, column in columns:
-                    if index <= last_active.get(prefix, -1):
-                        continue
-                    series = chunk[column]
-                    minimum = series.min(skipna=True)
-                    maximum = series.max(skipna=True)
-                    if pd.notna(minimum) and (minimum != 0 or maximum != 0):
-                        last_active[prefix] = index
+        sample = pd.read_csv(**read_kwargs, nrows=TRAILING_ZERO_SCAN_ROWS)
+        for column in sample.columns:
+            if column in protected:
+                continue
+            matched = re.match(r"^(.*?)(\d+)$", str(column))
+            if matched:
+                families.setdefault(matched.group(1), []).append((int(matched.group(2)), column))
+
+        for prefix, columns in families.items():
+            for index, column in columns:
+                if index <= last_active.get(prefix, -1):
+                    continue
+                series = sample[column]
+                minimum = series.min(skipna=True)
+                maximum = series.max(skipna=True)
+                if pd.notna(minimum) and (minimum != 0 or maximum != 0):
+                    last_active[prefix] = index
 
         excluded = []
         for prefix, columns in families.items():

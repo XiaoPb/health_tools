@@ -39,3 +39,34 @@ def test_drop_trailing_zero_columns_keeps_frame_acc_and_gaps_before_last_active(
     assert "AGC_INFO_CH1" not in reduced.columns
     assert "FRAME_ID" in reduced.columns
     assert "ACCX" in reduced.columns
+
+
+def test_drop_trailing_zero_columns_scans_only_first_500_data_rows(tmp_path):
+    source = tmp_path / "sample_501_rows.csv"
+    columns = ["FRAME_ID"] + [f"ALGO_RESULT{i}" for i in range(8)]
+    rows = []
+    for frame_id in range(501):
+        values = [0] * 8
+        values[0] = 1
+        if frame_id == 499:
+            values[6] = 6
+        if frame_id == 500:
+            values[7] = 7
+        rows.append(",".join(str(value) for value in [frame_id] + values))
+    source.write_text(
+        ",".join(columns) + "\n" + "\n".join(rows) + "\n",
+        encoding="utf-8",
+    )
+    handler = CSVHandler()
+
+    _, reduced = handler.read(
+        source,
+        trim_trailing_zero=True,
+        protected_columns=["FRAME_ID"],
+    )
+
+    assert handler.excluded_columns == ["ALGO_RESULT7"]
+    assert "FRAME_ID" in reduced.columns
+    assert "ALGO_RESULT4" in reduced.columns
+    assert "ALGO_RESULT6" in reduced.columns
+    assert "ALGO_RESULT7" not in reduced.columns
