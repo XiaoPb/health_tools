@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -41,6 +41,41 @@ class CSVHandler:
 
     def __init__(self, chip_rule: Optional[ChipRule] = None):
         self.chip_rule = chip_rule
+        self.excluded_columns: List[str] = []
+
+    @staticmethod
+    def _trailing_zero_columns(
+        read_kwargs: Dict[str, object], protected_columns: List[str]
+    ) -> List[str]:
+        protected = set(protected_columns)
+        families: Dict[str, List[Tuple[int, str]]] = {}
+        last_active: Dict[str, int] = {}
+        chunks = pd.read_csv(**read_kwargs, chunksize=MAX_CHUNK_SIZE)
+        for chunk in chunks:
+            if not families:
+                for column in chunk.columns:
+                    if column in protected:
+                        continue
+                    matched = re.match(r"^(.*?)(\d+)$", str(column))
+                    if matched:
+                        families.setdefault(matched.group(1), []).append(
+                            (int(matched.group(2)), column)
+                        )
+            for prefix, columns in families.items():
+                for index, column in columns:
+                    if index <= last_active.get(prefix, -1):
+                        continue
+                    series = chunk[column]
+                    minimum = series.min(skipna=True)
+                    maximum = series.max(skipna=True)
+                    if pd.notna(minimum) and (minimum != 0 or maximum != 0):
+                        last_active[prefix] = index
+
+        excluded = []
+        for prefix, columns in families.items():
+            final_index = last_active.get(prefix, -1)
+            excluded.extend(column for index, column in columns if index > final_index)
+        return excluded
 
     def _detect_encoding(self, file_path: Path, auto_detect: bool) -> str:
         if auto_detect:
@@ -71,6 +106,9 @@ class CSVHandler:
         self,
         file_path: Union[str, Path],
         auto_detect_encoding: bool = True,
+        *,
+        trim_trailing_zero: bool = False,
+        protected_columns: Optional[List[str]] = None,
     ) -> Tuple[str, pd.DataFrame]:
         file_path = Path(file_path)
         encoding = self._detect_encoding(file_path, auto_detect_encoding)
@@ -108,6 +146,13 @@ class CSVHandler:
                     "skiprows": data_start_row - 1 if data_start_row > 1 else None,
                 }
             )
+        self.excluded_columns = []
+        if trim_trailing_zero:
+            self.excluded_columns = self._trailing_zero_columns(
+                read_kwargs, protected_columns or []
+            )
+            excluded = set(self.excluded_columns)
+            read_kwargs["usecols"] = lambda column: column not in excluded
         df = _downcast_integer_columns(pd.read_csv(**read_kwargs))
 
         return info, df

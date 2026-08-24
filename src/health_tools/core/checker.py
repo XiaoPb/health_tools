@@ -243,6 +243,14 @@ class DataChecker:
                 active_cols.append(col)
         return active_cols, skipped_cols
 
+    def _excluded_zero_data_columns(self) -> List[str]:
+        context = getattr(self, "_check_context", None)
+        return list(getattr(context, "excluded_zero_data_columns", ()))
+
+    def _excluded_zero_ipd_columns(self) -> List[str]:
+        context = getattr(self, "_check_context", None)
+        return list(getattr(context, "excluded_zero_ipd_columns", ()))
+
     @staticmethod
     def _append_skipped_summary(summary: str, skipped_count: int) -> str:
         """在检查摘要中补充跳过全0预留通道的信息。"""
@@ -270,8 +278,18 @@ class DataChecker:
         """检查原始数据是否在正常范围内"""
         all_data_cols = [c for c in self._get_data_columns() if c in df.columns]
         if not all_data_cols:
+            skipped_cols = self._excluded_zero_data_columns()
+            if skipped_cols:
+                return CheckResult(
+                    "数据范围",
+                    True,
+                    f"全部 {len(skipped_cols)} 个全0预留通道已跳过，未检查有效数据列",
+                    status="PASS",
+                    threshold_ratio=threshold_ratio,
+                )
             return CheckResult("数据范围", False, "未找到数据列")
         data_cols, skipped_cols = self._filter_reserved_zero_channels(df, all_data_cols)
+        skipped_cols = self._excluded_zero_data_columns() + skipped_cols
         if not data_cols:
             return CheckResult(
                 "数据范围",
@@ -388,8 +406,18 @@ class DataChecker:
         """检查数据去除基线后是否居中（0.3*2^23 ~ 0.85*2^23）"""
         all_data_cols = [c for c in self._get_data_columns() if c in df.columns]
         if not all_data_cols:
+            skipped_cols = self._excluded_zero_data_columns()
+            if skipped_cols:
+                return CheckResult(
+                    "数据居中",
+                    True,
+                    f"全部 {len(skipped_cols)} 个全0预留通道已跳过，未检查有效数据列",
+                    status="PASS",
+                    threshold_ratio=threshold_ratio,
+                )
             return CheckResult("数据居中", False, "未找到数据列")
         data_cols, skipped_cols = self._filter_reserved_zero_channels(df, all_data_cols)
+        skipped_cols = self._excluded_zero_data_columns() + skipped_cols
         if not data_cols:
             return CheckResult(
                 "数据居中",
@@ -856,7 +884,18 @@ class DataChecker:
         data_cols = [c for c in self._get_data_columns() if c in df.columns]
         agc_cols = [c for c in self._get_agc_columns() if c in df.columns]
 
+        excluded_data = self._excluded_zero_data_columns()
+        excluded_ipd = self._excluded_zero_ipd_columns()
         if not ipd_cols or not data_cols:
+            skipped_count = min(len(excluded_data), len(excluded_ipd))
+            if skipped_count:
+                return CheckResult(
+                    "Ipd转换",
+                    True,
+                    f"全部 {skipped_count} 个全0预留通道已跳过，未检查有效通道",
+                    status="PASS",
+                    threshold_ratio=threshold_ratio,
+                )
             return CheckResult("Ipd转换", False, "未找到 Ipd 或 Rawdata 列")
 
         chip_info = self.chip_rule.chip_info or {}
@@ -870,7 +909,7 @@ class DataChecker:
         mismatch_cols: List[str] = []
         details: List[str] = []
         check_count = min(len(ipd_cols), len(data_cols))
-        skipped_count = 0
+        skipped_count = min(len(excluded_data), len(excluded_ipd))
         active_count = 0
         total_points = 0
         total_exceed = 0

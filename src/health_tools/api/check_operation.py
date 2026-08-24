@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import gc
-
 import csv
+import gc
 import math
 import re
 import shutil
@@ -222,6 +221,8 @@ class _FileCheckContext:
     acc_columns: List[str]
     ipd_columns: List[str]
     agc_columns: List[str]
+    excluded_zero_data_columns: List[str] = field(default_factory=list)
+    excluded_zero_ipd_columns: List[str] = field(default_factory=list)
     _numeric_columns: Dict[Tuple[str, ...], pd.DataFrame] = field(default_factory=dict)
     _timestamp_analysis: Dict[str, Tuple[Optional[pd.Series], str]] = field(default_factory=dict)
     _sample_positions: Dict[Tuple[float, str], np.ndarray] = field(default_factory=dict)
@@ -357,7 +358,8 @@ def _rule_mismatch(
         if cached is not None and cached.frame is frame
         else checker._resolve_frame_column(frame)
     )
-    if ({"range", "center"} & checks) and not data_columns:
+    has_data_columns = bool(data_columns) or bool(getattr(cached, "excluded_zero_data_columns", ()))
+    if ({"range", "center"} & checks) and not has_data_columns:
         missing.append("数据列")
     if "frame" in checks and not frame_column:
         missing.append("帧号列")
@@ -367,7 +369,10 @@ def _rule_mismatch(
             if cached is not None and cached.frame is frame
             else [column for column in checker._get_ipd_columns() if column in frame.columns]
         )
-        if not ipd_columns or not data_columns:
+        has_ipd_columns = bool(ipd_columns) or bool(
+            getattr(cached, "excluded_zero_ipd_columns", ())
+        )
+        if not has_ipd_columns or not has_data_columns:
             missing.append("Ipd/Rawdata列")
     acc_columns = (
         cached.acc_columns
@@ -1026,7 +1031,43 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             )
         try:
             chip_rule = _load_rule(RuleLoader.load_chip_rule, chip, "芯片")
-            _, frame = CSVHandler(chip_rule).read(path)
+            schema_columns = RuleLoader.expand_columns(getattr(chip_rule, "columns", []) or [])
+            configured_acc = getattr(chip_rule, "acc_columns", {}) or {}
+            protected_columns = [
+                getattr(chip_rule, "frame_column", "") or "",
+                *[configured_acc.get(axis, "") for axis in ("x", "y", "z")],
+                *[
+                    column
+                    for column in schema_columns
+                    if re.match(r"(?i)^(?:frame_?id|fid|acc[_ ]?[xyz])$", column)
+                ],
+                request.timestamp_column or "",
+                request.ref_hr_column or "",
+                request.ref_spo2_column or "",
+                request.accuracy_ref_column or "",
+                request.accuracy_online_column or "",
+                request.accuracy_comp_column or "",
+            ]
+            if (request.ref_hr_column or request.ref_spo2_column) or request.accuracy_enabled:
+                protected_columns.extend(
+                    [
+                        request.timestamp_column or "TimeStamp",
+                        request.accuracy_online_column or "ALGO_RESULT0",
+                        request.accuracy_ref_column
+                        or request.ref_hr_column
+                        or request.ref_spo2_column
+                        or "REF_RESULT0",
+                    ]
+                )
+            csv_handler = CSVHandler(chip_rule)
+            if hasattr(csv_handler, "excluded_columns"):
+                _, frame = csv_handler.read(
+                    path,
+                    trim_trailing_zero=True,
+                    protected_columns=[column for column in protected_columns if column],
+                )
+            else:
+                _, frame = csv_handler.read(path)
             if frame.empty:
                 return (
                     ItemResult(ItemStatus.SKIP, str(path), reason="空文件"),
@@ -1038,7 +1079,21 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
             checker = DataChecker(
                 chip_rule, tolerance=request.tolerance, static_min=request.static_min
             )
+            get_data_columns = getattr(checker, "_get_data_columns", None)
+            get_ipd_columns = getattr(checker, "_get_ipd_columns", None)
+            original_data_columns = set(get_data_columns() if get_data_columns else ())
+            original_ipd_columns = set(get_ipd_columns() if get_ipd_columns else ())
             file_context = _FileCheckContext.create(path, chip, chip_rule, frame, checker)
+            file_context.excluded_zero_data_columns = [
+                column
+                for column in getattr(csv_handler, "excluded_columns", ())
+                if column in original_data_columns
+            ]
+            file_context.excluded_zero_ipd_columns = [
+                column
+                for column in getattr(csv_handler, "excluded_columns", ())
+                if column in original_ipd_columns
+            ]
             mismatch = _rule_mismatch(
                 checker,
                 file_context.frame,
