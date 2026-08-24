@@ -106,6 +106,7 @@ class RuleValidator:
             "reference",
             "scene_regex",
             "accuracy",
+            "issue_priority",
         }
         unknown = set(rule) - allowed
         if unknown:
@@ -137,6 +138,35 @@ class RuleValidator:
                 errors.append(f"check 规则 '{field}' 必须是非负整数")
         if "acc_axis" in rule and not isinstance(rule["acc_axis"], bool):
             errors.append("check 规则 'acc_axis' 必须是布尔值")
+
+        issue_priority = rule.get("issue_priority")
+        supported_issue_priority = {
+            "frame_fail",
+            "range_fail",
+            "acc_fail",
+            "timestamp_fail",
+            "frame_warning",
+            "reference_fail",
+            "acc_warning",
+            "center_fail",
+            "accuracy",
+        }
+        if issue_priority is not None:
+            if not isinstance(issue_priority, list):
+                errors.append("issue_priority 必须是列表")
+            elif not issue_priority:
+                errors.append("issue_priority 必须是非空列表")
+            else:
+                seen = set()
+                for index, item in enumerate(issue_priority):
+                    if not isinstance(item, str) or not item.strip():
+                        errors.append(f"issue_priority[{index}] 必须是非空字符串")
+                        continue
+                    if item in seen:
+                        errors.append(f"issue_priority 不允许重复: {item}")
+                    seen.add(item)
+                    if item not in supported_issue_priority:
+                        errors.append(f"issue_priority 包含未知项: {item}")
 
         ratios = rule.get("ratios")
         if ratios is not None:

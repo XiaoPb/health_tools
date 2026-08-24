@@ -2,9 +2,31 @@
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from health_tools.utils.columns import expand_columns
+
+
+CHECK_ISSUE_PRIORITY_IDS = (
+    "frame_fail",
+    "range_fail",
+    "acc_fail",
+    "timestamp_fail",
+    "frame_warning",
+    "reference_fail",
+    "acc_warning",
+    "center_fail",
+    "accuracy",
+)
+DEFAULT_CHECK_ISSUE_PRIORITY = CHECK_ISSUE_PRIORITY_IDS
+
+
+def normalize_check_issue_priority(priority: Optional[Sequence[str]]) -> Tuple[str, ...]:
+    """规范化 check 异常优先级：显式顺序优先，未指定项按默认顺序追加。"""
+    if priority is None:
+        return DEFAULT_CHECK_ISSUE_PRIORITY
+    configured = tuple(str(item).strip() for item in priority)
+    return configured + tuple(item for item in DEFAULT_CHECK_ISSUE_PRIORITY if item not in configured)
 
 
 @dataclass
@@ -298,6 +320,10 @@ class CheckRule:
     chip: Optional[str] = None
     values: Dict[str, Any] = field(default_factory=dict)
     accuracy: CheckAccuracyRule = field(default_factory=CheckAccuracyRule)
+    issue_priority: Tuple[str, ...] = field(default_factory=lambda: DEFAULT_CHECK_ISSUE_PRIORITY)
+
+    def __post_init__(self):
+        object.__setattr__(self, "issue_priority", normalize_check_issue_priority(self.issue_priority))
 
     @property
     def checks(self) -> Tuple[str, ...]:

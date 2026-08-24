@@ -16,6 +16,7 @@ from health_tools.models.rules import (
     EvaluateRule,
     ParsePattern,
     ParseRule,
+    normalize_check_issue_priority,
 )
 from health_tools.utils.columns import expand_columns as _expand_columns
 
@@ -280,7 +281,7 @@ class RuleLoader:
         values = {
             key: value
             for key, value in data.items()
-            if key not in {"version", "description", "chip", "accuracy"}
+            if key not in {"version", "description", "chip", "accuracy", "issue_priority"}
         }
         accuracy_data = data.get("accuracy") or {}
         marks = tuple(
@@ -324,4 +325,5 @@ class RuleLoader:
             chip=data.get("chip"),
             values=values,
             accuracy=accuracy,
+            issue_priority=normalize_check_issue_priority(data.get("issue_priority")),
         )

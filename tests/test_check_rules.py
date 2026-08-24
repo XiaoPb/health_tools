@@ -11,6 +11,9 @@ from health_tools.models.rules import (
     AccuracyMarkRule,
     CheckAccuracyRule,
     CheckRule,
+    CHECK_ISSUE_PRIORITY_IDS,
+    DEFAULT_CHECK_ISSUE_PRIORITY,
+    normalize_check_issue_priority,
 )
 from health_tools.rules.loader import RuleLoader
 from health_tools.rules.validator import RuleValidator
@@ -493,6 +496,49 @@ def test_check_rule_rejects_non_boolean_flags_and_non_integer_counts():
     assert "acc_axis" in message
     assert "accuracy.enabled" in message
     assert "accuracy.inclusive" in message
+
+
+def test_check_rule_issue_priority_defaults_and_partial_configuration():
+    rule = CheckRule()
+    assert rule.issue_priority == DEFAULT_CHECK_ISSUE_PRIORITY
+    assert rule.issue_priority == CHECK_ISSUE_PRIORITY_IDS
+    assert normalize_check_issue_priority(["center_fail", "frame_fail"]) == (
+        "center_fail",
+        "frame_fail",
+        "range_fail",
+        "acc_fail",
+        "timestamp_fail",
+        "frame_warning",
+        "reference_fail",
+        "acc_warning",
+        "accuracy",
+    )
+
+
+def test_check_rule_loads_issue_priority_without_storing_in_values(tmp_path):
+    rule_path = tmp_path / "priority.yaml"
+    rule_path.write_text(
+        "version: '1.0'\nissue_priority: [accuracy, frame_fail]\nchecks: [frame]\n",
+        encoding="utf-8",
+    )
+    rule = RuleLoader.load_check_rule(str(rule_path))
+    assert rule.issue_priority[:2] == ("accuracy", "frame_fail")
+    assert "issue_priority" not in rule.values
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("frame_fail", "issue_priority 必须是列表"),
+        ([], "issue_priority 必须是非空列表"),
+        (["", "frame_fail"], "issue_priority[0] 必须是非空字符串"),
+        (["unknown"], "issue_priority 包含未知项"),
+        (["frame_fail", "frame_fail"], "issue_priority 不允许重复"),
+    ],
+)
+def test_check_rule_rejects_invalid_issue_priority(value, expected):
+    errors = RuleValidator.validate({"version": "1.0", "issue_priority": value}, "check")
+    assert expected in " ".join(errors)
 
 
 @pytest.mark.parametrize(
