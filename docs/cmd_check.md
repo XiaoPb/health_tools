@@ -43,7 +43,7 @@ ghealth_tool check --sort --sort-output <output_dir> [--report <check_report.csv
 | `--sort` | 读取检查报告并分拣正常/异常文件 |
 | `--report` | 分拣使用的检查报告路径 |
 | `--sort-output` | 分拣输出目录 |
-| `-w/--workers` | 请求的并行线程数，默认 4；文件检查线程最多为 32 个 |
+| `-w/--workers` | 请求的并行线程数，默认 1；文件检查线程最多为 32 个。未指定时单线程处理，适合大型 CSV；显式指定大于 1 的值才启用并行 |
 | `-v/--verbose` | 显示失败/跳过文件明细和检查项详情 |
 
 ## 输出与异常汇总

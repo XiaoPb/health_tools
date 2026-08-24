@@ -92,6 +92,15 @@ def test_check_cli_explicit_values_override_rule(monkeypatch, tmp_path):
     assert request.workers == 8
 
 
+def test_check_cli_defaults_to_single_worker(monkeypatch):
+    captured = _capture_check_request(monkeypatch)
+
+    result = CliRunner().invoke(check_cmd, [])
+
+    assert result.exit_code == 0, result.output
+    assert captured["request"].workers == 1
+
+
 def test_check_rule_fills_unspecified_policy_values(monkeypatch, tmp_path):
     captured = _capture_check_request(monkeypatch)
     rule = _write_check_rule(tmp_path)

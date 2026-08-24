@@ -548,7 +548,7 @@ class CheckRequest:
     sort_report: bool = False
     report_path: Optional[Path] = None
     sort_output: Optional[Path] = None
-    workers: int = 4
+    workers: int = 1
     accuracy_enabled: bool = False
     accuracy_ref_column: Optional[str] = None
     accuracy_online_column: Optional[str] = None

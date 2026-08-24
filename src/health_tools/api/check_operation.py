@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gc
+
 import csv
 import math
 import re
@@ -1231,6 +1233,39 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
                 None,
                 None,
             )
+        finally:
+            # 大型 CSV 可能达到数百 MB；任务结束后及时断开局部对象引用，
+            # 避免长批次或显式并行处理时已完成文件继续占用内存。
+            for name in (
+                "frame",
+                "file_context",
+                "checker",
+                "reference_frame",
+                "accuracy_frame",
+                "evidence_frame",
+                "timestamp_intervals",
+                "sample_positions",
+                "acc",
+            ):
+                if name == "frame" and "frame" in locals():
+                    del frame
+                elif name == "file_context" and "file_context" in locals():
+                    del file_context
+                elif name == "checker" and "checker" in locals():
+                    del checker
+                elif name == "reference_frame" and "reference_frame" in locals():
+                    del reference_frame
+                elif name == "accuracy_frame" and "accuracy_frame" in locals():
+                    del accuracy_frame
+                elif name == "evidence_frame" and "evidence_frame" in locals():
+                    del evidence_frame
+                elif name == "timestamp_intervals" and "timestamp_intervals" in locals():
+                    del timestamp_intervals
+                elif name == "sample_positions" and "sample_positions" in locals():
+                    del sample_positions
+                elif name == "acc" and "acc" in locals():
+                    del acc
+            gc.collect()
 
     from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 

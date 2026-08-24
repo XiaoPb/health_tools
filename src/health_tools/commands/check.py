@@ -101,7 +101,7 @@ if TYPE_CHECKING:
     "--report", "report_path", type=click.Path(), default=None, help="分拣使用的检查报告路径"
 )
 @click.option("--sort-output", "sort_output", type=click.Path(), default=None, help="分拣输出目录")
-@click.option("-w", "--workers", type=int, default=4, help="并行线程数 (默认4)")
+@click.option("-w", "--workers", type=int, default=1, help="并行线程数 (默认1)")
 @click.option("-v", "--verbose", is_flag=True, help="显示详细信息")
 @click.pass_context
 def check_cmd(
