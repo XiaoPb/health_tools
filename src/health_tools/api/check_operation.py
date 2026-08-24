@@ -79,9 +79,9 @@ def issue_category_order(
                 if category and category not in categories:
                     categories.append(category)
             continue
-        category = _ISSUE_CATEGORY_MAP.get(issue_id)
-        if category and category not in categories:
-            categories.append(category)
+        mapped = _ISSUE_CATEGORY_MAP.get(issue_id)
+        if mapped and mapped not in categories:
+            categories.append(mapped)
     for category in _TRAILING_CATEGORY_ORDER:
         if category not in categories:
             categories.append(category)
@@ -136,6 +136,11 @@ def _is_failed_check_report(item: ItemResult, path: Path) -> bool:
 def _compact_report_path(report_path: Path) -> Path:
     """根据完整报告路径生成对应的精简报告路径。"""
     return report_path.with_name(f"{report_path.stem}_compact{report_path.suffix}")
+
+
+def _is_xlsx_report(path: Path) -> bool:
+    """按后缀判断报告输出是否为 XLSX 格式。"""
+    return path.suffix.lower() == ".xlsx"
 
 
 TRAILING_CHECK_CATEGORIES = {
@@ -658,16 +663,97 @@ def _report_row_as_dict(
     return row, methods
 
 
-def _save_report(
+def _category_descriptions(
+    issue_priority: Optional[Sequence[str]], accuracy_marks: Sequence[Any]
+) -> Dict[str, Tuple[str, str]]:
+    """把 issue_priority 展开为分类说明表使用的 (判断条件, 说明) 映射。
+
+    键为展开后的分类名（如 "frame" 或准确度标记分类值）：稳定异常组按
+    PRIMARY_RULES 的状态列构建判断条件并取规则标签为说明，准确度标记统一
+    使用「准确度标定分类非空」作为判断条件、标记标签为说明。
+    """
+    descriptions: Dict[str, Tuple[str, str]] = {}
+    for rule_id in normalize_check_issue_priority(issue_priority):
+        if rule_id == "accuracy":
+            for mark in accuracy_marks:
+                category = str(getattr(mark, "category", "") or "").strip()
+                if category:
+                    descriptions[category] = ("准确度标定分类非空", mark.label)
+            continue
+        rule = PRIMARY_RULES.get(rule_id)
+        if rule is None:
+            continue
+        columns, expected, category, label = rule
+        if expected == "__PRESENT__":
+            continue
+        descriptions[category] = (" 或 ".join(f"{column}={expected}" for column in columns), label)
+    return descriptions
+
+
+def _report_output_header(reports, acc_reports, include_axis: bool) -> List[str]:
+    """构建完整报告 CSV/XLSX 共用的输出列顺序（主要异常列提前）。"""
+    check_names: List[str] = []
+    for report in reports:
+        for result in report.results:
+            if result.name not in check_names:
+                check_names.append(result.name)
+    methods = _accuracy_methods(reports)
+    header = ["文件名", "芯片", "总异常(结果)"]
+    for name in check_names:
+        header.extend([f"{name}(结果)", f"{name}(说明)"])
+        if name in {"心率金标", "血氧金标"}:
+            header.append(f"{name}(异常时间)")
+    if acc_reports:
+        header.extend(
+            [
+                "ACC全零次数",
+                "ACC全零最长帧",
+                "ACC全零前10帧",
+                "ACC静止XYZ次数",
+                "ACC静止XYZ最长帧",
+                "ACC静止XYZ前10帧",
+                "ACC循环XYZ次数",
+                "ACC循环XYZ最长帧",
+                "ACC循环XYZ前10帧",
+            ]
+        )
+        if include_axis:
+            for kind in ("静止", "循环"):
+                for axis in "XYZ":
+                    header.extend(
+                        [f"ACC{kind}{axis}次数", f"ACC{kind}{axis}最长帧", f"ACC{kind}{axis}前10帧"]
+                    )
+    header.extend(["场景分类", "姓名", "手别", "主要异常项"])
+    header.extend(_accuracy_header("Online", methods))
+    header.extend(_accuracy_header("Comp", methods))
+    header.extend(["准确度标定分类", "准确度标定说明", "文件相对路径"])
+    leading_columns = [
+        "文件名",
+        "芯片",
+        "总异常(结果)",
+        "场景分类",
+        "姓名",
+        "手别",
+        "主要异常项",
+    ]
+    return leading_columns + [column for column in header if column not in leading_columns]
+
+
+def _report_rows_for_xlsx(
     reports,
     acc_reports,
-    output: Path,
     base: Path,
     include_axis: bool,
     items=(),
     issue_priority: Optional[Sequence[str]] = None,
-) -> None:
-    check_names = []
+) -> List[Dict[str, object]]:
+    """构建完整报告的行字典列表，与 CSV 写出共用同一语义。
+
+    返回的行以 ``_report_output_header`` 的输出列顺序为键，覆盖全部报告行与
+    未进入报告的跳过/失败条目行；状态、准确度、主要异常与跳过的取值和格式
+    与 CSV 完全一致，供 CSV 与 XLSX 复用。
+    """
+    check_names: List[str] = []
     for report in reports:
         for result in report.results:
             if result.name not in check_names:
@@ -712,85 +798,96 @@ def _save_report(
         "主要异常项",
     ]
     output_header = leading_columns + [column for column in header if column not in leading_columns]
-    output.parent.mkdir(parents=True, exist_ok=True)
+    rows: List[Dict[str, object]] = []
     report_paths = {report.file_path.resolve() for report in reports}
+    for report in reports:
+        row: List[object] = [report.file_path.name, report.chip, report.total_status]
+        result_map = {result.name: result for result in report.results}
+        for name in check_names:
+            result = result_map.get(name)
+            row.extend([result.status, result.summary] if result else ["-", "-"])
+            if name in {"心率金标", "血氧金标"}:
+                metric: Dict[str, Any] = (
+                    next(iter(result.channel_metrics.values()), {}) if result else {}
+                )
+                row.append(metric.get("abnormal_times", "") if result else "-")
+        if acc_reports:
+            acc = acc_reports.get(report.file_path)
+            if acc:
+                row.extend(_anomaly_fields(acc.zero))
+                row.extend(_anomaly_fields(acc.static_xyz))
+                row.extend(_anomaly_fields(acc.cyclic_xyz))
+                if include_axis:
+                    for name in (
+                        "static_x",
+                        "static_y",
+                        "static_z",
+                        "cyclic_x",
+                        "cyclic_y",
+                        "cyclic_z",
+                    ):
+                        row.extend(_anomaly_fields(getattr(acc, name)))
+            else:
+                row.extend(["-"] * (27 if include_axis else 9))
+        accuracy_result = getattr(report, "accuracy_result", None)
+        row.extend(
+            [
+                report.scene,
+                report.name,
+                report.hand,
+                primary_issue(
+                    {
+                        **{k: str(v) for k, v in zip(header, row)},
+                        "准确度标定分类": _accuracy_mark_values(report)[0],
+                        "准确度标定说明": _accuracy_mark_values(report)[1],
+                    },
+                    issue_priority,
+                ),
+            ]
+        )
+        row.extend(_accuracy_values(getattr(accuracy_result, "online", None), methods))
+        row.extend(_accuracy_values(getattr(accuracy_result, "comp", None), methods))
+        row.extend([*_accuracy_mark_values(report), _relative_path(report.file_path, base)])
+        row_by_name = dict(zip(header, row))
+        rows.append({column: row_by_name[column] for column in output_header})
+    for item in items:
+        item_path = Path(item.input)
+        try:
+            resolved_path = item_path.resolve()
+        except OSError:
+            resolved_path = item_path
+        if resolved_path in report_paths:
+            continue
+        reason = _item_issue(item)
+        status = getattr(item.status, "value", str(item.status))
+        rows.append(
+            {
+                "文件名": item_path.name,
+                "总异常(结果)": status,
+                "主要异常项": f"{'跳过' if status == 'SKIP' else '失败'}：{reason}",
+                "文件相对路径": _relative_path(item_path, base),
+            }
+        )
+    return rows
+
+
+def _save_report(
+    reports,
+    acc_reports,
+    output: Path,
+    base: Path,
+    include_axis: bool,
+    items=(),
+    issue_priority: Optional[Sequence[str]] = None,
+) -> None:
+    rows = _report_rows_for_xlsx(reports, acc_reports, base, include_axis, items, issue_priority)
+    output_header = _report_output_header(reports, acc_reports, include_axis)
+    output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow(output_header)
-        for report in reports:
-            row: List[object] = [report.file_path.name, report.chip, report.total_status]
-            result_map = {result.name: result for result in report.results}
-            for name in check_names:
-                result = result_map.get(name)
-                row.extend([result.status, result.summary] if result else ["-", "-"])
-                if name in {"心率金标", "血氧金标"}:
-                    metric: Dict[str, Any] = (
-                        next(iter(result.channel_metrics.values()), {}) if result else {}
-                    )
-                    row.append(metric.get("abnormal_times", "") if result else "-")
-            if acc_reports:
-                acc = acc_reports.get(report.file_path)
-                if acc:
-                    row.extend(_anomaly_fields(acc.zero))
-                    row.extend(_anomaly_fields(acc.static_xyz))
-                    row.extend(_anomaly_fields(acc.cyclic_xyz))
-                    if include_axis:
-                        for name in (
-                            "static_x",
-                            "static_y",
-                            "static_z",
-                            "cyclic_x",
-                            "cyclic_y",
-                            "cyclic_z",
-                        ):
-                            row.extend(_anomaly_fields(getattr(acc, name)))
-                else:
-                    row.extend(["-"] * (27 if include_axis else 9))
-            accuracy_result = getattr(report, "accuracy_result", None)
-            row.extend(
-                [
-                    report.scene,
-                    report.name,
-                    report.hand,
-                    primary_issue(
-                        {
-                            **{k: str(v) for k, v in zip(header, row)},
-                            "准确度标定分类": _accuracy_mark_values(report)[0],
-                            "准确度标定说明": _accuracy_mark_values(report)[1],
-                        },
-                        issue_priority,
-                    ),
-                ]
-            )
-            row.extend(_accuracy_values(getattr(accuracy_result, "online", None), methods))
-            row.extend(_accuracy_values(getattr(accuracy_result, "comp", None), methods))
-            row.extend([*_accuracy_mark_values(report), _relative_path(report.file_path, base)])
-            row_by_name = dict(zip(header, row))
-            writer.writerow([row_by_name[column] for column in output_header])
-        for item in items:
-            item_path = Path(item.input)
-            try:
-                resolved_path = item_path.resolve()
-            except OSError:
-                resolved_path = item_path
-            if resolved_path in report_paths:
-                continue
-            reason = _item_issue(item)
-            status = getattr(item.status, "value", str(item.status))
-            row_by_name = {
-                column: ""
-                for column in output_header
-                if column not in {"文件名", "总异常(结果)", "主要异常项", "文件相对路径"}
-            }
-            row_by_name.update(
-                {
-                    "文件名": item_path.name,
-                    "总异常(结果)": status,
-                    "主要异常项": f"{'跳过' if status == 'SKIP' else '失败'}：{reason}",
-                    "文件相对路径": _relative_path(item_path, base),
-                }
-            )
-            writer.writerow([row_by_name.get(column, "") for column in output_header])
+        for row in rows:
+            writer.writerow([row.get(column, "") for column in output_header])
 
 
 COMPACT_HEADER = [
@@ -839,87 +936,37 @@ def _format_compact_percent(value) -> str:
         return str(value)
 
 
-def _save_compact_report(reports, output: Path, base: Path) -> None:
-    """保存仅包含 WARNING/FAIL 检查项的通道长表。"""
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COMPACT_HEADER)
-        writer.writeheader()
-        for report in reports:
-            agc_metrics = {}
-            for result in report.results:
-                if result.name == "AGC调光":
-                    agc_metrics = result.channel_metrics
-                    break
-            for result in report.results:
-                if result.status not in {"WARNING", "FAIL"}:
-                    continue
-                metrics = result.channel_metrics or {"-": {}}
-                for channel, metric in metrics.items():
-                    agc_count = metric.get("change_count", "")
-                    agc_total = metric.get("total_count", "")
-                    agc_ratio = metric.get("change_ratio", "")
-                    if not agc_count and channel != "-":
-                        suffix = channel.lower().replace("rawdata", "").replace("ch", "")
-                        for agc_name, agc_metric in agc_metrics.items():
-                            agc_suffix = agc_name.lower().replace("agc_info_", "").replace("ch", "")
-                            if agc_suffix == suffix:
-                                agc_count = agc_metric.get("change_count", "")
-                                agc_total = agc_metric.get("total_count", "")
-                                agc_ratio = agc_metric.get("change_ratio", "")
-                                break
-                    writer.writerow(
-                        {
-                            "文件名": report.file_path.name,
-                            "场景分类": report.scene,
-                            "姓名": report.name,
-                            "手别": report.hand,
-                            "文件相对路径": _relative_path(report.file_path, base),
-                            "芯片": report.chip,
-                            "检查项": result.name,
-                            "状态": result.status,
-                            "通道": channel,
-                            "异常数": metric.get("abnormal_count", ""),
-                            "总数": metric.get("total_count", ""),
-                            "异常占比": _format_compact_percent(
-                                metric.get("abnormal_ratio", result.abnormal_ratio)
-                            ),
-                            "偏低占比": _format_compact_percent(metric.get("low_ratio", "")),
-                            "偏高占比": _format_compact_percent(metric.get("high_ratio", "")),
-                            "近0占比": _format_compact_percent(metric.get("near_zero_ratio", "")),
-                            "近满量程占比": _format_compact_percent(
-                                metric.get("near_full_ratio", "")
-                            ),
-                            "AGC变化次数": agc_count,
-                            "AGC有效对数": agc_total,
-                            "AGC变化占比": _format_compact_percent(agc_ratio),
-                            "金标范围异常数": metric.get("range_abnormal_count", ""),
-                            "金标非零占比": _format_compact_percent(
-                                metric.get("nonzero_ratio", "")
-                            ),
-                            "金标阶跃次数": metric.get("step_count", ""),
-                            "金标阶跃阈值": metric.get("step_threshold", ""),
-                            "金标最大阶跃变化": metric.get("max_step_change", ""),
-                            "金标最大阶跃时间": metric.get("max_step_time", ""),
-                            "金标最长静止帧": metric.get("longest_static_frames", ""),
-                            "金标静止帧阈值": metric.get("static_frame_threshold", ""),
-                            "金标异常时间": metric.get("abnormal_times", ""),
-                            "说明": "",
-                            "比较对象": "",
-                            "准确度指标": "",
-                            "准确度阈值": "",
-                        }
-                    )
-            accuracy = getattr(report, "accuracy_result", None)
-            mark = getattr(accuracy, "matched_mark", None) if accuracy else None
-            if mark:
-                from health_tools.core.check_accuracy import accuracy_mark_value
+def _compact_rows_for_xlsx(reports, base: Path) -> List[Dict[str, object]]:
+    """构建精简报告的行字典列表，与 CSV 写出共用同一语义（键为 COMPACT_HEADER）。
 
-                accuracy_result = cast(CheckAccuracyResult, accuracy)
-                source, metric = mark.left.split(".", 1)
-                values = getattr(accuracy_result, source, None) or {}
-                metric_value = accuracy_mark_value(accuracy_result, mark)
-                writer.writerow(
+    仅包含 WARNING/FAIL 检查项的通道长表，并追加准确度标定命中行；值格式
+    （如 ``_format_compact_percent``）与 CSV 完全一致。
+    """
+    rows: List[Dict[str, object]] = []
+    for report in reports:
+        agc_metrics = {}
+        for result in report.results:
+            if result.name == "AGC调光":
+                agc_metrics = result.channel_metrics
+                break
+        for result in report.results:
+            if result.status not in {"WARNING", "FAIL"}:
+                continue
+            metrics = result.channel_metrics or {"-": {}}
+            for channel, metric in metrics.items():
+                agc_count = metric.get("change_count", "")
+                agc_total = metric.get("total_count", "")
+                agc_ratio = metric.get("change_ratio", "")
+                if not agc_count and channel != "-":
+                    suffix = channel.lower().replace("rawdata", "").replace("ch", "")
+                    for agc_name, agc_metric in agc_metrics.items():
+                        agc_suffix = agc_name.lower().replace("agc_info_", "").replace("ch", "")
+                        if agc_suffix == suffix:
+                            agc_count = agc_metric.get("change_count", "")
+                            agc_total = agc_metric.get("total_count", "")
+                            agc_ratio = agc_metric.get("change_ratio", "")
+                            break
+                rows.append(
                     {
                         "文件名": report.file_path.name,
                         "场景分类": report.scene,
@@ -927,18 +974,77 @@ def _save_compact_report(reports, output: Path, base: Path) -> None:
                         "手别": report.hand,
                         "文件相对路径": _relative_path(report.file_path, base),
                         "芯片": report.chip,
-                        "检查项": "准确度标定",
-                        "状态": "WARNING",
-                        "通道": source,
-                        "异常数": metric_value,
-                        "总数": (values.get("samples", "") if values else ""),
-                        "异常占比": _format_compact_percent(metric_value),
-                        "说明": mark.label,
-                        "比较对象": ("Online vs Comp" if mark.right else "Ref"),
-                        "准确度指标": format_metric_name(metric),
-                        "准确度阈值": mark.threshold,
+                        "检查项": result.name,
+                        "状态": result.status,
+                        "通道": channel,
+                        "异常数": metric.get("abnormal_count", ""),
+                        "总数": metric.get("total_count", ""),
+                        "异常占比": _format_compact_percent(
+                            metric.get("abnormal_ratio", result.abnormal_ratio)
+                        ),
+                        "偏低占比": _format_compact_percent(metric.get("low_ratio", "")),
+                        "偏高占比": _format_compact_percent(metric.get("high_ratio", "")),
+                        "近0占比": _format_compact_percent(metric.get("near_zero_ratio", "")),
+                        "近满量程占比": _format_compact_percent(metric.get("near_full_ratio", "")),
+                        "AGC变化次数": agc_count,
+                        "AGC有效对数": agc_total,
+                        "AGC变化占比": _format_compact_percent(agc_ratio),
+                        "金标范围异常数": metric.get("range_abnormal_count", ""),
+                        "金标非零占比": _format_compact_percent(metric.get("nonzero_ratio", "")),
+                        "金标阶跃次数": metric.get("step_count", ""),
+                        "金标阶跃阈值": metric.get("step_threshold", ""),
+                        "金标最大阶跃变化": metric.get("max_step_change", ""),
+                        "金标最大阶跃时间": metric.get("max_step_time", ""),
+                        "金标最长静止帧": metric.get("longest_static_frames", ""),
+                        "金标静止帧阈值": metric.get("static_frame_threshold", ""),
+                        "金标异常时间": metric.get("abnormal_times", ""),
+                        "说明": "",
+                        "比较对象": "",
+                        "准确度指标": "",
+                        "准确度阈值": "",
                     }
                 )
+        accuracy = getattr(report, "accuracy_result", None)
+        mark = getattr(accuracy, "matched_mark", None) if accuracy else None
+        if mark:
+            from health_tools.core.check_accuracy import accuracy_mark_value
+
+            accuracy_result = cast(CheckAccuracyResult, accuracy)
+            source, metric = mark.left.split(".", 1)
+            values = getattr(accuracy_result, source, None) or {}
+            metric_value = accuracy_mark_value(accuracy_result, mark)
+            rows.append(
+                {
+                    "文件名": report.file_path.name,
+                    "场景分类": report.scene,
+                    "姓名": report.name,
+                    "手别": report.hand,
+                    "文件相对路径": _relative_path(report.file_path, base),
+                    "芯片": report.chip,
+                    "检查项": "准确度标定",
+                    "状态": "WARNING",
+                    "通道": source,
+                    "异常数": metric_value,
+                    "总数": (values.get("samples", "") if values else ""),
+                    "异常占比": _format_compact_percent(metric_value),
+                    "说明": mark.label,
+                    "比较对象": ("Online vs Comp" if mark.right else "Ref"),
+                    "准确度指标": format_metric_name(metric),
+                    "准确度阈值": mark.threshold,
+                }
+            )
+    return rows
+
+
+def _save_compact_report(reports, output: Path, base: Path) -> None:
+    """保存仅包含 WARNING/FAIL 检查项的通道长表。"""
+    rows = _compact_rows_for_xlsx(reports, base)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.DictWriter(handle, fieldnames=COMPACT_HEADER)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
 def _write_sort_list(path: Path, rows: List[List[str]]) -> None:
@@ -1474,18 +1580,38 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     report_path = request.output_path or (
         target.parent / "check_report.csv" if target.is_file() else target / "check_report.csv"
     )
-    _save_report(
-        reports,
-        acc_reports,
-        report_path,
-        base,
-        request.acc_axis,
-        items,
-        request.issue_priority,
-    )
-    compact_report_path = _compact_report_path(report_path)
-    _save_compact_report(reports, compact_report_path, base)
-    artifacts = [report_path, compact_report_path]
+    if _is_xlsx_report(report_path):
+        from health_tools.utils.check_xlsx import write_check_workbook
+
+        rows = _report_rows_for_xlsx(
+            reports, acc_reports, base, request.acc_axis, items, request.issue_priority
+        )
+        compact_rows = _compact_rows_for_xlsx(reports, base)
+        write_check_workbook(
+            report_path,
+            rows,
+            compact_rows,
+            issue_priority=request.issue_priority,
+            accuracy_categories=tuple(mark.category for mark in request.accuracy_marks),
+            category_descriptions=_category_descriptions(
+                request.issue_priority, request.accuracy_marks
+            ),
+        )
+        compact_report_path = None
+        artifacts = [report_path]
+    else:
+        _save_report(
+            reports,
+            acc_reports,
+            report_path,
+            base,
+            request.acc_axis,
+            items,
+            request.issue_priority,
+        )
+        compact_report_path = _compact_report_path(report_path)
+        _save_compact_report(reports, compact_report_path, base)
+        artifacts = [report_path, compact_report_path]
     for path, frame in ipd_details.items():
         detail = report_path.parent / f"ipd_detail_{path.stem}.csv"
         frame.to_csv(detail, index=False, encoding="utf-8-sig")

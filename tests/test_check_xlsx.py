@@ -1,9 +1,14 @@
 """check XLSX 报告分类聚合与工作簿写出的单元测试。"""
 
+import csv
 from collections import Counter
 
+import pytest
 from openpyxl import load_workbook
 
+from health_tools.api.check_operation import run_check
+from health_tools.api.models import CheckRequest
+from health_tools.models.rules import AccuracyMarkRule
 from health_tools.utils.check_xlsx import (
     _count_field,
     _format_distribution,
@@ -564,3 +569,86 @@ def test_write_check_workbook_multi_category_summary_denominators(tmp_path):
     assert summary["G3"].value == "bob: 1 (100.00%)"
     # 每行只属于一个分类：文件数之和等于总行数
     assert summary["C2"].value + summary["C3"].value == len(rows)
+
+
+def write_check_fixture(tmp_path, columns, rows):
+    """按 gh3220 CSV 布局写出 fixture：info 行 1、表头行 2、数据自第 3 行起。"""
+    path = tmp_path / "check_fixture.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Version: GH3220"])
+        writer.writerow(columns)
+        writer.writerows(rows)
+    return path
+
+
+@pytest.fixture
+def fixture_csv(tmp_path):
+    """gh3220 最小可用检查数据（info 行 + 表头 + 两行数据）。"""
+    return write_check_fixture(
+        tmp_path,
+        columns=["TimeStamp", "FRAME_ID", "ACCX", "ACCY", "ACCZ", "CH0", "CH1"],
+        rows=[
+            [0, 0, 100, 100, 100, 1000, 1000],
+            [40, 1, 200, 200, 200, 2000, 2000],
+        ],
+    )
+
+
+def test_xlsx_output_does_not_call_csv_writers(monkeypatch, tmp_path, fixture_csv):
+    calls = {}
+    monkeypatch.setattr(
+        "health_tools.utils.check_xlsx.write_check_workbook",
+        lambda output, rows, compact_rows, **kwargs: calls.update(output=output),
+    )
+    monkeypatch.setattr(
+        "health_tools.api.check_operation._save_report",
+        lambda *args, **kwargs: pytest.fail("CSV report writer called"),
+    )
+    monkeypatch.setattr(
+        "health_tools.api.check_operation._save_compact_report",
+        lambda *args, **kwargs: pytest.fail("CSV compact writer called"),
+    )
+    request = CheckRequest(
+        input_path=fixture_csv,
+        chip_name="gh3220",
+        output_path=tmp_path / "check_report.xlsx",
+    )
+    run_check(request)
+    assert calls["output"] == tmp_path / "check_report.xlsx"
+
+
+def test_xlsx_contains_accuracy_sheet_and_final_compact_sheet(tmp_path):
+    output = tmp_path / "accuracy.xlsx"
+    mark = AccuracyMarkRule(
+        id="online_low",
+        left="online.within_5",
+        operator="lt",
+        threshold=80.0,
+        category="accuracy_online_low",
+        label="Online准确度低",
+    )
+    accuracy_fixture_csv = write_check_fixture(
+        tmp_path,
+        columns=["TimeStamp", "FRAME_ID", "CH0", "REF_RESULT0", "ALGO_RESULT0"],
+        rows=[
+            [0, 0, 12000000, 80, 50],
+            [40, 1, 12000000, 80, 50],
+            [80, 2, 12000000, 80, 50],
+        ],
+    )
+    request = CheckRequest(
+        input_path=accuracy_fixture_csv,
+        chip_name="gh3220",
+        output_path=output,
+        accuracy_enabled=True,
+        accuracy_ref_column="REF_RESULT0",
+        accuracy_online_column="ALGO_RESULT0",
+        accuracy_marks=(mark,),
+    )
+    run_check(request)
+    book = load_workbook(output, read_only=True)
+    assert "accuracy_online_low" in book.sheetnames
+    assert book.sheetnames[-1] == "精简总表"
+    assert not output.with_suffix(".csv").exists()
+    assert not output.with_name("accuracy_compact.csv").exists()

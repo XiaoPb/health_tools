@@ -94,7 +94,7 @@ if TYPE_CHECKING:
     "output_path",
     type=click.Path(),
     default=None,
-    help="检查报告CSV输出路径 (默认: <path>/check_report.csv)",
+    help="检查报告输出路径，支持 .csv 或 .xlsx (默认: <path>/check_report.csv)",
 )
 @click.option("--sort", "sort_report", is_flag=True, help="读取检查报告并分拣正常/异常文件")
 @click.option(
@@ -511,126 +511,6 @@ def _save_report_csv(
     _save_report(
         reports, acc_reports, output_path, base_dir or output_path.parent, include_acc_axis
     )
-    return
-
-    """将全部检查结果保存到统一CSV文件"""
-    header = ["文件名", "芯片", "总异常(结果)"]
-
-    check_names = []
-    for report in reports:
-        for result in report.results:
-            if result.name not in check_names:
-                check_names.append(result.name)
-
-    for name in check_names:
-        header.append(f"{name}(结果)")
-        header.append(f"{name}(说明)")
-
-    has_acc = bool(acc_reports)
-    if has_acc:
-        header.extend(
-            [
-                "ACC全零次数",
-                "ACC全零最长帧",
-                "ACC全零前10帧",
-                "ACC静止XYZ次数",
-                "ACC静止XYZ最长帧",
-                "ACC静止XYZ前10帧",
-                "ACC循环XYZ次数",
-                "ACC循环XYZ最长帧",
-                "ACC循环XYZ前10帧",
-            ]
-        )
-        if include_acc_axis:
-            header.extend(
-                [
-                    "ACC静止X次数",
-                    "ACC静止X最长帧",
-                    "ACC静止X前10帧",
-                    "ACC静止Y次数",
-                    "ACC静止Y最长帧",
-                    "ACC静止Y前10帧",
-                    "ACC静止Z次数",
-                    "ACC静止Z最长帧",
-                    "ACC静止Z前10帧",
-                    "ACC循环X次数",
-                    "ACC循环X最长帧",
-                    "ACC循环X前10帧",
-                    "ACC循环Y次数",
-                    "ACC循环Y最长帧",
-                    "ACC循环Y前10帧",
-                    "ACC循环Z次数",
-                    "ACC循环Z最长帧",
-                    "ACC循环Z前10帧",
-                ]
-            )
-
-    header.extend(["场景分类", "姓名", "手别", "文件相对路径"])
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-
-        for report in reports:
-            row = [report.file_path.name, report.chip, report.total_status]
-
-            result_map = {r.name: r for r in report.results}
-            for name in check_names:
-                if name in result_map:
-                    r = result_map[name]
-                    row.append(r.status)
-                    row.append(r.summary)
-                else:
-                    row.append("-")
-                    row.append("-")
-
-            if has_acc:
-                acc = acc_reports.get(report.file_path)
-                if acc:
-
-                    def _a(a):
-                        """输出单个AccChannelAnomaly的三列: 次数,最长帧,前10帧"""
-                        if a.count > 0:
-                            frames_str = ",".join(str(f) for f in a.frames[:10])
-                            return [a.count, a.max_duration, frames_str]
-                        return [0, "-", "-"]
-
-                    row.extend(_a(acc.zero))
-                    row.extend(_a(acc.static_xyz))
-                    row.extend(_a(acc.cyclic_xyz))
-                    if include_acc_axis:
-                        row.extend(_a(acc.static_x))
-                        row.extend(_a(acc.static_y))
-                        row.extend(_a(acc.static_z))
-                        row.extend(_a(acc.cyclic_x))
-                        row.extend(_a(acc.cyclic_y))
-                        row.extend(_a(acc.cyclic_z))
-                else:
-                    acc_column_count = 27 if include_acc_axis else 9
-                    row.extend(["-"] * acc_column_count)
-
-            row.extend(
-                [
-                    getattr(report, "scene", "default"),
-                    getattr(report, "name", "default"),
-                    getattr(report, "hand", "default"),
-                    _relative_report_path(report.file_path, base_dir),
-                ]
-            )
-            writer.writerow(row)
-
-    console.print(f"[green]检查报告已保存: {output_path}[/green]")
-
-
-def _relative_report_path(file_path: Path, base_dir: Optional[Path]) -> str:
-    """生成写入报告的相对文件路径。"""
-    if base_dir is None:
-        return file_path.name
-    try:
-        return file_path.resolve().relative_to(base_dir.resolve()).as_posix()
-    except ValueError:
-        return file_path.name
 
 
 def _sort_report_files(report_path: Path, output_dir: Path) -> Dict[str, int]:
