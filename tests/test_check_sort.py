@@ -619,3 +619,38 @@ def test_sort_rejects_xlsx_report_with_actionable_message(tmp_path):
     report.write_bytes(b"not a csv")
     with pytest.raises(RequestValidationError, match="分拣需要 CSV 检查报告"):
         _sort_report(report, tmp_path / "sorted")
+
+
+def test_sort_accepts_uppercase_csv_suffix(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "ok.csv").write_text("ok", encoding="utf-8")
+    (src / "sub").mkdir()
+    (src / "sub" / "bad.csv").write_text("bad", encoding="utf-8")
+    report = src / "check_report.CSV"
+    _write_report(
+        report,
+        [
+            ["文件名", "芯片", "总异常(结果)", "文件相对路径"],
+            ["ok.csv", "gh3220", "PASS", "ok.csv"],
+            ["bad.csv", "gh3220", "FAIL", "sub/bad.csv"],
+        ],
+    )
+
+    output = tmp_path / "sorted"
+    stats = _sort_report(report, output)
+
+    assert stats == {"normal": 1, "total_fail": 1, "skipped": 0}
+    assert (output / "normal" / "ok.csv").read_text(encoding="utf-8") == "ok"
+    assert (output / "abnormal" / "total_fail" / "sub" / "bad.csv").read_text(
+        encoding="utf-8"
+    ) == "bad"
+
+
+def test_sort_rejects_xls_report_with_actionable_message(tmp_path):
+    from health_tools.api.errors import RequestValidationError
+
+    report = tmp_path / "check_report.xls"
+    report.write_bytes(b"not a csv")
+    with pytest.raises(RequestValidationError, match="分拣需要 CSV 检查报告"):
+        _sort_report(report, tmp_path / "sorted")
