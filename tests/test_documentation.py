@@ -64,6 +64,7 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     assert "`-r/--rule`" in command_doc
     assert "`-r/--rule`" in rules_doc
     assert "`check -r/--rule`" in skill_commands
+    assert "精简总表为 WARNING/FAIL" in skill_commands
     assert "check -i data/ -r" in skill_workflows
 
     for keyword in (
@@ -79,7 +80,14 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     ):
         assert keyword in command_doc or keyword in rules_doc
 
-    for keyword in (".xlsx", "总表", "分类说明", "精简总表", "不再生成 CSV", "分拣需要 CSV 检查报告"):
+    for keyword in (
+        ".xlsx",
+        "总表",
+        "分类说明",
+        "精简总表",
+        "不再生成 CSV",
+        "分拣需要 CSV 检查报告",
+    ):
         assert keyword in command_doc or keyword in rules_doc
 
     assert "validate custom_rules/check/custom.yaml" in skill_workflows

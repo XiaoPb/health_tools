@@ -56,4 +56,4 @@ CSV 与跑库目录分离时直接生成报告；`--resume` 复用 `analysis_sta
   （仅实际命中的分类）、最后一张 `精简总表`。
 - 检查总表行数与输入文件数一致（每文件一行）；精简总表为 WARNING/FAIL
   通道长表，行数按命中检查项与通道变化（可与总表行数不同）。
-- 确认输出同目录没有 `.csv` / `_compact.csv` 伴随文件。
+- 确认输出同目录没有 `check_report.csv` / `check_report_compact.csv` 报告文件。
