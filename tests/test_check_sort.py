@@ -3,6 +3,7 @@
 import csv
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from health_tools.api.check_operation import (
@@ -609,3 +610,12 @@ def test_check_help_center_ratio_default_is_five_percent():
     assert "ACC异常帧允许比例 (%, 默认1)" in result.output
     assert "--acc-axis" in result.output
     assert "ACC单轴异常也计入结果" in result.output
+
+
+def test_sort_rejects_xlsx_report_with_actionable_message(tmp_path):
+    from health_tools.api.errors import RequestValidationError
+
+    report = tmp_path / "check_report.xlsx"
+    report.write_bytes(b"not a csv")
+    with pytest.raises(RequestValidationError, match="分拣需要 CSV 检查报告"):
+        _sort_report(report, tmp_path / "sorted")

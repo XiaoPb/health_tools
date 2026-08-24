@@ -942,6 +942,10 @@ def _write_sort_list(path: Path, rows: List[List[str]]) -> None:
 def _sort_report(
     report: Path, output: Path, issue_priority: Optional[Sequence[str]] = None
 ) -> Dict[str, int]:
+    if report.suffix.lower() != ".csv":
+        raise RequestValidationError(
+            "分拣需要 CSV 检查报告；请传入 .csv 报告，XLSX 暂不支持分拣"
+        )
     with report.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.DictReader(handle))
     if not rows:
