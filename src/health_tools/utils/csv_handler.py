@@ -4,14 +4,29 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import pandas as pd
 
 from health_tools.models.rules import ChipRule
+from health_tools.utils.columns import expand_columns
 from health_tools.utils.file import detect_file_encoding
 
 MAX_CHUNK_SIZE = 50000
 
 _CSV_INJECTION_PATTERN = re.compile(r"^[=+\-@\t\r]")
+
+
+def _downcast_integer_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """在不改变数值范围的前提下压缩整型列，降低大 CSV 的常驻内存。"""
+    int32_min, int32_max = np.iinfo(np.int32).min, np.iinfo(np.int32).max
+    dtypes = {}
+    for column in df.select_dtypes(include=["integer"]).columns:
+        series = df[column]
+        if series.empty:
+            continue
+        if series.min() >= int32_min and series.max() <= int32_max:
+            dtypes[column] = np.int32
+    return df.astype(dtypes, copy=False) if dtypes else df
 
 
 def _sanitize_csv_cell(value: str) -> str:
@@ -67,39 +82,33 @@ class CSVHandler:
 
         info = self._read_info_line(file_path, info_row, encoding)
 
+        read_kwargs = {
+            "filepath_or_buffer": file_path,
+            "index_col": False,
+            "delimiter": delimiter,
+            "encoding": encoding,
+        }
+        if self.chip_rule and self.chip_rule.columns:
+            read_kwargs["dtype"] = {
+                column: np.int32 for column in expand_columns(self.chip_rule.columns)
+            }
         if header_row > 0 and header_row < data_start_row:
-            skiprows = self._build_skiprows(header_row, data_start_row)
-            chunks = pd.read_csv(
-                file_path,
-                header=0,
-                index_col=False,
-                skiprows=skiprows if skiprows else None,
-                delimiter=delimiter,
-                encoding=encoding,
-                chunksize=MAX_CHUNK_SIZE,
+            read_kwargs.update(
+                {
+                    "header": 0,
+                    "skiprows": self._build_skiprows(header_row, data_start_row) or None,
+                }
             )
-            df = pd.concat(chunks, ignore_index=True)
         elif header_row > 0:
-            chunks = pd.read_csv(
-                file_path,
-                header=header_row - 1,
-                index_col=False,
-                delimiter=delimiter,
-                encoding=encoding,
-                chunksize=MAX_CHUNK_SIZE,
-            )
-            df = pd.concat(chunks, ignore_index=True)
+            read_kwargs["header"] = header_row - 1
         else:
-            chunks = pd.read_csv(
-                file_path,
-                header=None,
-                index_col=False,
-                skiprows=data_start_row - 1 if data_start_row > 1 else None,
-                delimiter=delimiter,
-                encoding=encoding,
-                chunksize=MAX_CHUNK_SIZE,
+            read_kwargs.update(
+                {
+                    "header": None,
+                    "skiprows": data_start_row - 1 if data_start_row > 1 else None,
+                }
             )
-            df = pd.concat(chunks, ignore_index=True)
+        df = _downcast_integer_columns(pd.read_csv(**read_kwargs))
 
         return info, df
 
