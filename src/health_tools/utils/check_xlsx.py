@@ -31,11 +31,13 @@ _ROW_RULES: Dict[str, Tuple[Tuple[str, ...], str, str]] = {
 # 供 expand_issue_category_order 按优先级展开分类顺序使用。
 _ISSUE_CATEGORY: Dict[str, str] = {rule_id: rule[2] for rule_id, rule in _ROW_RULES.items()}
 
-# 目录分类到稳定异常组标识的反向映射，供分类说明表的 优先级 列使用；准确度
-# 标记分类不在其中，写表时统一回退为 "accuracy"。
-_ISSUE_ID_BY_CATEGORY: Dict[str, str] = {
-    category: rule_id for rule_id, category in _ISSUE_CATEGORY.items()
-}
+# 目录分类到稳定异常组标识的反向映射，供分类说明表的 优先级 列使用；多个
+# rule_id 映射到同一 category 时取最先出现者（first-wins，防御性；当前 8 个
+# category 互不相同）。准确度标记分类不在其中，写表时统一回退为 "accuracy"。
+_ISSUE_ID_BY_CATEGORY: Dict[str, str] = {}
+for _rule_id, _category in _ISSUE_CATEGORY.items():
+    if _category not in _ISSUE_ID_BY_CATEGORY:
+        _ISSUE_ID_BY_CATEGORY[_category] = _rule_id
 
 # Excel 工作表名非法字符（openpyxl 与 Excel 均不允许）。
 _SHEET_ILLEGAL_CHARS = frozenset("[]:*?/\\")
@@ -72,20 +74,17 @@ class CategorySummary(TypedDict):
 
 # 与 check_operation.issue_category_order 不同，本函数只返回 rows 中实际命中的
 # category，且不附加 agc/ipd/total_fail/normal 兜底类别。
-def expand_issue_category_order(
+def _ordered_present_categories(
+    present: Set[str],
     issue_priority: Sequence[str],
-    rows: Sequence[Dict[str, str]],
-    accuracy_categories: Sequence[str] = (),
+    accuracy_categories: Sequence[str],
 ) -> Tuple[str, ...]:
-    """按 issue_priority 展开为实际出现在 rows 中的分类顺序。
+    """按 issue_priority 展开 present 中实际出现的分类顺序（公共排序逻辑）。
 
-    稳定异常组映射为对应目录分类；``accuracy`` 在外层位置展开为实际出现在
-    rows 中且按 ``accuracy_categories`` 声明顺序排列的准确度分类。未出现在
-    rows 中的分类不输出；未知标识被跳过，不产生任何 category。
+    稳定异常组映射为对应目录分类；``accuracy`` 在外层位置展开为按
+    ``accuracy_categories`` 声明顺序排列的准确度分类。不在 present 中的分类不
+    输出；未知标识被跳过，不产生任何 category。
     """
-    present = {
-        category for row in rows for category in (_row_category(row, issue_priority),) if category
-    }
     categories: List[str] = []
     for rule_id in issue_priority:
         if rule_id == "accuracy":
@@ -101,8 +100,25 @@ def expand_issue_category_order(
     return tuple(categories)
 
 
+def expand_issue_category_order(
+    issue_priority: Sequence[str],
+    rows: Sequence[Mapping[str, object]],
+    accuracy_categories: Sequence[str] = (),
+) -> Tuple[str, ...]:
+    """按 issue_priority 展开为实际出现在 rows 中的分类顺序。
+
+    稳定异常组映射为对应目录分类；``accuracy`` 在外层位置展开为实际出现在
+    rows 中且按 ``accuracy_categories`` 声明顺序排列的准确度分类。未出现在
+    rows 中的分类不输出；未知标识被跳过，不产生任何 category。
+    """
+    present = {
+        category for row in rows for category in (_row_category(row, issue_priority),) if category
+    }
+    return _ordered_present_categories(present, issue_priority, accuracy_categories)
+
+
 def build_category_summary(
-    rows: Sequence[Dict[str, str]],
+    rows: Sequence[Mapping[str, object]],
     category: str,
     condition: str,
     explanation: str,
@@ -131,7 +147,7 @@ def build_category_summary(
 
 
 def _row_category(
-    row: Dict[str, str],
+    row: Mapping[str, object],
     issue_priority: Sequence[str],
 ) -> str:
     """按状态列匹配行的目录分类；未命中返回空字符串。
@@ -168,7 +184,7 @@ def _format_distribution(counter: Counter, total: int) -> str:
     return ", ".join(items)
 
 
-def _count_field(rows: Sequence[Dict[str, str]], column: str) -> Counter:
+def _count_field(rows: Sequence[Mapping[str, object]], column: str) -> Counter:
     """按列统计字段出现次数，空值与纯空白值统一归一为 default。"""
     counter: Counter = Counter()
     for row in rows:
@@ -180,12 +196,17 @@ def _count_field(rows: Sequence[Dict[str, str]], column: str) -> Counter:
 def _safe_sheet_title(title: str, used_names: Set[str]) -> str:
     """把原始标题转换为合法的 Excel 工作表名。
 
-    替换非法字符 ``[ ] : * ? / \\`` 为 ``_``，去除首尾空白，截断到 31 字符；
-    结果为空时回退为 "sheet"。与已用名称冲突或命中保留名 "History" 时按创建
-    顺序追加稳定后缀 ``_2``、``_3``……（首个占用原名的除外），保证重复运行
-    结果一致。调用方负责把返回值加入 ``used_names``。
+    替换非法字符 ``[ ] : * ? / \\`` 与控制字符 (0x00-0x1F) 为 ``_``，去除首尾
+    空白与撇号（Excel 不允许以撇号开头或结尾），截断到 31 字符；结果为空时
+    回退为 "sheet"。与已用名称冲突或命中保留名 "History" 时按创建顺序追加稳定
+    后缀 ``_2``、``_3``……（首个占用原名的除外），保证重复运行结果一致。调用方
+    负责把返回值加入 ``used_names``。
     """
-    sanitized = "".join("_" if ch in _SHEET_ILLEGAL_CHARS else ch for ch in title).strip()
+    sanitized = (
+        "".join("_" if ch in _SHEET_ILLEGAL_CHARS or ord(ch) < 0x20 else ch for ch in title)
+        .strip()
+        .strip("'")
+    )
     base = sanitized[:_SHEET_TITLE_MAX_LENGTH] if sanitized else _SHEET_TITLE_FALLBACK
     candidate = base
     counter = 1
@@ -250,8 +271,8 @@ def _write_data_sheet(
 
 def write_check_workbook(
     output: Path,
-    rows: Sequence[Dict[str, str]],
-    compact_rows: Sequence[Dict[str, object]],
+    rows: Sequence[Mapping[str, object]],
+    compact_rows: Sequence[Mapping[str, object]],
     issue_priority: Sequence[str],
     accuracy_categories: Sequence[str] = (),
     category_descriptions: Optional[Mapping[str, Tuple[str, str]]] = None,
@@ -259,22 +280,32 @@ def write_check_workbook(
     """写出固定顺序的多工作表 check XLSX 报告。
 
     固定顺序：总表 → 分类说明 → （每个实际命中分类一张表，按
-    ``expand_issue_category_order`` 顺序）→ 精简总表。
+    ``expand_issue_category_order`` 顺序）→ 精简总表。输出目录不存在时自动创建。
 
     - 总表：全部行与全部列（首见顺序并集，缺键补空串），首行为列头。
     - 分类说明：每类一行统计，列为 ``_CATEGORY_SUMMARY_COLUMNS``。
     - 分类表：仅含 ``_row_category`` 命中该分类的行，列与总表一致。
     - 精简总表：原样写出 ``compact_rows`` 的列头与内容。
 
+    ``category_descriptions`` 的键是**展开后的分类名**（如 "frame"，或准确度标记
+    分类值如 "accuracy_online_low"），不是规则标识（如 "frame_fail"）；缺失的键
+    回退为 ("", "")。
+
     空输入仍会生成 总表/分类说明/精简总表，分类表只覆盖实际命中的分类。
     """
+    output.parent.mkdir(parents=True, exist_ok=True)
     category_descriptions = category_descriptions or {}
     total_columns = _column_union(rows)
-    categories = expand_issue_category_order(issue_priority, rows, accuracy_categories)
-    rows_by_category = {
-        category: [row for row in rows if _row_category(row, issue_priority) == category]
-        for category in categories
-    }
+    # 单趟分类：每行只计算一次 _row_category，写入其唯一所属分类桶；同趟收集
+    # 实际出现的分类集合，供分类顺序展开过滤使用（总体 O(rows × priority)）。
+    rows_by_category: Dict[str, List[Mapping[str, object]]] = {}
+    present: Set[str] = set()
+    for row in rows:
+        category = _row_category(row, issue_priority)
+        if category:
+            present.add(category)
+            rows_by_category.setdefault(category, []).append(row)
+    categories = _ordered_present_categories(present, issue_priority, accuracy_categories)
 
     wb = Workbook()
     wb.remove(wb.active)  # 移除默认空表，按固定顺序重建

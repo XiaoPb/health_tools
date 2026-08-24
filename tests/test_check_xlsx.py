@@ -254,6 +254,20 @@ def test_safe_sheet_title_appends_suffix_on_conflict_and_reserved_history():
     assert _safe_sheet_title("History", {"History_2"}) == "History_3"
 
 
+def test_safe_sheet_title_strips_control_chars_and_apostrophes():
+    assert _safe_sheet_title("a\x00b\x1f", set()) == "a_b_"
+    assert _safe_sheet_title("line\nbreak", set()) == "line_break"
+    assert _safe_sheet_title("'frame'", set()) == "frame"
+    assert _safe_sheet_title("  'frame'  ", set()) == "frame"
+    assert _safe_sheet_title("'", set()) == "sheet"
+
+
+def test_safe_sheet_title_truncated_base_with_suffix_stays_within_limit():
+    base = "x" * 31
+    assert _safe_sheet_title(base, {base}) == "x" * 29 + "_2"
+    assert len(_safe_sheet_title(base, {base})) == 31
+
+
 def test_write_check_workbook_applies_numeric_formats(tmp_path):
     rows = [
         {"文件名": "a.csv", "帧完整性(结果)": "FAIL", "场景分类": "rest", "姓名": "alice"},
@@ -376,3 +390,177 @@ def test_write_check_workbook_category_matching_fixed_names_gets_suffix(tmp_path
     )
     book = load_workbook(output)
     assert book.sheetnames == ["总表", "分类说明", "精简总表_2", "精简总表"]
+
+
+def test_write_check_workbook_heterogeneous_keys_column_union_first_seen(tmp_path):
+    rows = [
+        {"文件名": "a.csv", "帧完整性(结果)": "FAIL"},
+        {"数据范围(结果)": "FAIL", "姓名": "bob"},
+        {"帧完整性(结果)": "PASS"},
+    ]
+    output = tmp_path / "union.xlsx"
+    write_check_workbook(
+        output,
+        rows,
+        [],
+        issue_priority=("frame_fail", "range_fail"),
+        accuracy_categories=(),
+        category_descriptions={},
+    )
+    book = load_workbook(output)
+    ws = book["总表"]
+    assert [cell.value for cell in ws[1]] == ["文件名", "帧完整性(结果)", "数据范围(结果)", "姓名"]
+    # 缺键按列序补空串写出；openpyxl 把空串单元格写为空单元格，读回为 None
+    assert [cell.value for cell in ws[2]] == ["a.csv", "FAIL", None, None]
+    assert [cell.value for cell in ws[3]] == [None, None, "FAIL", "bob"]
+    assert [cell.value for cell in ws[4]] == [None, "PASS", None, None]
+
+
+def test_write_check_workbook_non_string_values_round_trip(tmp_path):
+    rows = [
+        {"文件名": "a.csv", "帧完整性(结果)": "FAIL", "数量": 3, "占比": 0.75, "备注": None},
+        {"文件名": "b.csv", "帧完整性(结果)": "FAIL", "数量": 1, "占比": 0.25, "备注": None},
+    ]
+    output = tmp_path / "values.xlsx"
+    write_check_workbook(
+        output,
+        rows,
+        [],
+        issue_priority=("frame_fail",),
+        accuracy_categories=(),
+        category_descriptions={"frame": ("帧完整性(结果)=FAIL", "帧不完整")},
+    )
+    book = load_workbook(output)
+    headers = [cell.value for cell in book["总表"][1]]
+    assert headers == ["文件名", "帧完整性(结果)", "数量", "占比", "备注"]
+    assert [cell.value for cell in book["总表"][2]] == ["a.csv", "FAIL", 3, 0.75, None]
+    assert [cell.value for cell in book["总表"][3]] == ["b.csv", "FAIL", 1, 0.25, None]
+    assert [cell.value for cell in book["frame"][2]] == ["a.csv", "FAIL", 3, 0.75, None]
+    assert [cell.value for cell in book["frame"][3]] == ["b.csv", "FAIL", 1, 0.25, None]
+
+
+def test_write_check_workbook_deterministic_output(tmp_path):
+    rows = [
+        {"文件名": "a.csv", "帧完整性(结果)": "FAIL", "场景分类": "rest", "姓名": "alice"},
+        {"文件名": "b.csv", "数据范围(结果)": "FAIL", "场景分类": "walk", "姓名": "bob"},
+    ]
+    compact_rows = [{"文件名": "a.csv", "检查项": "帧完整性", "状态": "FAIL"}]
+    out1 = tmp_path / "deterministic_1.xlsx"
+    out2 = tmp_path / "deterministic_2.xlsx"
+    write_check_workbook(
+        out1,
+        rows,
+        compact_rows,
+        issue_priority=("frame_fail", "range_fail"),
+        accuracy_categories=(),
+        category_descriptions={"frame": ("帧完整性(结果)=FAIL", "帧不完整")},
+    )
+    write_check_workbook(
+        out2,
+        rows,
+        compact_rows,
+        issue_priority=("frame_fail", "range_fail"),
+        accuracy_categories=(),
+        category_descriptions={"frame": ("帧完整性(结果)=FAIL", "帧不完整")},
+    )
+    book1 = load_workbook(out1)
+    book2 = load_workbook(out2)
+    assert book1.sheetnames == book2.sheetnames
+    for name in book1.sheetnames:
+        ws1, ws2 = book1[name], book2[name]
+        assert ws1.max_row == ws2.max_row
+        assert ws1.max_column == ws2.max_column
+        for row in ws1.iter_rows():
+            for cell in row:
+                assert cell.value == ws2[cell.coordinate].value
+
+
+def test_write_check_workbook_sanitized_title_collision_gets_stable_suffix(tmp_path):
+    rows = [
+        {"文件名": "a.csv", "准确度标定分类": "a/b"},
+        {"文件名": "b.csv", "准确度标定分类": "a_b"},
+    ]
+    output = tmp_path / "collision.xlsx"
+    write_check_workbook(
+        output,
+        rows,
+        [],
+        issue_priority=("accuracy",),
+        accuracy_categories=("a/b", "a_b"),
+        category_descriptions={},
+    )
+    book = load_workbook(output)
+    assert book.sheetnames == ["总表", "分类说明", "a_b", "a_b_2", "精简总表"]
+    for name, mark in (("a_b", "a/b"), ("a_b_2", "a_b")):
+        ws = book[name]
+        headers = [cell.value for cell in ws[1]]
+        column = headers.index("准确度标定分类") + 1
+        assert ws.cell(row=2, column=column).value == mark
+
+
+def test_write_check_workbook_auto_filter_ref_exact(tmp_path):
+    rows = [
+        {
+            "文件名": "a.csv",
+            "帧完整性(结果)": "FAIL",
+            "场景分类": "rest",
+            "姓名": "alice",
+            "总异常(结果)": "FAIL",
+        },
+        {
+            "文件名": "b.csv",
+            "帧完整性(结果)": "FAIL",
+            "场景分类": "walk",
+            "姓名": "bob",
+            "总异常(结果)": "FAIL",
+        },
+    ]
+    output = tmp_path / "filter.xlsx"
+    write_check_workbook(
+        output,
+        rows,
+        [],
+        issue_priority=("frame_fail",),
+        accuracy_categories=(),
+        category_descriptions={"frame": ("帧完整性(结果)=FAIL", "帧不完整")},
+    )
+    book = load_workbook(output)
+    ws = book["总表"]
+    assert ws.auto_filter.ref == f"A1:E{ws.max_row}"
+    assert ws.auto_filter.ref == "A1:E3"
+
+
+def test_write_check_workbook_multi_category_summary_denominators(tmp_path):
+    rows = [
+        {"文件名": "a.csv", "帧完整性(结果)": "FAIL", "场景分类": "rest", "姓名": "alice"},
+        {"文件名": "b.csv", "数据范围(结果)": "FAIL", "场景分类": "walk", "姓名": "bob"},
+        {"文件名": "c.csv", "帧完整性(结果)": "FAIL", "场景分类": "walk", "姓名": "carol"},
+    ]
+    output = tmp_path / "multi.xlsx"
+    write_check_workbook(
+        output,
+        rows,
+        [],
+        issue_priority=("frame_fail", "range_fail"),
+        accuracy_categories=(),
+        category_descriptions={
+            "frame": ("帧完整性(结果)=FAIL", "帧不完整"),
+            "range": ("数据范围(结果)=FAIL", "数据越界"),
+        },
+    )
+    book = load_workbook(output)
+    summary = book["分类说明"]
+    # frame 命中 a/c 两行：占比分母为全部行数 3，场景/人员占比分母为自身命中数 2
+    assert summary["B2"].value == "frame"
+    assert summary["C2"].value == 2
+    assert summary["D2"].value == 2 / 3
+    assert summary["F2"].value == "rest: 1 (50.00%), walk: 1 (50.00%)"
+    assert summary["G2"].value == "alice: 1 (50.00%), carol: 1 (50.00%)"
+    # range 命中 b 一行
+    assert summary["B3"].value == "range"
+    assert summary["C3"].value == 1
+    assert summary["D3"].value == 1 / 3
+    assert summary["F3"].value == "walk: 1 (100.00%)"
+    assert summary["G3"].value == "bob: 1 (100.00%)"
+    # 每行只属于一个分类：文件数之和等于总行数
+    assert summary["C2"].value + summary["C3"].value == len(rows)
