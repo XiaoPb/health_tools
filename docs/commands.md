@@ -66,3 +66,4 @@ ghealth_tool --help
 - 七类 YAML 规则及查找顺序见 [规则文件格式](rules.md)。其中 `check` 规则描述芯片、列语义、检查阈值和准确度策略；输入输出路径、分拣开关、报告路径、并行数和 verbose 仍由 CLI/API 提供。
 - 用户目录、离线算法版本和参数模板见 [config 命令](cmd_config.md)。
 - 模块职责和数据流见 [架构说明](architecture.md)。
+- 大型 CSV 的读取、裁剪、并行度和峰值 RSS 优化见 [大型 CSV 内存优化指南](memory_optimization.md)。
