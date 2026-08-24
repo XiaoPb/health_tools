@@ -530,7 +530,12 @@ def _accuracy_mark_values(report) -> Tuple[str, str]:
 
 
 def _report_row_as_dict(
-    report, check_names: List[str], acc_reports: dict, base: Path, include_axis: bool
+    report,
+    check_names: List[str],
+    acc_reports: dict,
+    base: Path,
+    include_axis: bool,
+    issue_priority: Optional[Sequence[str]] = None,
 ):
     result_map = {result.name: result for result in report.results}
     row: Dict[str, object] = {
@@ -588,7 +593,8 @@ def _report_row_as_dict(
             **{k: str(v) for k, v in row.items()},
             "准确度标定分类": _accuracy_mark_values(report)[0],
             "准确度标定说明": _accuracy_mark_values(report)[1],
-        }
+        },
+        issue_priority,
     )
     accuracy_result = getattr(report, "accuracy_result", None)
     row.update(
@@ -621,6 +627,7 @@ def _save_report(
     base: Path,
     include_axis: bool,
     items=(),
+    issue_priority: Optional[Sequence[str]] = None,
 ) -> None:
     check_names = []
     for report in reports:
@@ -712,7 +719,8 @@ def _save_report(
                             **{k: str(v) for k, v in zip(header, row)},
                             "准确度标定分类": _accuracy_mark_values(report)[0],
                             "准确度标定说明": _accuracy_mark_values(report)[1],
-                        }
+                        },
+                        issue_priority,
                     ),
                 ]
             )
@@ -903,7 +911,9 @@ def _write_sort_list(path: Path, rows: List[List[str]]) -> None:
         writer.writerows(rows)
 
 
-def _sort_report(report: Path, output: Path) -> Dict[str, int]:
+def _sort_report(
+    report: Path, output: Path, issue_priority: Optional[Sequence[str]] = None
+) -> Dict[str, int]:
     with report.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.DictReader(handle))
     if not rows:
@@ -918,7 +928,7 @@ def _sort_report(report: Path, output: Path) -> Dict[str, int]:
         relative_text = row.get("文件相对路径", "").strip()
         file_name = row.get("文件名", "").strip()
         scene = row.get("场景分类", "default") or "default"
-        category = _sort_category(row)
+        category = _sort_category(row, issue_priority)
         bucket = "normal" if category == "normal" else "abnormal"
         if not relative_text:
             records[bucket].append([file_name, "", "", "跳过", "文件相对路径为空", category, scene])
@@ -992,7 +1002,7 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
         _require_path(sort_report_path, "检查报告")
         ctx.check_cancelled("sort")
         ctx.emit(ProgressEvent("check", "sort", 0, 1, "分拣文件", str(sort_report_path)))
-        counts = _sort_report(sort_report_path, request.sort_output)
+        counts = _sort_report(sort_report_path, request.sort_output, request.issue_priority)
         sort_artifacts = (
             request.sort_output / "normal_files.csv",
             request.sort_output / "abnormal_files.csv",
@@ -1426,7 +1436,15 @@ def run_check(request: CheckRequest, *, context: Optional[ExecutionContext] = No
     report_path = request.output_path or (
         target.parent / "check_report.csv" if target.is_file() else target / "check_report.csv"
     )
-    _save_report(reports, acc_reports, report_path, base, request.acc_axis, items)
+    _save_report(
+        reports,
+        acc_reports,
+        report_path,
+        base,
+        request.acc_axis,
+        items,
+        request.issue_priority,
+    )
     compact_report_path = _compact_report_path(report_path)
     _save_compact_report(reports, compact_report_path, base)
     artifacts = [report_path, compact_report_path]

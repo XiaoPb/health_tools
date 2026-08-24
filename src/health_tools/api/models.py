@@ -6,7 +6,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Tuple
 
-from health_tools.models.rules import AccuracyMarkRule
+from health_tools.models.rules import AccuracyMarkRule, normalize_check_issue_priority
 
 
 def _freeze(value: Any) -> Any:
@@ -559,3 +559,11 @@ class CheckRequest:
     accuracy_inclusive: bool = False
     accuracy_marks: Tuple[AccuracyMarkRule, ...] = ()
     reference_detail_output: Optional[Path] = None
+    issue_priority: Tuple[str, ...] = field(
+        default_factory=lambda: normalize_check_issue_priority(None)
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "issue_priority", normalize_check_issue_priority(self.issue_priority)
+        )

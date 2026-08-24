@@ -334,6 +334,26 @@ def test_api_sort_report_uses_same_priority_rules(tmp_path):
     assert (tmp_path / "sorted/abnormal/frame/nested/sample.csv").exists()
 
 
+def test_api_sort_report_accepts_custom_issue_priority(tmp_path):
+    src = tmp_path / "src"
+    source = src / "nested" / "sample.csv"
+    source.parent.mkdir(parents=True)
+    source.write_text("data", encoding="utf-8")
+    report = src / "check_report.csv"
+    _write_report(
+        report,
+        [
+            ["文件名", "总异常(结果)", "帧完整性(结果)", "数据范围(结果)", "文件相对路径"],
+            ["sample.csv", "FAIL", "FAIL", "FAIL", "nested/sample.csv"],
+        ],
+    )
+
+    stats = _sort_report(report, tmp_path / "sorted", ("range_fail", "frame_fail"))
+
+    assert stats == {"range": 1, "skipped": 0}
+    assert (tmp_path / "sorted/abnormal/range/nested/sample.csv").exists()
+
+
 def test_sort_report_places_reference_fail_before_ipd(tmp_path):
     src = tmp_path / "src"
     source = src / "nested" / "sample.csv"

@@ -8,11 +8,11 @@ from click.testing import CliRunner
 from health_tools.api.models import BatchResult, CheckResult
 from health_tools.commands.check import check_cmd
 from health_tools.models.rules import (
+    CHECK_ISSUE_PRIORITY_IDS,
+    DEFAULT_CHECK_ISSUE_PRIORITY,
     AccuracyMarkRule,
     CheckAccuracyRule,
     CheckRule,
-    CHECK_ISSUE_PRIORITY_IDS,
-    DEFAULT_CHECK_ISSUE_PRIORITY,
     normalize_check_issue_priority,
 )
 from health_tools.rules.loader import RuleLoader
@@ -129,6 +129,21 @@ def test_check_rule_fills_unspecified_policy_values(monkeypatch, tmp_path):
     assert request.accuracy_inclusive is True
     assert request.accuracy_marks[0].id == "online_low"
     assert request.workers == 8
+
+
+def test_check_cli_threads_normalized_issue_priority(monkeypatch, tmp_path):
+    captured = _capture_check_request(monkeypatch)
+    rule = tmp_path / "priority.yaml"
+    rule.write_text(
+        "version: '1.0'\nissue_priority: [center_fail, frame_fail]\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(check_cmd, ["-r", str(rule)])
+
+    assert result.exit_code == 0, result.output
+    assert captured["request"].issue_priority[:2] == ("center_fail", "frame_fail")
+    assert "range_fail" in captured["request"].issue_priority
 
 
 def test_check_sort_summary_uses_mark_order_without_category_prefix(monkeypatch, tmp_path):

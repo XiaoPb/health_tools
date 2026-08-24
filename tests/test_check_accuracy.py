@@ -396,6 +396,24 @@ def test_check_report_uses_resolved_accuracy_methods(tmp_path) -> None:
     assert "Online ±5BPM准确度" not in header
 
 
+def test_check_report_uses_request_issue_priority_for_primary_issue(tmp_path) -> None:
+    report = FileCheckReport(
+        tmp_path / "custom.csv",
+        "gh3036",
+        results=[
+            ItemCheckResult("帧完整性", False, "失败"),
+            ItemCheckResult("数据范围", False, "失败"),
+        ],
+    )
+    output = tmp_path / "custom_report.csv"
+
+    _save_report([report], {}, output, tmp_path, False, issue_priority=("range_fail", "frame_fail"))
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["主要异常项"] == "数据范围异常"
+
+
 def test_check_request_accuracy_thresholds_replace_within_methods() -> None:
     request = CheckRequest(
         accuracy_enabled=True,

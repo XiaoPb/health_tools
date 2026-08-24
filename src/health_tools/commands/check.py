@@ -216,6 +216,7 @@ def check_cmd(
                     rule_file=rule_file,
                     chip_name=chip_name,
                     checks=checks,
+                    issue_priority=rule.issue_priority,
                     tolerance=tolerance,
                     static_min=static_min,
                     range_ratio=range_ratio,
