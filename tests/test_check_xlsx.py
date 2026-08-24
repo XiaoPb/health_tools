@@ -6,8 +6,9 @@ from collections import Counter
 import pytest
 from openpyxl import load_workbook
 
-from health_tools.api.check_operation import run_check
+from health_tools.api.check_operation import COMPACT_HEADER, _report_rows_for_xlsx, run_check
 from health_tools.api.models import CheckRequest
+from health_tools.core.checker import FileCheckReport
 from health_tools.models.rules import AccuracyMarkRule
 from health_tools.utils.check_xlsx import (
     _count_field,
@@ -571,15 +572,41 @@ def test_write_check_workbook_multi_category_summary_denominators(tmp_path):
     assert summary["C2"].value + summary["C3"].value == len(rows)
 
 
-def write_check_fixture(tmp_path, columns, rows):
+def write_check_fixture(tmp_path, columns, rows, name="check_fixture.csv"):
     """按 gh3220 CSV 布局写出 fixture：info 行 1、表头行 2、数据自第 3 行起。"""
-    path = tmp_path / "check_fixture.csv"
+    path = tmp_path / name
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["Version: GH3220"])
         writer.writerow(columns)
         writer.writerows(rows)
     return path
+
+
+def _accuracy_mark() -> AccuracyMarkRule:
+    """命中 accuracy_online_low 的在线准确度标记（ref 80 vs online 50）。"""
+    return AccuracyMarkRule(
+        id="online_low",
+        left="online.within_5",
+        operator="lt",
+        threshold=80.0,
+        category="accuracy_online_low",
+        label="Online准确度低",
+    )
+
+
+def _accuracy_fixture(tmp_path, name="check_fixture.csv"):
+    """带准确度金标/在线列的 gh3220 fixture，命中 ``_accuracy_mark``。"""
+    return write_check_fixture(
+        tmp_path,
+        columns=["TimeStamp", "FRAME_ID", "CH0", "REF_RESULT0", "ALGO_RESULT0"],
+        rows=[
+            [0, 0, 12000000, 80, 50],
+            [40, 1, 12000000, 80, 50],
+            [80, 2, 12000000, 80, 50],
+        ],
+        name=name,
+    )
 
 
 @pytest.fixture
@@ -620,23 +647,8 @@ def test_xlsx_output_does_not_call_csv_writers(monkeypatch, tmp_path, fixture_cs
 
 def test_xlsx_contains_accuracy_sheet_and_final_compact_sheet(tmp_path):
     output = tmp_path / "accuracy.xlsx"
-    mark = AccuracyMarkRule(
-        id="online_low",
-        left="online.within_5",
-        operator="lt",
-        threshold=80.0,
-        category="accuracy_online_low",
-        label="Online准确度低",
-    )
-    accuracy_fixture_csv = write_check_fixture(
-        tmp_path,
-        columns=["TimeStamp", "FRAME_ID", "CH0", "REF_RESULT0", "ALGO_RESULT0"],
-        rows=[
-            [0, 0, 12000000, 80, 50],
-            [40, 1, 12000000, 80, 50],
-            [80, 2, 12000000, 80, 50],
-        ],
-    )
+    mark = _accuracy_mark()
+    accuracy_fixture_csv = _accuracy_fixture(tmp_path)
     request = CheckRequest(
         input_path=accuracy_fixture_csv,
         chip_name="gh3220",
@@ -652,3 +664,187 @@ def test_xlsx_contains_accuracy_sheet_and_final_compact_sheet(tmp_path):
     assert book.sheetnames[-1] == "精简总表"
     assert not output.with_suffix(".csv").exists()
     assert not output.with_name("accuracy_compact.csv").exists()
+
+
+def test_xlsx_compact_sheet_keeps_full_columns_for_accuracy_only_batch(tmp_path):
+    """仅含准确度标定命中行的批次，精简总表仍保持 COMPACT_HEADER 全列。"""
+    output = tmp_path / "compact_columns.xlsx"
+    request = CheckRequest(
+        input_path=_accuracy_fixture(tmp_path),
+        chip_name="gh3220",
+        output_path=output,
+        accuracy_enabled=True,
+        accuracy_ref_column="REF_RESULT0",
+        accuracy_online_column="ALGO_RESULT0",
+        accuracy_marks=(_accuracy_mark(),),
+    )
+    run_check(request)
+    book = load_workbook(output)
+    assert book["精简总表"].max_column == len(COMPACT_HEADER)
+    assert len(COMPACT_HEADER) == 32
+
+
+def test_xlsx_acc_axis_output_includes_single_axis_columns(tmp_path, fixture_csv):
+    """acc_axis=True 时总表（XLSX）与报告 CSV 均含单轴 ACC 列。"""
+    xlsx_output = tmp_path / "axis.xlsx"
+    run_check(
+        CheckRequest(
+            input_path=fixture_csv, chip_name="gh3220", output_path=xlsx_output, acc_axis=True
+        )
+    )
+    book = load_workbook(xlsx_output)
+    headers = [cell.value for cell in book["总表"][1]]
+    for column in (
+        "ACC静止X次数",
+        "ACC静止X最长帧",
+        "ACC静止X前10帧",
+        "ACC循环Z次数",
+        "ACC循环Z前10帧",
+    ):
+        assert column in headers
+    csv_output = tmp_path / "axis.csv"
+    run_check(
+        CheckRequest(
+            input_path=fixture_csv, chip_name="gh3220", output_path=csv_output, acc_axis=True
+        )
+    )
+    with csv_output.open(newline="", encoding="utf-8-sig") as handle:
+        csv_header = next(csv.reader(handle))
+    assert "ACC静止X次数" in csv_header
+    assert "ACC循环Z前10帧" in csv_header
+
+
+def test_xlsx_acc_axis_acc_less_input_keeps_axis_columns(tmp_path):
+    """无 ACC 列的输入开启 acc_axis=True 不崩溃，总表仍保留单轴 ACC 列。"""
+    fixture = write_check_fixture(
+        tmp_path,
+        columns=["TimeStamp", "FRAME_ID", "CH0", "CH1"],
+        rows=[
+            [0, 0, 1000, 1000],
+            [40, 1, 2000, 2000],
+        ],
+    )
+    output = tmp_path / "axis_less.xlsx"
+    run_check(
+        CheckRequest(input_path=fixture, chip_name="gh3220", output_path=output, acc_axis=True)
+    )
+    book = load_workbook(output)
+    headers = [cell.value for cell in book["总表"][1]]
+    assert "ACC静止X次数" in headers
+    assert "ACC循环Z前10帧" in headers
+
+
+def test_report_rows_for_xlsx_pads_axis_columns_when_acc_missing(tmp_path):
+    """acc_reports 非空但缺少当前报告的 ACC 数据时，27 列 ACC 列全部补 "-"。"""
+    report = FileCheckReport(file_path=tmp_path / "a.csv", chip="gh3220")
+    rows = _report_rows_for_xlsx([report], {"other.csv": object()}, tmp_path, True)
+    acc_columns = [
+        "ACC全零次数",
+        "ACC全零最长帧",
+        "ACC全零前10帧",
+        "ACC静止XYZ次数",
+        "ACC静止XYZ最长帧",
+        "ACC静止XYZ前10帧",
+        "ACC循环XYZ次数",
+        "ACC循环XYZ最长帧",
+        "ACC循环XYZ前10帧",
+    ]
+    acc_columns.extend(
+        f"ACC{kind}{axis}{suffix}"
+        for kind in ("静止", "循环")
+        for axis in "XYZ"
+        for suffix in ("次数", "最长帧", "前10帧")
+    )
+    assert len(acc_columns) == 27
+    assert all(rows[0][column] == "-" for column in acc_columns)
+
+
+def test_xlsx_uppercase_suffix_takes_xlsx_branch(monkeypatch, tmp_path, fixture_csv):
+    calls = {}
+    monkeypatch.setattr(
+        "health_tools.utils.check_xlsx.write_check_workbook",
+        lambda output, rows, compact_rows, **kwargs: calls.update(output=output),
+    )
+    monkeypatch.setattr(
+        "health_tools.api.check_operation._save_report",
+        lambda *args, **kwargs: pytest.fail("CSV report writer called"),
+    )
+    monkeypatch.setattr(
+        "health_tools.api.check_operation._save_compact_report",
+        lambda *args, **kwargs: pytest.fail("CSV compact writer called"),
+    )
+    request = CheckRequest(
+        input_path=fixture_csv,
+        chip_name="gh3220",
+        output_path=tmp_path / "check_report.XLSX",
+    )
+    run_check(request)
+    assert calls["output"] == tmp_path / "check_report.XLSX"
+    assert not (tmp_path / "check_report.csv").exists()
+
+
+def test_xlsx_items_only_input_writes_skip_row_without_csv_sidecars(tmp_path):
+    fixture = write_check_fixture(
+        tmp_path,
+        columns=["Foo", "Bar"],
+        rows=[
+            [1, 2],
+            [3, 4],
+        ],
+    )
+    output = tmp_path / "skip.xlsx"
+    run_check(CheckRequest(input_path=fixture, chip_name="gh3220", output_path=output))
+    book = load_workbook(output)
+    ws = book["总表"]
+    assert [cell.value for cell in ws[1]] == [
+        "文件名",
+        "总异常(结果)",
+        "主要异常项",
+        "文件相对路径",
+    ]
+    assert ws["A2"].value == "check_fixture.csv"
+    assert ws["B2"].value == "SKIP"
+    assert "跳过" in ws["C2"].value
+    assert not (tmp_path / "skip.csv").exists()
+    assert not (tmp_path / "skip_compact.csv").exists()
+
+
+def test_xlsx_accuracy_category_sheet_precedes_frame_when_both_hit(tmp_path):
+    _accuracy_fixture(tmp_path, name="acc_file.csv")
+    write_check_fixture(
+        tmp_path,
+        columns=["TimeStamp", "FRAME_ID", "CH0", "REF_RESULT0", "ALGO_RESULT0"],
+        rows=[
+            [0, 0, 1000, 80, 80],
+            [80, 2, 2000, 80, 80],
+        ],
+        name="frame_file.csv",
+    )
+    output = tmp_path / "ordered.xlsx"
+    run_check(
+        CheckRequest(
+            input_path=tmp_path,
+            chip_name="gh3220",
+            output_path=output,
+            accuracy_enabled=True,
+            accuracy_ref_column="REF_RESULT0",
+            accuracy_online_column="ALGO_RESULT0",
+            accuracy_marks=(_accuracy_mark(),),
+            issue_priority=("accuracy", "frame_fail"),
+        )
+    )
+    book = load_workbook(output)
+    assert book.sheetnames == ["总表", "分类说明", "accuracy_online_low", "frame", "精简总表"]
+
+
+def test_xlsx_summary_header_matches_csv_header(tmp_path, fixture_csv):
+    """同一输入分别输出 .csv 与 .xlsx，总表列头必须与 CSV 列头逐列一致。"""
+    csv_output = tmp_path / "report.csv"
+    xlsx_output = tmp_path / "report.xlsx"
+    run_check(CheckRequest(input_path=fixture_csv, chip_name="gh3220", output_path=csv_output))
+    run_check(CheckRequest(input_path=fixture_csv, chip_name="gh3220", output_path=xlsx_output))
+    with csv_output.open(newline="", encoding="utf-8-sig") as handle:
+        csv_header = next(csv.reader(handle))
+    book = load_workbook(xlsx_output)
+    xlsx_header = [cell.value for cell in book["总表"][1]]
+    assert xlsx_header == csv_header

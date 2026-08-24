@@ -572,97 +572,6 @@ def _accuracy_mark_values(report) -> Tuple[str, str]:
     return (mark.category, mark.label) if mark else ("", "")
 
 
-def _report_row_as_dict(
-    report,
-    check_names: List[str],
-    acc_reports: dict,
-    base: Path,
-    include_axis: bool,
-    issue_priority: Optional[Sequence[str]] = None,
-):
-    result_map = {result.name: result for result in report.results}
-    row: Dict[str, object] = {
-        "文件名": report.file_path.name,
-        "芯片": report.chip,
-        "总异常(结果)": report.total_status,
-    }
-    for name in check_names:
-        result = result_map.get(name)
-        row[f"{name}(结果)"] = result.status if result else "-"
-        row[f"{name}(说明)"] = result.summary if result else "-"
-    if acc_reports:
-        acc = acc_reports.get(report.file_path)
-        fields = []
-        if acc:
-            fields.extend(_anomaly_fields(acc.zero))
-            fields.extend(_anomaly_fields(acc.static_xyz))
-            fields.extend(_anomaly_fields(acc.cyclic_xyz))
-            if include_axis:
-                for name in (
-                    "static_x",
-                    "static_y",
-                    "static_z",
-                    "cyclic_x",
-                    "cyclic_y",
-                    "cyclic_z",
-                ):
-                    fields.extend(_anomaly_fields(getattr(acc, name)))
-        else:
-            fields = ["-"] * (27 if include_axis else 9)
-        acc_names = [
-            "ACC全零次数",
-            "ACC全零最长帧",
-            "ACC全零前10帧",
-            "ACC静止XYZ次数",
-            "ACC静止XYZ最长帧",
-            "ACC静止XYZ前10帧",
-            "ACC循环XYZ次数",
-            "ACC循环XYZ最长帧",
-            "ACC循环XYZ前10帧",
-        ]
-        if include_axis:
-            for kind in ("静止", "循环"):
-                for axis in "XYZ":
-                    acc_names.extend(
-                        [f"ACC{kind}{axis}次数", f"ACC{kind}{axis}最长帧", f"ACC{kind}{axis}前10帧"]
-                    )
-        row.update(dict(zip(acc_names, fields)))
-    methods = _accuracy_methods([report])
-    row["场景分类"] = report.scene
-    row["姓名"] = report.name
-    row["手别"] = report.hand
-    row["主要异常项"] = primary_issue(
-        {
-            **{k: str(v) for k, v in row.items()},
-            "准确度标定分类": _accuracy_mark_values(report)[0],
-            "准确度标定说明": _accuracy_mark_values(report)[1],
-        },
-        issue_priority,
-    )
-    accuracy_result = getattr(report, "accuracy_result", None)
-    row.update(
-        dict(
-            zip(
-                _accuracy_header("Online", methods),
-                _accuracy_values(getattr(accuracy_result, "online", None), methods),
-            )
-        )
-    )
-    row.update(
-        dict(
-            zip(
-                _accuracy_header("Comp", methods),
-                _accuracy_values(getattr(accuracy_result, "comp", None), methods),
-            )
-        )
-    )
-    mark_category, mark_label = _accuracy_mark_values(report)
-    row["准确度标定分类"] = mark_category
-    row["准确度标定说明"] = mark_label
-    row["文件相对路径"] = _relative_path(report.file_path, base)
-    return row, methods
-
-
 def _category_descriptions(
     issue_priority: Optional[Sequence[str]], accuracy_marks: Sequence[Any]
 ) -> Dict[str, Tuple[str, str]]:
@@ -690,68 +599,12 @@ def _category_descriptions(
     return descriptions
 
 
-def _report_output_header(reports, acc_reports, include_axis: bool) -> List[str]:
-    """构建完整报告 CSV/XLSX 共用的输出列顺序（主要异常列提前）。"""
-    check_names: List[str] = []
-    for report in reports:
-        for result in report.results:
-            if result.name not in check_names:
-                check_names.append(result.name)
-    methods = _accuracy_methods(reports)
-    header = ["文件名", "芯片", "总异常(结果)"]
-    for name in check_names:
-        header.extend([f"{name}(结果)", f"{name}(说明)"])
-        if name in {"心率金标", "血氧金标"}:
-            header.append(f"{name}(异常时间)")
-    if acc_reports:
-        header.extend(
-            [
-                "ACC全零次数",
-                "ACC全零最长帧",
-                "ACC全零前10帧",
-                "ACC静止XYZ次数",
-                "ACC静止XYZ最长帧",
-                "ACC静止XYZ前10帧",
-                "ACC循环XYZ次数",
-                "ACC循环XYZ最长帧",
-                "ACC循环XYZ前10帧",
-            ]
-        )
-        if include_axis:
-            for kind in ("静止", "循环"):
-                for axis in "XYZ":
-                    header.extend(
-                        [f"ACC{kind}{axis}次数", f"ACC{kind}{axis}最长帧", f"ACC{kind}{axis}前10帧"]
-                    )
-    header.extend(["场景分类", "姓名", "手别", "主要异常项"])
-    header.extend(_accuracy_header("Online", methods))
-    header.extend(_accuracy_header("Comp", methods))
-    header.extend(["准确度标定分类", "准确度标定说明", "文件相对路径"])
-    leading_columns = [
-        "文件名",
-        "芯片",
-        "总异常(结果)",
-        "场景分类",
-        "姓名",
-        "手别",
-        "主要异常项",
-    ]
-    return leading_columns + [column for column in header if column not in leading_columns]
+def _report_columns(reports, acc_reports, include_axis: bool) -> Tuple[List[str], List[str]]:
+    """构建完整报告 CSV/XLSX 共用的列（主要异常列提前）。
 
-
-def _report_rows_for_xlsx(
-    reports,
-    acc_reports,
-    base: Path,
-    include_axis: bool,
-    items=(),
-    issue_priority: Optional[Sequence[str]] = None,
-) -> List[Dict[str, object]]:
-    """构建完整报告的行字典列表，与 CSV 写出共用同一语义。
-
-    返回的行以 ``_report_output_header`` 的输出列顺序为键，覆盖全部报告行与
-    未进入报告的跳过/失败条目行；状态、准确度、主要异常与跳过的取值和格式
-    与 CSV 完全一致，供 CSV 与 XLSX 复用。
+    返回 ``(header, output_header)``：``header`` 为全部列的原始顺序，``output_header``
+    为把主要异常列提前后的输出列顺序；``_save_report`` 与 ``_report_rows_for_xlsx``
+    共用同一实现，保证 CSV 与 XLSX 列完全一致。
     """
     check_names: List[str] = []
     for report in reports:
@@ -798,6 +651,35 @@ def _report_rows_for_xlsx(
         "主要异常项",
     ]
     output_header = leading_columns + [column for column in header if column not in leading_columns]
+    return header, output_header
+
+
+def _report_output_header(reports, acc_reports, include_axis: bool) -> List[str]:
+    """返回完整报告 CSV/XLSX 共用的输出列顺序（主要异常列提前）。"""
+    return _report_columns(reports, acc_reports, include_axis)[1]
+
+
+def _report_rows_for_xlsx(
+    reports,
+    acc_reports,
+    base: Path,
+    include_axis: bool,
+    items=(),
+    issue_priority: Optional[Sequence[str]] = None,
+) -> List[Dict[str, object]]:
+    """构建完整报告的行字典列表，与 CSV 写出共用同一语义。
+
+    返回的行以 ``_report_output_header`` 的输出列顺序为键，覆盖全部报告行与
+    未进入报告的跳过/失败条目行；状态、准确度、主要异常与跳过的取值和格式
+    与 CSV 完全一致，供 CSV 与 XLSX 复用。
+    """
+    header, output_header = _report_columns(reports, acc_reports, include_axis)
+    check_names: List[str] = []
+    for report in reports:
+        for result in report.results:
+            if result.name not in check_names:
+                check_names.append(result.name)
+    methods = _accuracy_methods(reports)
     rows: List[Dict[str, object]] = []
     report_paths = {report.file_path.resolve() for report in reports}
     for report in reports:
@@ -1013,7 +895,8 @@ def _compact_rows_for_xlsx(reports, base: Path) -> List[Dict[str, object]]:
             source, metric = mark.left.split(".", 1)
             values = getattr(accuracy_result, source, None) or {}
             metric_value = accuracy_mark_value(accuracy_result, mark)
-            rows.append(
+            row: Dict[str, object] = {key: "" for key in COMPACT_HEADER}
+            row.update(
                 {
                     "文件名": report.file_path.name,
                     "场景分类": report.scene,
@@ -1033,6 +916,7 @@ def _compact_rows_for_xlsx(reports, base: Path) -> List[Dict[str, object]]:
                     "准确度阈值": mark.threshold,
                 }
             )
+            rows.append(row)
     return rows
 
 
