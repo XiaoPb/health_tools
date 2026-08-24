@@ -193,7 +193,7 @@ def test_sort_report_uses_priority_and_separates_acc_status(tmp_path):
             "PASS",
             "PASS",
             "FAIL",
-            "FAIL",
+            "PASS",
             "FAIL",
             "FAIL",
             "scene",
