@@ -3,10 +3,12 @@
 本模块只负责分类聚合与统计，不涉及 Excel 写出；工作簿写出由后续任务在
 ``write_check_workbook`` 中实现。分类语义与 ``check_operation`` 的主要异常
 匹配保持一致，但为独立实现：必须按状态列匹配，不能从 主要异常项 文本反推。
+未命中任何规则的报告行不进入任何分类表，只保留在总表中（分类说明与 category
+表只覆盖 issue_priority 命中的行）。
 """
 
 from collections import Counter
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple, TypedDict
 
 # 稳定异常组标识到 (状态列, 期望值, 目录分类) 的映射；匹配顺序由调用方传入的
 # issue_priority 决定。reference 组的两个状态列按 OR 语义匹配。
@@ -26,6 +28,20 @@ _ROW_RULES: Dict[str, Tuple[Tuple[str, ...], str, str]] = {
 _ISSUE_CATEGORY: Dict[str, str] = {rule_id: rule[2] for rule_id, rule in _ROW_RULES.items()}
 
 
+class CategorySummary(TypedDict):
+    """build_category_summary 返回的分类说明表字段。"""
+
+    category: str
+    condition: str
+    explanation: str
+    count: int
+    ratio: float
+    scene_distribution: str
+    person_distribution: str
+
+
+# 与 check_operation.issue_category_order 不同，本函数只返回 rows 中实际命中的
+# category，且不附加 agc/ipd/total_fail/normal 兜底类别。
 def expand_issue_category_order(
     issue_priority: Sequence[str],
     rows: Sequence[Dict[str, str]],
@@ -35,13 +51,10 @@ def expand_issue_category_order(
 
     稳定异常组映射为对应目录分类；``accuracy`` 在外层位置展开为实际出现在
     rows 中且按 ``accuracy_categories`` 声明顺序排列的准确度分类。未出现在
-    rows 中的分类不输出，未知标识按原样映射但同样需要实际出现。
+    rows 中的分类不输出；未知标识被跳过，不产生任何 category。
     """
     present = {
-        category
-        for row in rows
-        for category in (_row_category(row, issue_priority, accuracy_categories),)
-        if category
+        category for row in rows for category in (_row_category(row, issue_priority),) if category
     }
     categories: List[str] = []
     for rule_id in issue_priority:
@@ -64,14 +77,14 @@ def build_category_summary(
     condition: str,
     explanation: str,
     total_count: int,
-) -> Dict[str, object]:
+) -> CategorySummary:
     """统计单个分类命中行的聚合结果。
 
     返回分类说明表所需字段：count（命中行数，整数）、ratio（count/total_count
     数值）、scene_distribution（按 场景分类 计数）、person_distribution（按 姓名
     计数）、condition/explanation 原样保留，以及 category 供后续工作表使用。
     占比的分母是总表行数；场景与人员占比的分母是该分类命中行数；空姓名/场景
-    统一为 default。
+    统一为 default。total_count 是总表行数（count <= total_count 的预期前提）。
     """
     count = len(rows)
     scene_counter = _count_field(rows, "场景分类")
@@ -90,7 +103,6 @@ def build_category_summary(
 def _row_category(
     row: Dict[str, str],
     issue_priority: Sequence[str],
-    accuracy_categories: Sequence[str] = (),
 ) -> str:
     """按状态列匹配行的目录分类；未命中返回空字符串。
 
@@ -127,9 +139,9 @@ def _format_distribution(counter: Counter, total: int) -> str:
 
 
 def _count_field(rows: Sequence[Dict[str, str]], column: str) -> Counter:
-    """按列统计字段出现次数，空值统一归一为 default。"""
+    """按列统计字段出现次数，空值与纯空白值统一归一为 default。"""
     counter: Counter = Counter()
     for row in rows:
-        value = row.get(column)
+        value = str(row.get(column, "") or "").strip()
         counter[value if value else "default"] += 1
     return counter
