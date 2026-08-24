@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from health_tools.utils.columns import expand_columns
 
-
 CHECK_ISSUE_PRIORITY_IDS = (
     "frame_fail",
     "range_fail",
@@ -26,7 +25,9 @@ def normalize_check_issue_priority(priority: Optional[Sequence[str]]) -> Tuple[s
     if priority is None:
         return DEFAULT_CHECK_ISSUE_PRIORITY
     configured = tuple(str(item).strip() for item in priority)
-    return configured + tuple(item for item in DEFAULT_CHECK_ISSUE_PRIORITY if item not in configured)
+    return configured + tuple(
+        item for item in DEFAULT_CHECK_ISSUE_PRIORITY if item not in configured
+    )
 
 
 @dataclass
@@ -323,7 +324,9 @@ class CheckRule:
     issue_priority: Tuple[str, ...] = field(default_factory=lambda: DEFAULT_CHECK_ISSUE_PRIORITY)
 
     def __post_init__(self):
-        object.__setattr__(self, "issue_priority", normalize_check_issue_priority(self.issue_priority))
+        object.__setattr__(
+            self, "issue_priority", normalize_check_issue_priority(self.issue_priority)
+        )
 
     @property
     def checks(self) -> Tuple[str, ...]:

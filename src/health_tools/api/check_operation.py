@@ -87,6 +87,7 @@ def issue_category_order(
             categories.append(category)
     return tuple(categories)
 
+
 _MAX_FILE_WORKERS = 32
 
 _FULL_REPORT_HEADER = {
