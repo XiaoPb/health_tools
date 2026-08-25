@@ -259,11 +259,40 @@ accuracy:
 `bias`、`correlation`、`r2` 以及 `within_N`（例如 `within_5`、`within_12.5`）。
 `thresholds` 是自定义准确度指标列表，每项格式为 `{name: xxx, value: N}` 或
 `{name: xxx, percent: N}`，且只能二选一；`inclusive` 控制所有阈值边界是否使用 `<=`。
-`marks` 中 `id` 和 `category` 都必须唯一且为安全的单段目录名。每项使用 `left`、`operator`、
-`right`、`threshold` 声明条件：路径格式为 `online.<metric>` 或 `comp.<metric>`；单值运算支持
-`lt/lte/gt/gte`，差值运算支持 `diff_gte/diff_gt`，比例运算支持 `ratio_lt/ratio_lte`。
-二元运算必须提供 `right`；缺失指标或除零时不命中。旧的 `comparison/metric/min/min_gap`
-格式不再兼容。
+`marks` 中 `id` 和 `category` 都必须唯一且为安全的单段目录名。每项支持平铺简写或组合条件两种写法。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `marks[].match` | string | 组合模式：`all`（全部条件同时满足，默认）或 `any`（任一条件满足） |
+| `marks[].conditions` | list | 条件列表；每项含 `left`、`operator`、`threshold`（可选 `right`）。提供 `conditions` 时不能再提供平铺的 `left/operator/threshold/right`；两者都不提供则校验失败。单条件 mark 可继续使用平铺简写（等价于 `match: all` + 单个条件） |
+
+平铺简写直接提供 `left`、`operator`、`right`、`threshold` 声明单个条件：路径格式为
+`online.<metric>` 或 `comp.<metric>`；单值运算支持 `lt/lte/gt/gte`，差值运算支持
+`diff_gte/diff_gt`，比例运算支持 `ratio_lt/ratio_lte`。二元运算必须提供 `right`；缺失指标
+或除零时不命中。旧的 `comparison/metric/min/min_gap` 格式不再兼容。
+
+组合条件示例（`match: all` 全部满足 / `match: any` 任一满足）：
+
+```yaml
+marks:
+  - id: online_and_comp_low
+    match: all
+    conditions:
+      - {left: online.within_5, operator: lt, threshold: 80.0}
+      - {left: comp.within_5, operator: lt, threshold: 80.0}
+    label: Online与Comp ±5准确度均低
+    category: accuracy_both_low
+  - id: online_or_comp_low
+    match: any
+    conditions:
+      - {left: online.within_5, operator: lt, threshold: 80.0}
+      - {left: comp.within_5, operator: lt, threshold: 80.0}
+    label: Online或Comp ±5准确度低
+    category: accuracy_either_low
+```
+
+匹配按声明顺序取首个命中；组合 mark 在精简总表中展示全部条件数值（逗号连接），单条件 mark
+展示单个数值。
 命中后主要异常项先按 `issue_priority` 选择类别；其中 `accuracy` 再按 `marks` 声明顺序选择具体标定，
 并以该 `category` 作为分拣目录名。`issue_priority` 只需列出要调整的项，未列出的合法项会按内置默认顺序追加；
 需要提高某个准确度标定的优先级时，将 `accuracy` 前移，并在 `marks` 中调整声明顺序即可。

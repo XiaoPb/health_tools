@@ -40,6 +40,9 @@
   `timestamp_fail`、`frame_warning`、`reference_fail`、`acc_warning`、`center_fail`、`accuracy`。
   显式列表按声明顺序优先，未列项按内置默认顺序追加；`accuracy` 类别内部再按
   `accuracy.marks` 声明顺序选择具体标定。
+- accuracy `marks` 支持 `match: all|any` + `conditions` 组合多个判断条件（全部满足或任一
+  满足），也支持单条件简写 `left/operator/threshold`（可选 `right`）；两种写法互斥，匹配
+  按声明顺序取首个命中。
 - 执行 check 前确认 `accuracy.ref_column`、`accuracy.online_column`、`accuracy.comp_column`
   都存在于实际 CSV 表头；Comp 列全为 0 时跳过 Comp vs Ref 准确度统计。
 - check YAML 不写 `input`、`output`、`sort`、`report`、`sort_output`、`workers`、`verbose` 或
