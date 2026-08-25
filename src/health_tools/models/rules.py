@@ -273,7 +273,12 @@ class AccuracyMarkRule:
         if self.match not in {"all", "any"}:
             raise ValueError("AccuracyMarkRule.match 必须是 all 或 any")
         if self.conditions:
-            if self.left is not None or self.operator is not None or self.threshold is not None:
+            if (
+                self.left is not None
+                or self.operator is not None
+                or self.threshold is not None
+                or self.right is not None
+            ):
                 raise ValueError(
                     "AccuracyMarkRule 不能同时提供 conditions 和 left/operator/threshold"
                 )

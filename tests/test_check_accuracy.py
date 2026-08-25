@@ -524,3 +524,49 @@ def test_accuracy_mark_keeps_composite_conditions() -> None:
 def test_accuracy_mark_rejects_invalid_combinations(kwargs, message) -> None:
     with pytest.raises(ValueError, match=message):
         AccuracyMarkRule(**kwargs)
+
+
+def test_accuracy_mark_folds_shorthand_right() -> None:
+    mark = AccuracyMarkRule("g", "online.within_5", "diff_gte", 10, "c", "l", right="comp.within_5")
+    assert mark.conditions == (
+        AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+    )
+    assert mark.conditions[0].right == "comp.within_5"
+    assert mark.right == "comp.within_5"
+
+
+def test_accuracy_mark_folds_shorthand_with_empty_conditions() -> None:
+    mark = AccuracyMarkRule("g", "online.within_5", "diff_gte", 10, "c", "l", conditions=())
+    assert mark.conditions == (AccuracyConditionRule("online.within_5", "diff_gte", 10.0, None),)
+
+
+def test_accuracy_mark_composite_defaults_to_all_match() -> None:
+    mark = AccuracyMarkRule(
+        id="g",
+        category="c",
+        label="l",
+        conditions=(AccuracyConditionRule("online.within_5", "diff_gte", 10.0),),
+    )
+    assert mark.match == "all"
+
+
+def test_accuracy_mark_rejects_right_with_conditions() -> None:
+    with pytest.raises(ValueError, match="不能同时提供"):
+        AccuracyMarkRule(
+            id="x",
+            category="c",
+            label="l",
+            right="comp.within_5",
+            conditions=(AccuracyConditionRule("online.within_5", "lt", 80.0),),
+        )
+
+
+def test_accuracy_mark_rejects_operator_without_left() -> None:
+    with pytest.raises(ValueError, match="必须提供 conditions 或 left/operator/threshold"):
+        AccuracyMarkRule(
+            id="x",
+            category="c",
+            label="l",
+            operator="lt",
+            threshold=80.0,
+        )
