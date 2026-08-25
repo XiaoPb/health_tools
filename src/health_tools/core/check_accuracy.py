@@ -1,11 +1,11 @@
 """check 命令的 Online/Comp 准确度计算。"""
 
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
 from health_tools.api.models import CheckAccuracyResult
-from health_tools.models.rules import AccuracyMarkRule, CheckAccuracyRule
+from health_tools.models.rules import AccuracyConditionRule, AccuracyMarkRule, CheckAccuracyRule
 from health_tools.utils.accuracy import calculate_accuracy, prepare_accuracy_columns
 
 
@@ -14,7 +14,7 @@ def match_accuracy_mark(
 ) -> Optional[AccuracyMarkRule]:
     """按规则声明顺序匹配首个准确度标定。"""
     for mark in marks:
-        if _matches_declarative_mark(result, mark):
+        if _mark_matches(result, mark):
             return mark
     return None
 
@@ -32,36 +32,58 @@ def _metric_value(result: CheckAccuracyResult, path: str) -> Optional[float]:
 
 
 def accuracy_mark_value(result: CheckAccuracyResult, mark: AccuracyMarkRule) -> Optional[float]:
-    """返回标定规则实际与 threshold 比较的数值。"""
-    left = _metric_value(result, mark.left)
+    """返回标定规则实际与 threshold 比较的数值（单条件语义，取第一个条件）。"""
+    if not mark.conditions:
+        return None
+    return _condition_value(result, mark.conditions[0])
+
+
+def accuracy_mark_values(
+    result: CheckAccuracyResult, mark: AccuracyMarkRule
+) -> List[Optional[float]]:
+    """返回全部条件的比较值；无法计算的条件为 None。"""
+    return [_condition_value(result, condition) for condition in mark.conditions]
+
+
+def _condition_value(
+    result: CheckAccuracyResult, condition: AccuracyConditionRule
+) -> Optional[float]:
+    """返回单个条件实际与 threshold 比较的数值。"""
+    left = _metric_value(result, condition.left)
     if left is None:
         return None
-    right = _metric_value(result, mark.right) if mark.right else None
-    if mark.operator in {"lt", "lte", "gt", "gte"}:
+    right = _metric_value(result, condition.right) if condition.right else None
+    if condition.operator in {"lt", "lte", "gt", "gte"}:
         return left
     if right is None:
         return None
-    if mark.operator in {"diff_gte", "diff_gt"}:
+    if condition.operator in {"diff_gte", "diff_gt"}:
         return right - left
-    if mark.operator in {"ratio_lt", "ratio_lte"}:
+    if condition.operator in {"ratio_lt", "ratio_lte"}:
         return None if right == 0 else left / right
     return None
 
 
-def _matches_declarative_mark(result: CheckAccuracyResult, mark: AccuracyMarkRule) -> bool:
-    value = accuracy_mark_value(result, mark)
+def _condition_matches(result: CheckAccuracyResult, condition: AccuracyConditionRule) -> bool:
+    value = _condition_value(result, condition)
     if value is None:
         return False
-    threshold = mark.threshold
-    if mark.operator in {"lt", "ratio_lt"}:
+    threshold = condition.threshold
+    if condition.operator in {"lt", "ratio_lt"}:
         return value < threshold
-    if mark.operator in {"lte", "ratio_lte"}:
+    if condition.operator in {"lte", "ratio_lte"}:
         return value <= threshold
-    if mark.operator in {"gt", "diff_gt"}:
+    if condition.operator in {"gt", "diff_gt"}:
         return value > threshold
-    if mark.operator in {"gte", "diff_gte"}:
+    if condition.operator in {"gte", "diff_gte"}:
         return value >= threshold
     return False
+
+
+def _mark_matches(result: CheckAccuracyResult, mark: AccuracyMarkRule) -> bool:
+    if mark.match == "any":
+        return any(_condition_matches(result, condition) for condition in mark.conditions)
+    return all(_condition_matches(result, condition) for condition in mark.conditions)
 
 
 def calculate_check_accuracy(frame: pd.DataFrame, config: CheckAccuracyRule) -> CheckAccuracyResult:

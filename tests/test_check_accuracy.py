@@ -10,7 +10,12 @@ from health_tools.api.check_operation import (
     _save_report,
 )
 from health_tools.api.models import CheckAccuracyResult, CheckRequest, ItemResult, ItemStatus
-from health_tools.core.check_accuracy import calculate_check_accuracy, match_accuracy_mark
+from health_tools.core.check_accuracy import (
+    accuracy_mark_value,
+    accuracy_mark_values,
+    calculate_check_accuracy,
+    match_accuracy_mark,
+)
 from health_tools.core.checker import CheckResult as ItemCheckResult
 from health_tools.core.checker import FileCheckReport
 from health_tools.models.rules import (
@@ -570,3 +575,87 @@ def test_accuracy_mark_rejects_operator_without_left() -> None:
             operator="lt",
             threshold=80.0,
         )
+
+
+def test_match_accuracy_mark_composite_all_requires_every_condition() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0}, comp={"within_5": 85.0})
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        match="all",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    # diff = 85 - 70 = 15 >= 10 且 70 < 80 → 命中
+    assert match_accuracy_mark(result, (mark,)) is mark
+
+
+def test_match_accuracy_mark_composite_all_requires_every_condition_fail() -> None:
+    result = CheckAccuracyResult(online={"within_5": 75.0}, comp={"within_5": 80.0})
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        match="all",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    # diff = 5 < 10 → 不命中
+    assert match_accuracy_mark(result, (mark,)) is None
+
+
+def test_match_accuracy_mark_composite_any_matches_single_condition() -> None:
+    result = CheckAccuracyResult(online={"within_5": 75.0}, comp={"within_5": 80.0})
+    mark = AccuracyMarkRule(
+        id="bad_or_low",
+        category="accuracy_bad_or_low",
+        label="组合或",
+        match="any",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    # diff = 5 < 10 但 75 < 80 → 命中
+    assert match_accuracy_mark(result, (mark,)) is mark
+
+
+def test_match_accuracy_mark_composite_any_none_matches() -> None:
+    result = CheckAccuracyResult(online={"within_5": 90.0}, comp={"within_5": 95.0})
+    mark = AccuracyMarkRule(
+        id="bad_or_low",
+        category="accuracy_bad_or_low",
+        label="组合或",
+        match="any",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    # diff = 5 < 10 且 90 > 80 → 不命中
+    assert match_accuracy_mark(result, (mark,)) is None
+
+
+def test_accuracy_mark_values_returns_all_condition_values() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0}, comp={"within_5": 85.0})
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    assert accuracy_mark_values(result, mark) == [15.0, 70.0]
+
+
+def test_accuracy_mark_value_single_condition_semantics_unchanged() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0}, comp={"within_5": 85.0})
+    mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "accuracy_low", "低")
+    assert accuracy_mark_value(result, mark) == 70.0
