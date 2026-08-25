@@ -90,6 +90,8 @@ def test_check_documentation_covers_rules_accuracy_and_sort_contract():
     ):
         assert keyword in command_doc or keyword in rules_doc
 
+    assert "## check 规则" in rules_doc
+    assert "## parse 规则" in rules_doc
     check_rules_section = rules_doc.split("## check 规则", 1)[1].split("## parse 规则", 1)[0]
     for keyword in ("match", "conditions", "all", "any"):
         assert keyword in check_rules_section
