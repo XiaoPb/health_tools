@@ -721,3 +721,57 @@ def test_match_accuracy_mark_composite_first_wins_ordering() -> None:
     single = AccuracyMarkRule("single", "online.within_5", "lt", 80, "accuracy_single", "单条件")
 
     assert match_accuracy_mark(result, (composite, single)) is composite
+
+
+def test_compact_report_composite_mark_shows_all_condition_values(tmp_path) -> None:
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        match="all",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    report = FileCheckReport(
+        tmp_path / "composite.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "within_5": 70.0},
+            comp={"samples": 3, "within_5": 85.0},
+            matched_mark=mark,
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["检查项"] == "准确度标定"
+    assert row["异常数"] == "15.0, 70.0"
+    assert row["异常占比"] == "15.0, 70.0"
+    assert row["比较对象"] == "Online vs Comp"
+    assert row["准确度阈值"] == "10.0"
+    assert row["说明"] == "组合与"
+
+
+def test_compact_report_single_mark_value_unchanged(tmp_path) -> None:
+    mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "accuracy_low", "Online准确度低")
+    report = FileCheckReport(
+        tmp_path / "single.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "within_5": 70.0}, matched_mark=mark
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["异常数"] == "70.0"
+    assert row["异常占比"] == "70.00%"
+    assert row["比较对象"] == "Ref"

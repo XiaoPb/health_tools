@@ -818,6 +818,11 @@ def _format_compact_percent(value) -> str:
         return str(value)
 
 
+def _format_mark_display(values: List[Optional[float]]) -> str:
+    """把条件数值列表格式化为展示串；无法计算的跳过，全空返回空串。"""
+    return ", ".join(f"{value}" for value in values if value is not None)
+
+
 def _compact_rows_for_xlsx(reports, base: Path) -> List[Dict[str, object]]:
     """构建精简报告的行字典列表，与 CSV 写出共用同一语义（键为 COMPACT_HEADER）。
 
@@ -889,12 +894,15 @@ def _compact_rows_for_xlsx(reports, base: Path) -> List[Dict[str, object]]:
         accuracy = getattr(report, "accuracy_result", None)
         mark = getattr(accuracy, "matched_mark", None) if accuracy else None
         if mark:
-            from health_tools.core.check_accuracy import accuracy_mark_value
+            from health_tools.core.check_accuracy import accuracy_mark_values
 
             accuracy_result = cast(CheckAccuracyResult, accuracy)
-            source, metric = mark.left.split(".", 1)
+            first = mark.conditions[0]
+            source, metric = first.left.split(".", 1)
             values = getattr(accuracy_result, source, None) or {}
-            metric_value = accuracy_mark_value(accuracy_result, mark)
+            metric_values = accuracy_mark_values(accuracy_result, mark)
+            metric_value = _format_mark_display(metric_values)
+            has_right = any(condition.right for condition in mark.conditions)
             row: Dict[str, object] = {key: "" for key in COMPACT_HEADER}
             row.update(
                 {
@@ -911,9 +919,9 @@ def _compact_rows_for_xlsx(reports, base: Path) -> List[Dict[str, object]]:
                     "总数": (values.get("samples", "") if values else ""),
                     "异常占比": _format_compact_percent(metric_value),
                     "说明": mark.label,
-                    "比较对象": ("Online vs Comp" if mark.right else "Ref"),
+                    "比较对象": ("Online vs Comp" if has_right else "Ref"),
                     "准确度指标": format_metric_name(metric),
-                    "准确度阈值": mark.threshold,
+                    "准确度阈值": first.threshold,
                 }
             )
             rows.append(row)
