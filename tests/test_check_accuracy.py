@@ -775,3 +775,91 @@ def test_compact_report_single_mark_value_unchanged(tmp_path) -> None:
     assert row["异常数"] == "70.0"
     assert row["异常占比"] == "70.00%"
     assert row["比较对象"] == "Ref"
+
+
+def test_compact_report_composite_mark_partially_uncomputable(tmp_path) -> None:
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        match="all",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    report = FileCheckReport(
+        tmp_path / "partial.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "within_5": 70.0},
+            matched_mark=mark,
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["异常数"] == "70.0"
+    assert row["异常占比"] == "70.00%"
+
+
+def test_compact_report_composite_mark_all_uncomputable(tmp_path) -> None:
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        match="all",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    report = FileCheckReport(
+        tmp_path / "uncomputable.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3},
+            matched_mark=mark,
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["异常数"] == ""
+    assert row["异常占比"] == ""
+
+
+def test_compact_report_composite_mark_unary_conditions_show_ref(tmp_path) -> None:
+    mark = AccuracyMarkRule(
+        id="low_two_metrics",
+        category="accuracy_low_two",
+        label="双低",
+        match="all",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+            AccuracyConditionRule("online.within_10", "lt", 70.0),
+        ),
+    )
+    report = FileCheckReport(
+        tmp_path / "unary.csv",
+        "gh3036",
+        accuracy_result=CheckAccuracyResult(
+            online={"samples": 3, "within_5": 70.0, "within_10": 60.0},
+            matched_mark=mark,
+        ),
+    )
+    output = tmp_path / "check_report_compact.csv"
+
+    _save_compact_report([report], output, tmp_path)
+
+    with output.open(newline="", encoding="utf-8-sig") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["比较对象"] == "Ref"
+    assert row["异常数"] == "70.0, 60.0"
+    assert row["异常占比"] == "70.0, 60.0"

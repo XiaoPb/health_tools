@@ -9,7 +9,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 import pandas as pd
@@ -818,9 +818,19 @@ def _format_compact_percent(value) -> str:
         return str(value)
 
 
-def _format_mark_display(values: List[Optional[float]]) -> str:
-    """把条件数值列表格式化为展示串；无法计算的跳过，全空返回空串。"""
-    return ", ".join(f"{value}" for value in values if value is not None)
+def _format_mark_display(values: List[Optional[float]]) -> Union[str, float]:
+    """把条件数值列表格式化为展示串；无法计算的跳过，全空返回空串。
+
+    仅一个可计算条件时返回原始浮点，XLSX 写出为数值单元格（避免"数字以文本
+    形式存储"警告），CSV 经 str(float) 写出保持一致；多个条件时各值四舍五入
+    到两位小数后用逗号连接（组合展示保持文本串）。
+    """
+    computable = [value for value in values if value is not None]
+    if not computable:
+        return ""
+    if len(computable) == 1:
+        return computable[0]
+    return ", ".join(f"{round(value, 2)}" for value in computable)
 
 
 def _compact_rows_for_xlsx(reports, base: Path) -> List[Dict[str, object]]:
