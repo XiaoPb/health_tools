@@ -659,3 +659,65 @@ def test_accuracy_mark_value_single_condition_semantics_unchanged() -> None:
     result = CheckAccuracyResult(online={"within_5": 70.0}, comp={"within_5": 85.0})
     mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "accuracy_low", "低")
     assert accuracy_mark_value(result, mark) == 70.0
+
+
+def test_match_accuracy_mark_composite_all_uncomputable_condition_no_match() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0})
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        match="all",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    # comp 缺失 → 第一个条件不可计算，all 语义下不命中
+    assert match_accuracy_mark(result, (mark,)) is None
+
+
+def test_match_accuracy_mark_composite_any_skips_uncomputable_condition() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0})
+    mark = AccuracyMarkRule(
+        id="bad_or_low",
+        category="accuracy_bad_or_low",
+        label="组合或",
+        match="any",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    # 第一个条件不可计算，但 70 < 80 命中 → any 语义仍匹配
+    assert match_accuracy_mark(result, (mark,)) is mark
+
+
+def test_accuracy_mark_values_uncomputable_condition_is_none() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0})
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合与",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    assert accuracy_mark_values(result, mark) == [None, 70.0]
+
+
+def test_match_accuracy_mark_composite_first_wins_ordering() -> None:
+    result = CheckAccuracyResult(online={"within_5": 70.0}, comp={"within_5": 85.0})
+    composite = AccuracyMarkRule(
+        id="composite_first",
+        category="accuracy_composite_first",
+        label="组合优先",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    single = AccuracyMarkRule("single", "online.within_5", "lt", 80, "accuracy_single", "单条件")
+
+    assert match_accuracy_mark(result, (composite, single)) is composite

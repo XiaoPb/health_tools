@@ -32,7 +32,7 @@ def _metric_value(result: CheckAccuracyResult, path: str) -> Optional[float]:
 
 
 def accuracy_mark_value(result: CheckAccuracyResult, mark: AccuracyMarkRule) -> Optional[float]:
-    """返回标定规则实际与 threshold 比较的数值（单条件语义，取第一个条件）。"""
+    """返回标定规则实际与 threshold 比较的数值（单条件语义，取第一个条件；组合 mark 请使用 accuracy_mark_values）。"""
     if not mark.conditions:
         return None
     return _condition_value(result, mark.conditions[0])
@@ -81,6 +81,7 @@ def _condition_matches(result: CheckAccuracyResult, condition: AccuracyCondition
 
 
 def _mark_matches(result: CheckAccuracyResult, mark: AccuracyMarkRule) -> bool:
+    # AccuracyMarkRule.__post_init__ 保证 conditions 非空，all([])/any([]) 不会出现
     if mark.match == "any":
         return any(_condition_matches(result, condition) for condition in mark.conditions)
     return all(_condition_matches(result, condition) for condition in mark.conditions)
