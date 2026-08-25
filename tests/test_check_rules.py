@@ -630,9 +630,7 @@ accuracy:
     rule = RuleLoader.load_check_rule(str(rule_path))
 
     single, bad_and, bad_or = rule.accuracy.marks
-    assert single.conditions == (
-        AccuracyConditionRule("online.within_5", "lt", 80.0, None),
-    )
+    assert single.conditions == (AccuracyConditionRule("online.within_5", "lt", 80.0, None),)
     assert single.left == "online.within_5"
     assert bad_and.match == "all"
     assert bad_and.conditions[0].right == "comp.within_5"

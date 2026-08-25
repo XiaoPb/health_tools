@@ -30,11 +30,7 @@ def _build_accuracy_mark(mark: dict) -> AccuracyMarkRule:
             AccuracyConditionRule(
                 left=str(condition["left"]),
                 operator=str(condition["operator"]),
-                right=(
-                    str(condition["right"])
-                    if condition.get("right") is not None
-                    else None
-                ),
+                right=(str(condition["right"]) if condition.get("right") is not None else None),
                 threshold=float(condition["threshold"]),
             )
             for condition in mark["conditions"]
@@ -315,9 +311,7 @@ class RuleLoader:
             if key not in {"version", "description", "chip", "accuracy", "issue_priority"}
         }
         accuracy_data = data.get("accuracy") or {}
-        marks = tuple(
-            _build_accuracy_mark(mark) for mark in accuracy_data.get("marks", [])
-        )
+        marks = tuple(_build_accuracy_mark(mark) for mark in accuracy_data.get("marks", []))
         accuracy = CheckAccuracyRule(
             enabled=bool(accuracy_data.get("enabled", False)),
             ref_column=str(accuracy_data.get("ref_column", "REF_RESULT0")),

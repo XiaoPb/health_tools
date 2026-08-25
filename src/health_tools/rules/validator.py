@@ -436,9 +436,7 @@ class RuleValidator:
                     errors.append(f"{prefix}.right 只能用于二元运算")
             if conditions is not None:
                 if has_shorthand:
-                    errors.append(
-                        f"{prefix} 不能同时提供 conditions 和 left/operator/threshold"
-                    )
+                    errors.append(f"{prefix} 不能同时提供 conditions 和 left/operator/threshold")
                 if not isinstance(conditions, list) or not conditions:
                     errors.append(f"{prefix}.conditions 不能为空")
                 else:
