@@ -632,6 +632,7 @@ accuracy:
     single, bad_and, bad_or = rule.accuracy.marks
     assert single.conditions == (AccuracyConditionRule("online.within_5", "lt", 80.0, None),)
     assert single.left == "online.within_5"
+    assert single.match == "all"
     assert bad_and.match == "all"
     assert bad_and.conditions[0].right == "comp.within_5"
     assert bad_and.conditions[1].threshold == 80.0
@@ -706,7 +707,7 @@ accuracy:
       match: all
       conditions: []
 """,
-            "conditions 不能为空",
+            "conditions 必须是非空列表",
         ),
         (
             """
@@ -719,6 +720,108 @@ accuracy:
       category: c
 """,
             "必须提供 conditions 或 left/operator/threshold",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: null
+      conditions:
+        - left: online.within_5
+          operator: lt
+          threshold: 80.0
+""",
+            "match 仅支持",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      right: comp.within_5
+      conditions:
+        - left: online.within_5
+          operator: lt
+          threshold: 80.0
+""",
+            "不能同时",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: all
+      conditions:
+        - 42
+""",
+            "必须是映射",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: all
+      conditions:
+        - left: online.within_5
+          operator: lt
+          threshold: 80.0
+          extra: 1
+""",
+            "包含未知字段",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: all
+      conditions:
+        - left: online.within_5
+          operator: lt
+          right: comp.within_5
+          threshold: 80.0
+""",
+            "只能用于二元运算",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: all
+      conditions:
+        - left: online.within_5
+          operator: diff_gte
+          threshold: 10.0
+""",
+            "right 是二元运算必填项",
         ),
     ],
 )

@@ -368,18 +368,13 @@ class RuleValidator:
             for field in ("id", "category", "label"):
                 if not isinstance(mark.get(field), str) or not mark[field].strip():
                     errors.append(f"{prefix} 缺少有效的 '{field}'")
-            has_shorthand = mark.get("left") is not None
+            has_shorthand = (
+                mark.get("left") is not None
+                or mark.get("operator") is not None
+                or mark.get("threshold") is not None
+                or mark.get("right") is not None
+            )
             conditions = mark.get("conditions")
-            if has_shorthand:
-                if not RuleValidator._is_finite(mark.get("threshold")):
-                    errors.append(f"{prefix}.threshold 必须是有限数")
-                if "right" not in mark and mark.get("operator") in {
-                    "diff_gte",
-                    "diff_gt",
-                    "ratio_lt",
-                    "ratio_lte",
-                }:
-                    errors.append(f"{prefix}.right 是二元运算必填项")
             legacy = set(mark) & {"comparison", "metric", "min", "min_gap"}
             if legacy:
                 errors.append(f"{prefix} 包含已废弃的旧字段: {', '.join(sorted(legacy))}")
@@ -415,80 +410,76 @@ class RuleValidator:
                 if not safe_category.fullmatch(category):
                     errors.append(f"{prefix}.category 必须是安全的单段目录名")
             if has_shorthand:
-                left = mark.get("left")
-                right = mark.get("right")
-                for name, path in (("left", left), ("right", right)):
-                    if path is None:
-                        continue
-                    if not isinstance(path, str) or not re.fullmatch(
-                        r"(?:online|comp)\.[A-Za-z0-9_.-]+", path
-                    ):
-                        errors.append(f"{prefix}.{name} 必须是 online.<metric> 或 comp.<metric>")
-                    elif path.split(".", 1)[1] not in known_metrics:
-                        errors.append(
-                            f"{prefix}.{name} 指标 {path.split('.', 1)[1]} "
-                            "未由 accuracy.methods 或 accuracy.thresholds 声明"
-                        )
-                operator = mark.get("operator")
-                if operator not in operators:
-                    errors.append(f"{prefix}.operator 仅支持: {', '.join(sorted(operators))}")
-                elif operator in {"lt", "lte", "gt", "gte"} and right is not None:
-                    errors.append(f"{prefix}.right 只能用于二元运算")
+                RuleValidator._validate_accuracy_condition(
+                    {
+                        "left": mark.get("left"),
+                        "operator": mark.get("operator"),
+                        "threshold": mark.get("threshold"),
+                        "right": mark.get("right"),
+                    },
+                    prefix,
+                    known_metrics,
+                    operators,
+                    errors,
+                )
             if conditions is not None:
                 if has_shorthand:
                     errors.append(f"{prefix} 不能同时提供 conditions 和 left/operator/threshold")
                 if not isinstance(conditions, list) or not conditions:
-                    errors.append(f"{prefix}.conditions 不能为空")
+                    errors.append(f"{prefix}.conditions 必须是非空列表")
                 else:
                     for cond_index, condition in enumerate(conditions):
                         cond_prefix = f"{prefix}.conditions[{cond_index}]"
-                        if not isinstance(condition, dict):
-                            errors.append(f"{cond_prefix} 必须是映射")
-                            continue
-                        for field in ("left", "operator"):
-                            if (
-                                not isinstance(condition.get(field), str)
-                                or not condition[field].strip()
-                            ):
-                                errors.append(f"{cond_prefix} 缺少有效的 '{field}'")
-                        if not RuleValidator._is_finite(condition.get("threshold")):
-                            errors.append(f"{cond_prefix}.threshold 必须是有限数")
-                        cond_operator = condition.get("operator")
-                        if cond_operator not in operators:
-                            errors.append(
-                                f"{cond_prefix}.operator 仅支持: {', '.join(sorted(operators))}"
-                            )
-                        cond_right = condition.get("right")
-                        if (
-                            cond_operator in {"diff_gte", "diff_gt", "ratio_lt", "ratio_lte"}
-                            and cond_right is None
-                        ):
-                            errors.append(f"{cond_prefix}.right 是二元运算必填项")
-                        if cond_operator in {"lt", "lte", "gt", "gte"} and cond_right is not None:
-                            errors.append(f"{cond_prefix}.right 只能用于二元运算")
-                        for name, path in (
-                            ("left", condition.get("left")),
-                            ("right", cond_right),
-                        ):
-                            if path is None:
-                                continue
-                            if not isinstance(path, str) or not re.fullmatch(
-                                r"(?:online|comp)\.[A-Za-z0-9_.-]+", path
-                            ):
-                                errors.append(
-                                    f"{cond_prefix}.{name} 必须是 online.<metric> 或 comp.<metric>"
-                                )
-                            elif path.split(".", 1)[1] not in known_metrics:
-                                errors.append(
-                                    f"{cond_prefix}.{name} 指标 {path.split('.', 1)[1]} "
-                                    "未由 accuracy.methods 或 accuracy.thresholds 声明"
-                                )
+                        RuleValidator._validate_accuracy_condition(
+                            condition, cond_prefix, known_metrics, operators, errors
+                        )
             elif not has_shorthand:
                 errors.append(f"{prefix} 必须提供 conditions 或 left/operator/threshold")
             match = mark.get("match")
-            if match is not None and match not in {"all", "any"}:
+            if "match" in mark and match not in {"all", "any"}:
                 errors.append(f"{prefix}.match 仅支持: all, any")
         return errors
+
+    @staticmethod
+    def _validate_accuracy_condition(
+        condition: object,
+        prefix: str,
+        known_metrics: set,
+        operators: set,
+        errors: list,
+    ) -> None:
+        """校验单个准确度条件（简写或组合叶子条件），错误追加到 errors。"""
+        if not isinstance(condition, dict):
+            errors.append(f"{prefix} 必须是映射")
+            return
+        unknown = set(condition) - {"left", "operator", "right", "threshold"}
+        if unknown:
+            errors.append(f"{prefix} 包含未知字段: {', '.join(sorted(unknown))}")
+        for field in ("left", "operator"):
+            if not isinstance(condition.get(field), str) or not condition[field].strip():
+                errors.append(f"{prefix} 缺少有效的 '{field}'")
+        if not RuleValidator._is_finite(condition.get("threshold")):
+            errors.append(f"{prefix}.threshold 必须是有限数")
+        operator = condition.get("operator")
+        if operator not in operators:
+            errors.append(f"{prefix}.operator 仅支持: {', '.join(sorted(operators))}")
+        right = condition.get("right")
+        if operator in {"diff_gte", "diff_gt", "ratio_lt", "ratio_lte"} and right is None:
+            errors.append(f"{prefix}.right 是二元运算必填项")
+        if operator in {"lt", "lte", "gt", "gte"} and right is not None:
+            errors.append(f"{prefix}.right 只能用于二元运算")
+        for name, path in (("left", condition.get("left")), ("right", right)):
+            if path is None:
+                continue
+            if not isinstance(path, str) or not re.fullmatch(
+                r"(?:online|comp)\.[A-Za-z0-9_.-]+", path
+            ):
+                errors.append(f"{prefix}.{name} 必须是 online.<metric> 或 comp.<metric>")
+            elif path.split(".", 1)[1] not in known_metrics:
+                errors.append(
+                    f"{prefix}.{name} 指标 {path.split('.', 1)[1]} "
+                    "未由 accuracy.methods 或 accuracy.thresholds 声明"
+                )
 
     @staticmethod
     def _is_non_negative_finite(value: object) -> bool:

@@ -25,7 +25,7 @@ from health_tools.utils.columns import expand_columns as _expand_columns
 def _build_accuracy_mark(mark: dict) -> AccuracyMarkRule:
     """根据 mark 字典构建 AccuracyMarkRule（简写或组合条件）。"""
     conditions = None
-    if "conditions" in mark:
+    if mark.get("conditions") is not None:
         conditions = tuple(
             AccuracyConditionRule(
                 left=str(condition["left"]),
@@ -43,7 +43,7 @@ def _build_accuracy_mark(mark: dict) -> AccuracyMarkRule:
         right=str(mark["right"]) if mark.get("right") is not None else None,
         category=str(mark["category"]),
         label=str(mark["label"]),
-        match=str(mark.get("match", "all")),
+        match=str(mark["match"]) if mark.get("match") is not None else "all",
         conditions=conditions or (),
     )
 
