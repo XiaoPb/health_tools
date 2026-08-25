@@ -75,7 +75,8 @@ issue_priority: [accuracy, frame_warning]
 （`check_report.csv` 与 `check_report_compact.csv` 均不会出现）。分类说明列为
 `优先级`、`异常类别`、`文件数`、`占比`、`判断条件`、`场景分类占比`、`人员占比`、
 `说明信息`。分类表顺序沿用 `issue_priority`，准确度 category 沿用 `accuracy.marks`
-声明顺序。
+声明顺序。所有单元格水平居中、垂直居中并启用换行；数据区套用蓝色表格样式
+（TableStyleMedium2，自带筛选按钮）；列宽按内容自适应（东亚宽字符按 2 列计）。
 
 ### 性能基准
 

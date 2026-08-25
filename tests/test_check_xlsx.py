@@ -301,7 +301,7 @@ def test_write_check_workbook_applies_numeric_formats(tmp_path):
     assert summary["H2"].value == "帧不完整"
 
 
-def test_write_check_workbook_sets_freeze_panes_and_auto_filter(tmp_path):
+def test_write_check_workbook_sets_freeze_panes_and_table_style(tmp_path):
     rows = [{"文件名": "a.csv", "帧完整性(结果)": "FAIL"}]
     output = tmp_path / "frozen.xlsx"
     write_check_workbook(
@@ -316,7 +316,10 @@ def test_write_check_workbook_sets_freeze_panes_and_auto_filter(tmp_path):
     for name in ("总表", "分类说明", "frame", "精简总表"):
         ws = book[name]
         assert ws.freeze_panes == "A2"
-        assert ws.auto_filter.ref is not None
+        assert len(ws.tables) == 1
+        table = next(iter(ws.tables.values()))
+        assert table.tableStyleInfo.name == "TableStyleMedium2"
+        assert table.tableStyleInfo.showRowStripes is True
 
 
 def test_write_check_workbook_creates_category_sheets_only_for_hit_categories(tmp_path):
@@ -504,7 +507,7 @@ def test_write_check_workbook_sanitized_title_collision_gets_stable_suffix(tmp_p
         assert ws.cell(row=2, column=column).value == mark
 
 
-def test_write_check_workbook_auto_filter_ref_exact(tmp_path):
+def test_write_check_workbook_table_ref_exact(tmp_path):
     rows = [
         {
             "文件名": "a.csv",
@@ -532,8 +535,50 @@ def test_write_check_workbook_auto_filter_ref_exact(tmp_path):
     )
     book = load_workbook(output)
     ws = book["总表"]
-    assert ws.auto_filter.ref == f"A1:E{ws.max_row}"
-    assert ws.auto_filter.ref == "A1:E3"
+    assert len(ws.tables) == 1
+    table = next(iter(ws.tables.values()))
+    assert table.ref == "A1:E3"
+
+
+def test_write_check_workbook_aligns_all_cells_center(tmp_path):
+    rows = [{"文件名": "a.csv", "帧完整性(结果)": "FAIL", "场景分类": "rest"}]
+    output = tmp_path / "center.xlsx"
+    write_check_workbook(
+        output,
+        rows,
+        [{"文件名": "a.csv", "检查项": "帧完整性", "状态": "FAIL"}],
+        issue_priority=("frame_fail",),
+        accuracy_categories=(),
+        category_descriptions={"frame": ("帧完整性(结果)=FAIL", "帧不完整")},
+    )
+    book = load_workbook(output)
+    for name in ("总表", "分类说明", "frame", "精简总表"):
+        ws = book[name]
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column):
+            for cell in row:
+                assert cell.alignment.horizontal == "center", (name, cell.coordinate)
+                assert cell.alignment.vertical == "center", (name, cell.coordinate)
+                assert cell.alignment.wrap_text is True, (name, cell.coordinate)
+
+
+def test_write_check_workbook_column_width_aware_of_cjk(tmp_path):
+    rows = [{"文件名": "a.csv", "x": "a.csv"}]
+    output = tmp_path / "width.xlsx"
+    write_check_workbook(
+        output,
+        rows,
+        [],
+        issue_priority=(),
+        accuracy_categories=(),
+        category_descriptions={},
+    )
+    book = load_workbook(output)
+    ws = book["总表"]
+    width_cjk = ws.column_dimensions["A"].width
+    width_ascii = ws.column_dimensions["B"].width
+    assert width_cjk is not None and width_ascii is not None
+    # 中文列头 文件名 按 2 倍宽度计算，应比单字符列头更宽
+    assert width_cjk > width_ascii
 
 
 def test_write_check_workbook_multi_category_summary_denominators(tmp_path):

@@ -6,6 +6,7 @@
 ``write_check_workbook`` 基于这些聚合结果写出固定顺序的多工作表 XLSX 报告。
 """
 
+import unicodedata
 from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple, TypedDict
@@ -13,6 +14,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple, TypedDic
 from openpyxl import Workbook  # type: ignore[import-untyped]
 from openpyxl.styles import Alignment  # type: ignore[import-untyped]
 from openpyxl.utils import get_column_letter  # type: ignore[import-untyped]
+from openpyxl.worksheet.table import Table, TableStyleInfo  # type: ignore[import-untyped]
 
 # 稳定异常组标识到 (状态列, 期望值, 目录分类) 的映射；匹配顺序由调用方传入的
 # issue_priority 决定。reference 组的两个状态列按 OR 语义匹配。
@@ -229,16 +231,24 @@ def _column_union(rows: Sequence[Mapping[str, object]]) -> List[str]:
     return columns
 
 
+def _display_width(text: str) -> int:
+    """按 Excel 显示宽度计算：东亚全角/宽字符（F/W）按 2 列计。"""
+    return sum(2 if unicodedata.east_asian_width(ch) in {"F", "W"} else 1 for ch in text)
+
+
 def _write_data_sheet(
     wb: Workbook,
     title: str,
     columns: Sequence[str],
     data_rows: Sequence[Sequence[object]],
     number_formats: Optional[Mapping[int, str]] = None,
+    table_index: int = 0,
 ) -> None:
-    """创建数据工作表并写入列头与数据行，统一设置冻结、筛选、列宽与换行。
+    """创建数据工作表并写入列头与数据行，统一设置冻结、表格样式、列宽与居中。
 
-    列宽采用启发式：列头与数据前 20 行内容的 ``min(max(len(str(value))) + 2, 60)``。
+    全部单元格水平居中、垂直居中并启用换行；数据区套用蓝色表格样式
+    ``TableStyleMedium2``（自带筛选按钮）。列宽采用启发式：列头与数据前 20 行
+    及后 20 行内容的 ``min(max(显示宽度) + 2, 60)``，显示宽度按东亚宽字符计 2 列。
     ``number_formats`` 为 {1 起始列序号: 数字格式}，仅对数据行生效。
     """
     ws = wb.create_sheet(title=title)
@@ -249,14 +259,26 @@ def _write_data_sheet(
     ws.freeze_panes = "A2"
     if columns:
         last_column = get_column_letter(len(columns))
-        ws.auto_filter.ref = f"A1:{last_column}{ws.max_row}"
+        table = Table(
+            displayName=f"CheckTable{table_index}",
+            ref=f"A1:{last_column}{ws.max_row}",
+        )
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        ws.add_table(table)
         for index, column in enumerate(columns, start=1):
             sample = [column]
-            sample.extend(
-                str(row[index - 1]) if index - 1 < len(row) else "" for row in data_rows[:20]
-            )
+            head = list(data_rows[:20])
+            tail = list(data_rows[-20:]) if len(data_rows) > 40 else []
+            for row in head + tail:
+                sample.append(str(row[index - 1]) if index - 1 < len(row) else "")
             ws.column_dimensions[get_column_letter(index)].width = min(
-                max(len(value) for value in sample) + 2, 60
+                max(_display_width(value) for value in sample) + 2, 60
             )
     if number_formats:
         for row_index in range(2, ws.max_row + 1):
@@ -265,7 +287,7 @@ def _write_data_sheet(
     for row_index in range(1, ws.max_row + 1):
         for column_index in range(1, ws.max_column + 1):
             ws.cell(row=row_index, column=column_index).alignment = Alignment(
-                wrap_text=True, vertical="top"
+                horizontal="center", vertical="center", wrap_text=True
             )
 
 
@@ -311,6 +333,7 @@ def write_check_workbook(
     wb.remove(wb.active)  # 移除默认空表，按固定顺序重建
     # 预占三个固定工作表名，避免分类表与它们重名（openpyxl 会自动改名破坏固定名）。
     used_names: Set[str] = {"总表", "分类说明", "精简总表"}
+    table_index = 0
 
     # 总表
     _write_data_sheet(
@@ -318,7 +341,9 @@ def write_check_workbook(
         "总表",
         total_columns,
         [[row.get(column, "") for column in total_columns] for row in rows],
+        table_index=table_index,
     )
+    table_index += 1
 
     # 分类说明
     summary_rows: List[List[object]] = []
@@ -349,7 +374,9 @@ def write_check_workbook(
         _CATEGORY_SUMMARY_COLUMNS,
         summary_rows,
         number_formats={3: "0", 4: "0.00%"},
+        table_index=table_index,
     )
+    table_index += 1
 
     # 分类表（每个实际命中的 category 一张，标题经 _safe_sheet_title 清洗）
     for category in categories:
@@ -363,7 +390,9 @@ def write_check_workbook(
                 [row.get(column, "") for column in total_columns]
                 for row in rows_by_category[category]
             ],
+            table_index=table_index,
         )
+        table_index += 1
 
     # 精简总表（始终最后）
     compact_columns = _column_union(compact_rows)
@@ -372,6 +401,7 @@ def write_check_workbook(
         "精简总表",
         compact_columns,
         [[row.get(column, "") for column in compact_columns] for row in compact_rows],
+        table_index=table_index,
     )
 
     wb.save(output)
