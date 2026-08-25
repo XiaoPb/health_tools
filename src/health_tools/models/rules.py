@@ -241,16 +241,59 @@ class AnalysisRule:
 
 
 @dataclass(frozen=True)
-class AccuracyMarkRule:
-    """check 准确度标定条件。"""
+class AccuracyConditionRule:
+    """单个准确度比较条件（叶子）。"""
 
-    id: str
     left: str
     operator: str
     threshold: float
-    category: str
-    label: str
     right: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class AccuracyMarkRule:
+    """check 准确度标定条件（单条件简写或组合条件）。
+
+    单条件简写：提供 left/operator/threshold（可选 right），``__post_init__``
+    折叠为 ``conditions`` 中的单个条件；组合条件：提供 match（all/any，默认
+    all）与 conditions 列表。两种模式互斥。
+    """
+
+    id: str
+    left: Optional[str] = None
+    operator: Optional[str] = None
+    threshold: Optional[float] = None
+    category: str = ""
+    label: str = ""
+    right: Optional[str] = None
+    match: str = "all"
+    conditions: Tuple[AccuracyConditionRule, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.match not in {"all", "any"}:
+            raise ValueError("AccuracyMarkRule.match 必须是 all 或 any")
+        if self.conditions:
+            if self.left is not None or self.operator is not None or self.threshold is not None:
+                raise ValueError(
+                    "AccuracyMarkRule 不能同时提供 conditions 和 left/operator/threshold"
+                )
+        elif self.left is not None:
+            if self.operator is None or self.threshold is None:
+                raise ValueError("AccuracyMarkRule 单条件简写必须提供 left/operator/threshold")
+            object.__setattr__(
+                self,
+                "conditions",
+                (
+                    AccuracyConditionRule(
+                        self.left,
+                        self.operator,
+                        self.threshold,
+                        self.right,
+                    ),
+                ),
+            )
+        else:
+            raise ValueError("AccuracyMarkRule 必须提供 conditions 或 left/operator/threshold")
 
 
 @dataclass(frozen=True)

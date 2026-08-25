@@ -13,7 +13,11 @@ from health_tools.api.models import CheckAccuracyResult, CheckRequest, ItemResul
 from health_tools.core.check_accuracy import calculate_check_accuracy, match_accuracy_mark
 from health_tools.core.checker import CheckResult as ItemCheckResult
 from health_tools.core.checker import FileCheckReport
-from health_tools.models.rules import AccuracyMarkRule, CheckAccuracyRule
+from health_tools.models.rules import (
+    AccuracyConditionRule,
+    AccuracyMarkRule,
+    CheckAccuracyRule,
+)
 from health_tools.utils.accuracy import calculate_accuracy, prepare_accuracy_columns
 
 
@@ -448,3 +452,75 @@ def test_check_report_columns_follow_request_accuracy_thresholds(tmp_path) -> No
     assert "Online ±3BPM准确度" in header
     assert "Online ±6BPM准确度" in header
     assert "Online ±5BPM准确度" not in header
+
+
+def test_accuracy_mark_folds_single_condition_shorthand() -> None:
+    mark = AccuracyMarkRule("low", "online.within_5", "lt", 80, "accuracy_low", "Online准确度低")
+    assert mark.conditions == (AccuracyConditionRule("online.within_5", "lt", 80.0, None),)
+    assert mark.left == "online.within_5"
+    assert mark.threshold == 80.0
+    assert mark.match == "all"
+
+
+def test_accuracy_mark_keeps_composite_conditions() -> None:
+    mark = AccuracyMarkRule(
+        id="bad_and_low",
+        category="accuracy_bad_and_low",
+        label="组合",
+        match="any",
+        conditions=(
+            AccuracyConditionRule("online.within_5", "diff_gte", 10.0, "comp.within_5"),
+            AccuracyConditionRule("online.within_5", "lt", 80.0),
+        ),
+    )
+    assert mark.match == "any"
+    assert len(mark.conditions) == 2
+    assert mark.left is None
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        (
+            {
+                "id": "x",
+                "category": "c",
+                "label": "l",
+                "left": "online.within_5",
+                "operator": "lt",
+                "threshold": 80.0,
+                "conditions": (AccuracyConditionRule("online.within_5", "lt", 80.0),),
+            },
+            "不能同时提供",
+        ),
+        (
+            {"id": "x", "category": "c", "label": "l"},
+            "必须提供",
+        ),
+        (
+            {
+                "id": "x",
+                "category": "c",
+                "label": "l",
+                "left": "online.within_5",
+                "operator": "lt",
+                "match": "xor",
+                "conditions": (AccuracyConditionRule("online.within_5", "lt", 80.0),),
+            },
+            "必须是 all 或 any",
+        ),
+        (
+            {
+                "id": "x",
+                "category": "c",
+                "label": "l",
+                "left": "online.within_5",
+                "threshold": 80.0,
+            },
+            "必须提供 left/operator/threshold",
+        ),
+    ],
+)
+def test_accuracy_mark_rejects_invalid_combinations(kwargs, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        AccuracyMarkRule(**kwargs)
