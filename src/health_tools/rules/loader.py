@@ -5,6 +5,7 @@ import yaml
 
 from health_tools.config import get_user_rules_dir
 from health_tools.models.rules import (
+    AccuracyConditionRule,
     AccuracyMarkRule,
     AnalysisRule,
     CheckAccuracyRule,
@@ -19,6 +20,36 @@ from health_tools.models.rules import (
     normalize_check_issue_priority,
 )
 from health_tools.utils.columns import expand_columns as _expand_columns
+
+
+def _build_accuracy_mark(mark: dict) -> AccuracyMarkRule:
+    """根据 mark 字典构建 AccuracyMarkRule（简写或组合条件）。"""
+    conditions = None
+    if "conditions" in mark:
+        conditions = tuple(
+            AccuracyConditionRule(
+                left=str(condition["left"]),
+                operator=str(condition["operator"]),
+                right=(
+                    str(condition["right"])
+                    if condition.get("right") is not None
+                    else None
+                ),
+                threshold=float(condition["threshold"]),
+            )
+            for condition in mark["conditions"]
+        )
+    return AccuracyMarkRule(
+        id=str(mark["id"]),
+        left=str(mark["left"]) if mark.get("left") is not None else None,
+        operator=str(mark["operator"]) if mark.get("operator") is not None else None,
+        threshold=float(mark["threshold"]) if mark.get("threshold") is not None else None,
+        right=str(mark["right"]) if mark.get("right") is not None else None,
+        category=str(mark["category"]),
+        label=str(mark["label"]),
+        match=str(mark.get("match", "all")),
+        conditions=conditions or (),
+    )
 
 
 class RuleLoader:
@@ -285,16 +316,7 @@ class RuleLoader:
         }
         accuracy_data = data.get("accuracy") or {}
         marks = tuple(
-            AccuracyMarkRule(
-                id=str(mark["id"]),
-                left=str(mark["left"]),
-                operator=str(mark["operator"]),
-                right=str(mark["right"]) if mark.get("right") is not None else None,
-                threshold=float(mark["threshold"]),
-                category=str(mark["category"]),
-                label=str(mark["label"]),
-            )
-            for mark in accuracy_data.get("marks", [])
+            _build_accuracy_mark(mark) for mark in accuracy_data.get("marks", [])
         )
         accuracy = CheckAccuracyRule(
             enabled=bool(accuracy_data.get("enabled", False)),

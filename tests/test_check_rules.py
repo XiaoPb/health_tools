@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from health_tools.api.models import BatchResult, CheckResult
@@ -10,6 +11,7 @@ from health_tools.commands.check import check_cmd
 from health_tools.models.rules import (
     CHECK_ISSUE_PRIORITY_IDS,
     DEFAULT_CHECK_ISSUE_PRIORITY,
+    AccuracyConditionRule,
     AccuracyMarkRule,
     CheckAccuracyRule,
     CheckRule,
@@ -583,3 +585,145 @@ def test_check_rule_rejects_malformed_accuracy_thresholds(thresholds):
     )
 
     assert "accuracy.thresholds" in " ".join(errors)
+
+
+def test_check_rule_loads_composite_accuracy_marks(tmp_path) -> None:
+    rule_path = tmp_path / "accuracy.yaml"
+    rule_path.write_text(
+        """version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: single_low
+      left: online.within_5
+      operator: lt
+      threshold: 80.0
+      label: 单条件低
+      category: accuracy_single_low
+    - id: bad_and_low
+      label: 组合与
+      category: accuracy_bad_and_low
+      match: all
+      conditions:
+        - left: online.within_5
+          operator: diff_gte
+          right: comp.within_5
+          threshold: 10.0
+        - left: online.within_5
+          operator: lt
+          threshold: 80.0
+    - id: bad_or_low
+      label: 组合或
+      category: accuracy_bad_or_low
+      match: any
+      conditions:
+        - left: online.within_5
+          operator: lt
+          threshold: 80.0
+        - left: comp.within_5
+          operator: lt
+          threshold: 80.0
+""",
+        encoding="utf-8",
+    )
+
+    rule = RuleLoader.load_check_rule(str(rule_path))
+
+    single, bad_and, bad_or = rule.accuracy.marks
+    assert single.conditions == (
+        AccuracyConditionRule("online.within_5", "lt", 80.0, None),
+    )
+    assert single.left == "online.within_5"
+    assert bad_and.match == "all"
+    assert bad_and.conditions[0].right == "comp.within_5"
+    assert bad_and.conditions[1].threshold == 80.0
+    assert bad_or.match == "any"
+    assert len(bad_or.conditions) == 2
+
+
+@pytest.mark.parametrize(
+    ("yaml_body", "message"),
+    [
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      left: online.within_5
+      operator: lt
+      threshold: 80.0
+      conditions:
+        - left: online.within_5
+          operator: lt
+          threshold: 80.0
+""",
+            "不能同时",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: xor
+      conditions:
+        - left: online.within_5
+          operator: lt
+          threshold: 80.0
+""",
+            "match 仅支持",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: all
+      conditions:
+        - operator: lt
+          threshold: 80.0
+""",
+            "缺少有效的 'left'",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+      match: all
+      conditions: []
+""",
+            "conditions 不能为空",
+        ),
+        (
+            """
+version: '1.0'
+accuracy:
+  enabled: true
+  marks:
+    - id: x
+      label: l
+      category: c
+""",
+            "必须提供 conditions 或 left/operator/threshold",
+        ),
+    ],
+)
+def test_check_rule_rejects_invalid_accuracy_marks(yaml_body, message) -> None:
+    errors = RuleValidator.validate(yaml.safe_load(yaml_body), "check")
+    assert message in "；".join(errors)
