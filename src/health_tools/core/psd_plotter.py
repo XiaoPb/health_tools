@@ -218,13 +218,20 @@ def _plot_hr_overlays(
     labels = ["pred(offline)", "mcu(online)"]
     ax.plot(second, offline_hr, "k-.", linewidth=2)
     ax.plot(second, online_hr, "w-.", linewidth=2)
-    if _has_valid_ref(polar_hr):
-        ax.plot(second, polar_hr, "r-.", linewidth=2)
+    if _plot_polar_overlay(ax, second, polar_hr):
         labels.append("polar(ref)")
     if _has_valid_ref(comp_hr):
         ax.plot(second, comp_hr, color="#00E5FF", linestyle="--", linewidth=2)
         labels.append("comp")
     ax.legend(labels, loc="upper right")
+
+
+def _plot_polar_overlay(ax: Axes, second: np.ndarray, polar_hr: np.ndarray) -> bool:
+    """在PSD子图绘制有效的Polar参考心率折线。"""
+    if not _has_valid_ref(polar_hr):
+        return False
+    ax.plot(second, polar_hr, "r-.", linewidth=2)
+    return True
 
 
 class PsdPlotter:
@@ -388,6 +395,8 @@ class PsdPlotter:
                 _imagesc_exact(ax, psd, title)
                 if index == 0 and has_overlay:
                     _plot_hr_overlays(ax, second, hba_out, mcu_hr, polar_hr, comp_hr)
+                elif has_overlay:
+                    _plot_polar_overlay(ax, second, polar_hr)
 
             fig.subplots_adjust(
                 left=0.03,

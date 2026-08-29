@@ -256,7 +256,7 @@ def _write_data_sheet(
         ws.append(list(columns))
         for row in data_rows:
             ws.append(list(row))
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "B2"
     if columns:
         last_column = get_column_letter(len(columns))
         table = Table(

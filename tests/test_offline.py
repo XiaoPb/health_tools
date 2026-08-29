@@ -1671,6 +1671,33 @@ def test_psd_metric_text_preserves_high_precision_threshold_names():
     assert "±1.0000002bpm=" in rows[0]
 
 
+def test_psd_plotter_draws_polar_on_each_acc_axis(monkeypatch, tmp_path):
+    result_dir = tmp_path / "result"
+    result_dir.mkdir()
+    (result_dir / "sample_result.vshb").write_text(
+        "second,polar,algo_hr,comp_hr,fw_hr\n1,100,101,102,103\n",
+        encoding="utf-8",
+    )
+    matrix = np.arange(1, 33, dtype=float).reshape(4, 8)
+    for suffix in ("0.prepsd", ".accxpsd", ".accypsd", ".acczpsd"):
+        np.savetxt(result_dir / f"sample{suffix}", matrix, delimiter=",")
+
+    polar_axes = []
+    original_plot = psd_plotter.Axes.plot
+
+    def tracking_plot(ax, *args, **kwargs):
+        if len(args) >= 3 and args[2] == "r-.":
+            polar_axes.append(ax.get_title())
+        return original_plot(ax, *args, **kwargs)
+
+    monkeypatch.setattr(psd_plotter.Axes, "plot", tracking_plot)
+
+    result = psd_plotter.PsdPlotter().plot(result_dir, save_dir=tmp_path / "out", workers=1)
+
+    assert len(result.saved) == 1
+    assert polar_axes == ["PPG", "ACCX", "ACCY", "ACCZ"]
+
+
 @pytest.mark.parametrize("psd_values", [None, 0.0, np.nan], ids=["missing", "zero", "nonfinite"])
 def test_psd_plotter_skips_invalid_groups(tmp_path: Path, psd_values):
     result_dir = tmp_path / "result"

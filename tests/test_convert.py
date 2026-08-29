@@ -548,3 +548,96 @@ def test_convert_split_without_split_matches_convert():
 
     assert len(chunks) == 1
     pd.testing.assert_frame_equal(chunks[0], expected)
+
+
+def test_convert_split_drops_chunks_below_classify_min_rows(tmp_path: Path):
+    from health_tools.api.file_operations import _convert_one
+    from health_tools.api.models import ItemStatus
+
+    source = tmp_path / "source.csv"
+    source.write_text("frame,value\n0,10\n1,20\n2,30\n3,40\n4,50\n", encoding="utf-8")
+    output_root = tmp_path / "output"
+    destination = output_root / source.name
+    rule = ConvertRule(
+        column_mapping={"frame": "FRAME_ID", "value": "VALUE"},
+        split={"by_size": 2},
+        classify={"default": "kept", "filters": {"min_rows": 2}},
+    )
+
+    item = _convert_one(
+        source,
+        destination,
+        DataConverter(rule),
+        None,
+        None,
+        output_root=output_root,
+    )
+
+    assert item.status == ItemStatus.OK
+    assert item.rows == 4
+    assert (output_root / "kept" / "source_1.csv").exists()
+    assert (output_root / "kept" / "source_2.csv").exists()
+    assert not (output_root / "kept" / "source_3.csv").exists()
+
+
+def test_convert_split_filters_serialized_size_and_keeps_original_index(tmp_path: Path):
+    from health_tools.api.file_operations import _convert_one
+    from health_tools.api.models import ItemStatus
+
+    source = tmp_path / "source.csv"
+    large = "x" * 800
+    source.write_text(
+        f"frame,payload\n0,a\n1,b\n0,{large}\n1,{large}\n",
+        encoding="utf-8",
+    )
+    output_root = tmp_path / "output"
+    destination = output_root / source.name
+    rule = ConvertRule(
+        column_mapping={"frame": "FRAME_ID", "payload": "PAYLOAD"},
+        split={"by_column": "frame", "column_value": 0},
+        classify={"default": "kept", "filters": {"min_size_kb": 1}},
+    )
+
+    item = _convert_one(
+        source,
+        destination,
+        DataConverter(rule),
+        None,
+        None,
+        output_root=output_root,
+    )
+
+    assert item.status == ItemStatus.OK
+    assert item.rows == 2
+    assert not (output_root / "kept" / "source_1.csv").exists()
+    assert (output_root / "kept" / "source_2.csv").exists()
+
+
+def test_convert_split_returns_skip_when_classify_filters_drop_all_chunks(tmp_path: Path):
+    from health_tools.api.file_operations import _convert_one
+    from health_tools.api.models import ItemStatus
+    from health_tools.utils.errors import REASON_TOO_FEW_ROWS
+
+    source = tmp_path / "source.csv"
+    source.write_text("frame,value\n0,10\n1,20\n2,30\n", encoding="utf-8")
+    output_root = tmp_path / "output"
+    destination = output_root / source.name
+    rule = ConvertRule(
+        column_mapping={"frame": "FRAME_ID", "value": "VALUE"},
+        split={"by_size": 2},
+        classify={"default": "kept", "filters": {"min_rows": 3}},
+    )
+
+    item = _convert_one(
+        source,
+        destination,
+        DataConverter(rule),
+        None,
+        None,
+        output_root=output_root,
+    )
+
+    assert item.status == ItemStatus.SKIP
+    assert item.reason == REASON_TOO_FEW_ROWS
+    assert "行数不足" in item.detail
+    assert list(output_root.rglob("*.csv")) == []

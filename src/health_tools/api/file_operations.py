@@ -66,6 +66,34 @@ def _write_convert_csv(frame, output_file: Path, csv_config: Optional[dict]) -> 
     handler.write(output_file, frame, info=info or None)
 
 
+def _convert_chunk_filter_reason(
+    frame, classify_config: Optional[dict], output_config: Optional[dict]
+) -> Optional[Tuple[str, str]]:
+    """检查转换后分段是否满足内嵌 classify 的 filters。"""
+    filters = (classify_config or {}).get("filters", {}) or {}
+    min_rows = int(filters.get("min_rows", 0))
+    if min_rows > 0 and len(frame) < min_rows:
+        return REASON_TOO_FEW_ROWS, f"行数不足({len(frame)} < {min_rows})"
+
+    min_size_kb = float(filters.get("min_size_kb", 0))
+    if min_size_kb <= 0:
+        return None
+
+    config = output_config or {}
+    delimiter = config.get("delimiter", ",")
+    encoding = config.get("encoding", "utf-8")
+    payload = frame.to_csv(index=False, sep=delimiter)
+    info = config.get("info", "")
+    if int(config.get("info_row", 0)) > 0 and info:
+        from health_tools.utils.csv_handler import _sanitize_csv_cell
+
+        payload = _sanitize_csv_cell(str(info)) + "\n" + payload
+    size_kb = len(payload.encode(encoding)) / 1024.0
+    if size_kb < min_size_kb:
+        return REASON_TOO_SMALL, f"文件过小({size_kb:.1f}KB < {min_size_kb}KB)"
+    return None
+
+
 def _convert_classifier(converter):
     """规则配置 classify 时构建内存分类器，否则返回 None。"""
     if not converter.rule.classify:
@@ -140,7 +168,17 @@ def _convert_one(
                 )
             outputs = []
             categories = set()
+            filtered = []
+            written_rows = 0
             for index, chunk in enumerate(chunks, 1):
+                filter_reason = _convert_chunk_filter_reason(
+                    chunk,
+                    converter.rule.classify if classifier is not None else None,
+                    output_config,
+                )
+                if filter_reason is not None:
+                    filtered.append(filter_reason)
+                    continue
                 if classifier is not None:
                     category = (
                         classifier.classify_frame(chunk, source, input_root=input_root)
@@ -154,12 +192,23 @@ def _convert_one(
                     chunk_path = destination.parent / _output_name(index)
                 _write_convert_csv(chunk, chunk_path, output_config)
                 outputs.append(chunk_path)
+                written_rows += len(chunk)
+            if not outputs:
+                reason = filtered[0][0] if filtered else REASON_RULE_MISMATCH
+                details = "; ".join(dict.fromkeys(detail for _, detail in filtered))
+                return ItemResult(
+                    ItemStatus.SKIP,
+                    str(source),
+                    str(destination),
+                    reason,
+                    details or "不符合转换规则",
+                )
             return ItemResult(
                 ItemStatus.OK,
                 str(source),
                 ";".join(str(path) for path in outputs),
                 category=categories.pop() if len(categories) == 1 else "",
-                rows=sum(len(chunk) for chunk in chunks),
+                rows=written_rows,
             )
         result = converter.convert(frame, source_file=source)
         if result.empty and len(result.columns) == 0:

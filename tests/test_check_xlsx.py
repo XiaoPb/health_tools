@@ -315,7 +315,7 @@ def test_write_check_workbook_sets_freeze_panes_and_table_style(tmp_path):
     book = load_workbook(output)
     for name in ("总表", "分类说明", "frame", "精简总表"):
         ws = book[name]
-        assert ws.freeze_panes == "A2"
+        assert ws.freeze_panes == "B2"
         assert len(ws.tables) == 1
         table = next(iter(ws.tables.values()))
         assert table.tableStyleInfo.name == "TableStyleMedium2"
