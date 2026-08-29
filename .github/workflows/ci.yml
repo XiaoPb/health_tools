@@ -77,8 +77,69 @@ jobs:
         name: dist
         path: dist/
 
+  package-windows:
+    needs: test
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install packaging dependencies
+      shell: pwsh
+      run: |
+        python -m pip install --upgrade pip
+        pip install ".[dev]" pyinstaller
+
+    - name: Build standalone executable
+      shell: pwsh
+      run: pyinstaller --clean --noconfirm ghealth_tools.spec
+
+    - name: Smoke test executable
+      shell: pwsh
+      run: |
+        $exe = "dist\ghealth-tools-windows-x64.exe"
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+          throw "Executable not found: $exe"
+        }
+        & $exe --help
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $exe --version
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Create and verify zip
+      shell: pwsh
+      run: |
+        $exe = "dist\ghealth-tools-windows-x64.exe"
+        $zip = "dist\ghealth-tools-windows-x64.zip"
+        Compress-Archive -Path $exe -DestinationPath $zip -CompressionLevel Optimal
+        $extract = Join-Path $env:RUNNER_TEMP "ghealth-tools-windows-x64"
+        New-Item -ItemType Directory -Path $extract -Force | Out-Null
+        Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+        $files = @(Get-ChildItem -LiteralPath $extract -File -Recurse)
+        if ($files.Count -ne 1 -or $files[0].Name -ne "ghealth-tools-windows-x64.exe") {
+          throw "Zip must contain exactly ghealth-tools-windows-x64.exe"
+        }
+        & $files[0].FullName --version
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Upload Windows executable artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-executable
+        path: |
+          dist/ghealth-tools-windows-x64.exe
+          dist/ghealth-tools-windows-x64.zip
+
   release:
-    needs: build
+    needs: [build, package-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref, 'rc') && !contains(github.ref, 'beta') && !contains(github.ref, 'alpha')
 
@@ -94,6 +155,12 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: dist
+        path: dist/
+
+    - name: Download Windows executable artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-executable
         path: dist/
 
     - name: Generate release notes
@@ -125,6 +192,11 @@ jobs:
           ```
 
           Or download the wheel/sdist from the assets below.
+
+          Windows users can download `ghealth-tools-windows-x64.exe` directly without
+          installing Python, or download `ghealth-tools-windows-x64.zip` containing
+          the same executable. The `offline` command still requires the external
+          `TEE_Algorithm.exe` configured separately.
 
           ## Changes
 
