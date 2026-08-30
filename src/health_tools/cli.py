@@ -1,9 +1,28 @@
 import importlib
+import sys
 from typing import Any
 
 import click
 
 from health_tools import __version__
+
+
+def _configure_windows_stdio() -> None:
+    """让 Windows 控制台可以输出中文帮助和错误信息。"""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        encoding = str(getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if encoding == "utf8":
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_windows_stdio()
 
 COMMAND_MAP = {
     "parse": ("health_tools.commands.parse", "parse_cmd"),
