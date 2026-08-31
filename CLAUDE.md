@@ -14,7 +14,7 @@ ruff check src/ tests/
 mypy src/
 ```
 
-Python 3.9+，Black 与 Ruff 行宽为 100。测试前确认当前导入来自本工作区：
+Python 3.10+，Black 与 Ruff 行宽为 100。测试前确认当前导入来自本工作区：
 
 ```bash
 python -c "import health_tools; print(health_tools.__file__)"
