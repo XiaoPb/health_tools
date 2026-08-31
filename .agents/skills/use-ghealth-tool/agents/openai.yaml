@@ -1,4 +1,4 @@
 interface:
   display_name: "GHealth Tools 使用助手"
-  short_description: "规划并执行 PPG 数据处理、检查、绘图与评估工作流"
-  default_prompt: "Use $use-ghealth-tool to inspect my environment and complete this GHealth Tools data task."
+  short_description: "用当前 ghealth_tool CLI 安全完成 PPG 数据处理与验收"
+  default_prompt: "Use $use-ghealth-tool to inspect the current ghealth_tool CLI, validate my input, run the smallest safe workflow, and report outputs, skips, warnings, and failures."

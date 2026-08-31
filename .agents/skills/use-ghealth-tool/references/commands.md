@@ -8,19 +8,19 @@
 | 命令 | 输入 | 输出 | 关键选择 |
 |---|---|---|---|
 | `parse` (`p`) | 日志文件/目录 | CSV | 必须用 `--rule` 解析；芯片输出由规则内 `chip/target_chip` 决定 |
-| `plot` (`pl`) | CSV 或离线目录 | 图片 | `--type time|freq|stft|psd|both`；PSD 输入必须是目录 |
+| `plot` (`pl`) | CSV 或离线目录 | 图片 | `--type time|freq|ac|fft|stft|psd|both`；PSD 输入必须是目录，保存时加 `--no-show` |
 | `classify` (`cls`) | CSV 文件/目录 | 分类目录 | 默认 `--copy`；`--move`、`--symlink` 改变落盘方式 |
 | `convert` (`cv`) | CSV 文件/目录 | CSV | 正常转换需 `--rule`；`--init-rule` 生成模板；可 `--merge`、`--split` |
 | `info` (`i`) | CSV/YAML | 终端信息 | 用 `--stats`、`--schema`、`--preview` 预检输入 |
 | `validate` (`val`) | YAML | 验证状态 | 类型由路径推断；不等同于真实数据验证 |
 | `split` | CSV 文件/目录 | 多个 CSV | 按列值、行数或时间三种方式 |
-| `process` | CSV 目录 | 处理后 CSV | `--split` 按帧拆分，否则批量复制/处理 |
+| `process` | CSV 目录 | 处理后 CSV | `--split` 按 `FRAME_ID` 拆分；支持 `--pattern`、`--filter`、`--workers` |
 | `factory` (`snr`, `fac`) | CSV 文件/目录 | 指标表/CSV | chip/rule 提供列和 ADC 参数，CLI 可覆盖增益、电流、时长 |
 | `config` (`cfg`) | 配置选项 | 用户配置 | 初始化规则、扫描离线版本、设置默认版本 |
 | `evaluate` (`eval`) | 结果目录 | 评估报告 | `--type hr|spo2`；列索引为 1-based 且优先于列名 |
 | `offline` | 芯片 CSV 目录 | 版本结果、PSD、准确度 | 会调用 exe 并移动不合规输入；支持多版本和 `--no-run` |
-| `check` (`chk`) | CSV/目录或报告 | 检查报告/分拣目录 | 普通检查需 `-i`；可用 `-r` 复用 check YAML；`--sort` 需 `--sort-output`，未给 `--report` 时自动读取本次 check 报告 |
-| `analyze` (`ana`) | CSV/目录或 offline 结果 | 诊断报告和证据图 | `--focus` 强制深度分析；`--report` 选择 Markdown/PPT |
+| `check` (`chk`) | CSV/目录或报告 | 检查报告/分拣目录 | 普通检查需 `-i`；可用 `-r` 复用 check YAML；`--sort` 需 `--sort-output`，未给 `--report` 时按输入目录推导报告 |
+| `analyze` (`ana`) | CSV/目录或 offline 结果 | 诊断报告和证据图 | `--focus` 强制深度分析；`--report markdown|pptx|all`；可复用 `--check-report`/`--offline-result`/`--figure-dir` |
 
 ## 高影响参数
 
@@ -29,7 +29,7 @@
 - `classify --move`：移动源文件。默认使用 `--copy`。
 - `check --sort`：根据报告移动源文件到正常/异常目录。
 - `check -r/--rule`：加载 check 规则；规则可声明 chip、时间戳/金标/准确度列和检查策略，不能声明输入输出路径、sort、report、workers 或 verbose。
-- `check --accuracy`：统计 Online vs Ref、Comp vs Ref；`--accuracy-min` 和 `--online-comp-gap` 可声明标定及分拣优先级。
+- check 的准确度策略写在 check YAML 的 `accuracy` 块中；当前 CLI help 不提供 `--accuracy`、`--accuracy-min` 或 `--online-comp-gap` 选项，不要把它们写入命令。
 - `offline --version`、`--versions`、`--all-versions`：互斥。
 - `offline --no-run`：只处理已有结果，不运行输入预检和外部算法。
 - `offline --no-plot`、`--no-accuracy`：分别跳过耗时阶段。
@@ -41,6 +41,21 @@
 
 CLI 显式参数通常覆盖规则或配置默认值。芯片结构来自 `--chip`，转换/绘图也可通过
 `--rule` 指定格式。无法确认优先级时读取命令实现和对应文档，不组合两个来源猜测结果。
+### 高频命令模板
+
+```bash
+# 预检 CSV；目录任务先用一个文件替换 input.csv
+ghealth_tool info input.csv --schema --preview 5
+ghealth_tool validate rules/parse/custom.yaml
+
+# 保存绘图而不弹窗；目录任务可加 --filter 和 --workers
+ghealth_tool plot -i input.csv -o plots --type both --no-show
+
+# 先生成 check CSV，再单独分拣；--sort 不会在同一次调用中重新检查
+ghealth_tool check -i data/ -o data/check_report.csv
+ghealth_tool check --sort --report data/check_report.csv --sort-output sorted/
+```
+
 ### analyze 快速复用
 
 `analyze` 支持 `--check-report`、`--offline-result` 和可重复的 `--figure-dir`，用于在

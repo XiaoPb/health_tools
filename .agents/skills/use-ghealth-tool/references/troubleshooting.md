@@ -15,6 +15,11 @@ ghealth_tool --version
 
 在仓库根目录执行 `pip install -e ".[dev]"`，再确认模块路径指向 `src/health_tools`。
 
+如果 `ghealth_tool <command> --help` 与本文或旧脚本不一致，以当前 help 为准；先检查
+`ghealth_tool --version`、`python -c "import health_tools; print(health_tools.__file__)"`，不要
+通过添加未知选项“试出”参数。当前 `check` 的准确度策略来自 YAML `accuracy` 块，不支持旧的
+`--accuracy`、`--accuracy-min`、`--online-comp-gap` 选项。
+
 ## 找不到规则
 
 - 运行 `ghealth_tool config --show` 查看用户规则目录。
@@ -62,3 +67,11 @@ pattern 支持有限，`parse --dry-run` 也不读取日志，两者都不能替
 - `--no-plot`、`--no-accuracy` 会主动跳过对应离线产物。
 - 检查输出目录权限、文件名过滤器和汇总中的 WARN/跳过原因。
 - 不只看命令退出码；统计产物数量并打开少量 CSV/图片确认内容。
+
+## 命令执行成功但结果不对
+
+- 先保留完整命令、版本、规则绝对路径和输入样本，避免在不同安装来源之间比较。
+- 对目录任务去掉 `--workers`、`--filter` 等批量选项，用一个 CSV 重跑，区分输入/规则问题和并行问题。
+- `plot` 保存图片时使用 `--no-show`；`analyze` 可用 `--fast-report` 或复用已有
+  `--check-report`、`--offline-result`、`--figure-dir`，但仍要检查 `analysis_summary.json` 和报告证据。
+- 报告显示跳过时使用 `-v` 查看逐文件原因；不要把“没有生成输出”直接当作成功。

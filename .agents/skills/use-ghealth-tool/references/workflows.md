@@ -43,13 +43,15 @@ Comp vs Ref，不把它计作低准确度。
 不会在同一次调用中重新检查。也可用 `--report` 显式覆盖报告路径。执行前确认报告路径和
 `文件相对路径` 列指向正确数据。
 
-启用准确度与标定示例：
+启用准确度与标定示例（策略写在 check YAML，不写成 CLI 选项）：
 
 ```bash
-ghealth_tool check -i data/ -r default.yaml --accuracy \
-  --accuracy-min 'online:within_5:80:accuracy_online_low:Online ±5准确度低' \
-  --online-comp-gap 'within_5:10:accuracy_online_below_comp:Online低于Comp 10个百分点'
+ghealth_tool validate custom_rules/check/custom.yaml
+ghealth_tool check -i data/ -r custom_rules/check/custom.yaml -o data/check_report.csv
 ```
+
+check 规则中的 `accuracy` 块声明列、指标、阈值和 `marks`；当前 `check --help` 没有
+`--accuracy`、`--accuracy-min`、`--online-comp-gap`，不要复制旧版本命令。
 
 ## 分类与评估
 
@@ -59,6 +61,23 @@ ghealth_tool evaluate -i classified/ -o evaluation/ --type spo2 --rule evaluate_
 ```
 
 验证未分类文件数量、分类目录结构、参考/预测列缺失原因和准确度汇总的 TOTAL 行。
+
+## 分割与批处理
+
+```bash
+# 按帧列拆分
+ghealth_tool split -i data/input.csv -o split/ --by-column FRAME_ID
+
+# 按固定行数或时间拆分（二选一）
+ghealth_tool split -i data/input.csv -o split/ --by-size 1000
+ghealth_tool split -i data/input.csv -o split/ --by-time 60 --time-column TimeStamp
+
+# 批量处理；需要按帧输出时显式加 --split
+ghealth_tool process -i data/ -o processed/ -c gh3220 --workers 4 -v
+ghealth_tool process -i data/ -o processed_by_frame/ -c gh3220 --split
+```
+
+检查输出文件数量、命名和跳过原因；`split` 与 `process` 都不会替代规则或芯片格式验证。
 
 ## 产测
 
