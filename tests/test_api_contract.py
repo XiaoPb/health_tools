@@ -171,6 +171,20 @@ def test_parallel_request_defaults():
 
 
 @pytest.mark.parametrize(
+    "plot_request",
+    [
+        PlotRequest(Path("missing"), Path("out"), fft_start=1.0),
+        PlotRequest(Path("missing"), Path("out"), fft_duration=2.0),
+        PlotRequest(Path("missing"), Path("out"), fft_start=-1.0, fft_duration=2.0),
+        PlotRequest(Path("missing"), Path("out"), fft_start=1.0, fft_duration=0.0),
+    ],
+)
+def test_plot_rejects_invalid_fft_window_before_path_validation(plot_request):
+    with pytest.raises(RequestValidationError, match="FFT"):
+        run_plot(plot_request)
+
+
+@pytest.mark.parametrize(
     ("operation", "request_model"),
     [
         (

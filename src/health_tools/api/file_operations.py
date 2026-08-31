@@ -1052,6 +1052,8 @@ def _plot_one(path, output, request, chip_rule, channels, groups) -> ItemResult:
                     file_name=path.name,
                     fig_height=request.fig_height,
                     time_range=request.time_range,
+                    start=request.fft_start,
+                    duration=request.fft_duration,
                 )
                 outputs.append(target)
         return ItemResult(
@@ -1101,6 +1103,18 @@ def run_plot(request: PlotRequest, *, context: Optional[ExecutionContext] = None
                 raise ValueError
         except (TypeError, ValueError):
             raise RequestValidationError("时间范围必须满足 0 <= start < end") from None
+    if (request.fft_start is None) != (request.fft_duration is None):
+        raise RequestValidationError("FFT 起始时间和长度必须同时指定")
+    fft_start = request.fft_start
+    fft_duration = request.fft_duration
+    if fft_start is not None and fft_duration is not None:
+        if (
+            not math.isfinite(float(fft_start))
+            or not math.isfinite(float(fft_duration))
+            or fft_start < 0
+            or fft_duration <= 0
+        ):
+            raise RequestValidationError("FFT 起始时间必须非负，长度必须大于 0")
     if request.channels and request.plot_type != "ac" and ";" in request.channels:
         raise RequestValidationError("分号通道分组仅支持 AC")
     try:

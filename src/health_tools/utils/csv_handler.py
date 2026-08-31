@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -26,7 +26,7 @@ def _downcast_integer_columns(df: pd.DataFrame) -> pd.DataFrame:
             continue
         if series.min() >= int32_min and series.max() <= int32_max:
             dtypes[column] = np.int32
-    return df.astype(dtypes, copy=False) if dtypes else df
+    return df.astype(dtypes) if dtypes else df
 
 
 def _sanitize_csv_cell(value: str) -> str:
@@ -45,7 +45,7 @@ class CSVHandler:
 
     @staticmethod
     def _trailing_zero_columns(
-        read_kwargs: Dict[str, object], protected_columns: List[str]
+        read_kwargs: Dict[str, Any], protected_columns: List[str]
     ) -> List[str]:
         protected = set(protected_columns)
         families: Dict[str, List[Tuple[int, str]]] = {}
@@ -68,7 +68,7 @@ class CSVHandler:
                 if pd.notna(minimum) and (minimum != 0 or maximum != 0):
                     last_active[prefix] = index
 
-        excluded = []
+        excluded: List[str] = []
         for prefix, columns in families.items():
             final_index = last_active.get(prefix, -1)
             excluded.extend(column for index, column in columns if index > final_index)
@@ -117,7 +117,7 @@ class CSVHandler:
 
         info = self._read_info_line(file_path, info_row, encoding)
 
-        read_kwargs = {
+        read_kwargs: Dict[str, Any] = {
             "filepath_or_buffer": file_path,
             "index_col": False,
             "delimiter": delimiter,

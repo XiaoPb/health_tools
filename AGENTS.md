@@ -14,7 +14,7 @@ ruff check src/ tests/         # 静态检查
 mypy src/                      # 类型检查
 ```
 
-Python 3.9+。Black 与 Ruff 行宽均为 100。运行测试前用下面的命令确认没有误用其他目录的
+Python 3.10+。Black 与 Ruff 行宽均为 100。运行测试前用下面的命令确认没有误用其他目录的
 已安装版本：
 
 ```bash

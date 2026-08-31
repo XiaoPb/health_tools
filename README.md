@@ -154,7 +154,7 @@ black --check src/ tests/
 mypy src/
 ```
 
-项目支持 Python 3.9+，Black 和 Ruff 行宽均为 100。面向用户的文本、注释和文档使用中文。
+项目支持 Python 3.10+，Black 和 Ruff 行宽均为 100。面向用户的文本、注释和文档使用中文。
 
 ## 许可证
 

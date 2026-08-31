@@ -28,9 +28,13 @@ def calculate_median(
     """
     try:
         if isinstance(column, int):
-            values = pd.to_numeric(df.iloc[-samples:, column], errors="coerce").values
+            values = np.asarray(
+                pd.to_numeric(df.iloc[-samples:, column], errors="coerce"), dtype=float
+            )
         else:
-            values = pd.to_numeric(df[column].iloc[-samples:], errors="coerce").values
+            values = np.asarray(
+                pd.to_numeric(df[column].iloc[-samples:], errors="coerce"), dtype=float
+            )
 
         values = values[~np.isnan(values)]
         if len(values) == 0:

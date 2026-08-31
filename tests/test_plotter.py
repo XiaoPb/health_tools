@@ -7,7 +7,11 @@ import pandas as pd
 import pytest
 from matplotlib.figure import Figure
 
-from health_tools.core.plotter import DataPlotter, crop_time_range, limit_report_time_range
+from health_tools.core.plotter import (
+    DataPlotter,
+    crop_time_range,
+    limit_report_time_range,
+)
 from health_tools.core.ppg_analysis import SignalAnalysisError
 
 
@@ -41,15 +45,45 @@ def test_plot_ac_draws_three_subplots_and_keeps_channel_colors(monkeypatch, tmp_
 
     fig = saved[0]
     assert output.stat().st_size > 0
-    assert len(fig.axes) == 6
+    assert len(fig.axes) == 7
     assert [line.get_label() for line in fig.axes[0].lines] == ["ACCX"]
-    assert [line.get_label() for line in fig.axes[3].lines] == ["ACCY"]
-    assert [line.get_label() for line in fig.axes[4].lines] == ["ACCZ"]
+    assert [
+        line.get_label()
+        for line in next(axis for axis in fig.axes if axis.get_ylabel() == "ACCY").lines
+    ] == ["ACCY"]
+    assert [
+        line.get_label()
+        for line in next(axis for axis in fig.axes if axis.get_ylabel() == "ACCZ").lines
+    ] == ["ACCZ"]
     assert [line.get_label() for line in fig.axes[1].lines] == ["CH0", "CH1"]
     assert [line.get_label() for line in fig.axes[2].lines] == ["CH0", "CH1"]
-    assert [line.get_label() for line in fig.axes[5].lines] == ["R"]
+    assert [
+        line.get_label()
+        for line in next(axis for axis in fig.axes if axis.get_ylabel() == "R").lines
+    ] == ["R"]
     assert fig.axes[1].lines[0].get_color() == fig.axes[2].lines[0].get_color()
     assert fig.axes[1].lines[1].get_color() == fig.axes[2].lines[1].get_color()
+
+
+def test_plot_ac_draws_resultant_acceleration_on_independent_axis(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+
+    DataPlotter(sample_rate=10).plot_ac(
+        _analysis_df(), tmp_path / "ac.png", ["CH0", "CH1"], ["ACCX", "ACCY", "ACCZ"]
+    )
+
+    figure = saved[0]
+    rms_axes = [axis for axis in figure.axes if axis.get_ylabel() == "ACCRMS"]
+    assert len(rms_axes) == 1
+    assert [line.get_label() for line in rms_axes[0].lines] == ["ACCRMS"]
+    expected = np.sqrt(
+        np.square(_analysis_df()["ACCX"])
+        + np.square(_analysis_df()["ACCY"])
+        + np.square(_analysis_df()["ACCZ"])
+    )
+    assert np.array_equal(rms_axes[0].lines[0].get_ydata(), expected.to_numpy())
+    assert rms_axes[0].get_shared_x_axes().joined(rms_axes[0], figure.axes[0])
 
 
 def test_plot_ac_uses_symmetric_limits_from_dominant_peak_distribution(monkeypatch, tmp_path: Path):
@@ -126,7 +160,7 @@ def test_plot_time_preserves_non_string_column_names_and_rejects_all_invalid(
     saved = []
     monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
     df = pd.DataFrame({1: np.arange(20, dtype=float), "ZERO": 0.0})
-    DataPlotter(sample_rate=10).plot_time(df, tmp_path / "time.png")
+    DataPlotter(sample_rate=10).plot_time(df, tmp_path / "time.png", channels=[1])
     assert saved[0].axes[0].get_ylabel() == "1"
 
     with pytest.raises(SignalAnalysisError, match="没有有效的绘图列"):
@@ -149,7 +183,8 @@ def test_plot_ac_reads_explicit_r_column(tmp_path: Path, monkeypatch):
         r_column="R_VALUE",
     )
 
-    assert np.array_equal(saved[0].axes[5].lines[0].get_ydata(), df["R_VALUE"].to_numpy())
+    r_axis = next(axis for axis in saved[0].axes if axis.get_ylabel() == "R")
+    assert np.array_equal(r_axis.lines[0].get_ydata(), df["R_VALUE"].to_numpy())
 
 
 def test_plot_ac_calculates_r_from_selected_channel_order(tmp_path: Path, monkeypatch):
@@ -169,7 +204,8 @@ def test_plot_ac_calculates_r_from_selected_channel_order(tmp_path: Path, monkey
         ["ACCX", "ACCY", "ACCZ"],
     )
 
-    assert np.all(saved[0].axes[5].lines[0].get_ydata() == 20000.0)
+    r_axis = next(axis for axis in saved[0].axes if axis.get_ylabel() == "R")
+    assert np.all(r_axis.lines[0].get_ydata() == 20000.0)
 
 
 @pytest.mark.parametrize("channels", [["CH0"], ["CH0", "CH1", "CH2"], ["CH0", "CH1", "CH2", "CH3"]])
@@ -184,7 +220,7 @@ def test_plot_ac_without_r_column_skips_r_axis_unless_exactly_two_channels(
 
     DataPlotter(sample_rate=10).plot_ac(df, tmp_path / "ac.png", channels, ["ACCX", "ACCY", "ACCZ"])
 
-    assert len(saved[0].axes) == 5
+    assert len(saved[0].axes) == 6
     assert all(axis.get_ylabel() != "R" for axis in saved[0].axes)
 
 
@@ -202,8 +238,9 @@ def test_plot_ac_explicit_r_column_draws_with_one_selected_channel(tmp_path: Pat
         r_column="R_VALUE",
     )
 
-    assert len(saved[0].axes) == 6
-    assert np.array_equal(saved[0].axes[5].lines[0].get_ydata(), df["R_VALUE"].to_numpy())
+    assert len(saved[0].axes) == 7
+    r_axis = next(axis for axis in saved[0].axes if axis.get_ylabel() == "R")
+    assert np.array_equal(r_axis.lines[0].get_ydata(), df["R_VALUE"].to_numpy())
 
 
 def test_plot_ac_rejects_more_than_four_channels(tmp_path: Path):
@@ -238,10 +275,37 @@ def test_plot_fft_uses_independent_y_axes_and_excludes_dc(monkeypatch, tmp_path:
 
     fig = saved[0]
     assert output.stat().st_size > 0
-    assert len(fig.axes) == 2
-    assert fig.axes[0].get_ylabel() == "Raw amplitude"
-    assert fig.axes[1].get_ylabel() == "Filtered amplitude"
-    assert min(fig.axes[0].lines[0].get_xdata()) > 0
+    assert len(fig.axes) == 3
+    assert fig.axes[1].get_ylabel() == "Raw amplitude"
+    assert fig.axes[2].get_ylabel() == "Filtered amplitude"
+    assert min(fig.axes[1].lines[0].get_xdata()) > 0
+
+
+def test_plot_fft_uses_exact_window_and_marks_top_three_peaks(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    sample_rate = 100
+    time = np.arange(sample_rate * 10) / sample_rate
+    data = (
+        100
+        + 3 * np.sin(2 * np.pi * 2 * time)
+        + 2 * np.sin(2 * np.pi * 5 * time)
+        + 1 * np.sin(2 * np.pi * 8 * time)
+    )
+
+    DataPlotter(sample_rate=sample_rate).plot_fft(
+        pd.DataFrame({"CH0": data}),
+        tmp_path / "fft.png",
+        "CH0",
+        start=2.0,
+        duration=2.0,
+    )
+
+    figure = saved[0]
+    assert len(figure.axes) == 3
+    assert len(figure.axes[0].lines[0].get_ydata()) == 200
+    assert len(figure.axes[1].texts) == 3
+    assert all("Hz" in text.get_text() for text in figure.axes[1].texts)
 
 
 def test_plot_time_generates_png_in_worker_threads_without_pyplot_backend(
@@ -403,3 +467,52 @@ def test_plot_time_uses_requested_range(monkeypatch, tmp_path: Path):
     )
 
     assert len(saved[0].axes[0].lines[0].get_ydata()) == 100
+
+
+def test_plot_time_uses_ten_percent_padding_for_signal_range(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = pd.DataFrame({"CH0": np.linspace(0.0, 10.0, 20)})
+
+    DataPlotter(sample_rate=10).plot_time(df, tmp_path / "time.png", ["CH0"])
+
+    lower, upper = saved[0].axes[0].get_ylim()
+
+    assert lower == pytest.approx(-0.88)
+    assert upper == pytest.approx(10.88)
+
+
+def test_plot_time_uses_safe_range_for_constant_signal(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = pd.DataFrame({"CH0": np.full(20, 5.0)})
+
+    DataPlotter(sample_rate=10).plot_time(df, tmp_path / "time.png", ["CH0"])
+
+    lower, upper = saved[0].axes[0].get_ylim()
+
+    assert (lower, upper) == pytest.approx((4.5, 5.5))
+
+
+def test_plot_time_defaults_to_acc_and_rawdata_only(monkeypatch, tmp_path: Path):
+    saved = []
+    monkeypatch.setattr(Figure, "savefig", lambda figure, *args, **kwargs: saved.append(figure))
+    df = pd.DataFrame(
+        {
+            "ACCX": np.arange(20, dtype=float),
+            "rawdata0": np.arange(20, dtype=float) + 100,
+            "CH0": np.arange(20, dtype=float) + 200,
+            "timestamp": np.arange(20, dtype=float),
+        }
+    )
+
+    DataPlotter(sample_rate=10).plot_time(df, tmp_path / "time.png")
+
+    assert [axis.get_ylabel() for axis in saved[0].axes] == ["ACCX", "rawdata0"]
+
+
+def test_plot_time_skips_explicit_all_zero_channel(tmp_path: Path):
+    df = pd.DataFrame({"ZERO": np.zeros(20), "CH0": np.ones(20)})
+
+    with pytest.raises(SignalAnalysisError, match="没有有效的绘图列"):
+        DataPlotter(sample_rate=10).plot_time(df, tmp_path / "time.png", ["ZERO"])
