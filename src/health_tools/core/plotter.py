@@ -84,6 +84,101 @@ def _valid_columns(df: pd.DataFrame, channels: Optional[List[str]] = None) -> Li
     ]
 
 
+def _default_time_columns(df: pd.DataFrame) -> List[str]:
+    """返回时域图默认绘制的 ACC 与 rawdata 列。"""
+    return [
+        column
+        for column in df.columns
+        if isinstance(column, str)
+        and (column.upper().startswith("ACC") or column.lower().startswith("rawdata"))
+    ]
+
+
+def _finite_values(values: object, *, nonzero: bool = False) -> np.ndarray:
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
+    numeric = numeric[np.isfinite(numeric)]
+    if nonzero:
+        numeric = numeric[numeric != 0]
+    return numeric
+
+
+def _auto_ylim(values: object, padding: float = 0.1) -> Tuple[float, float]:
+    """根据数据范围设置坐标轴，并在上下各保留指定比例的留白。"""
+    finite = _finite_values(values)
+    if finite.size == 0:
+        return -1.0, 1.0
+    lower = float(np.percentile(finite, 1))
+    upper = float(np.percentile(finite, 99))
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
+        center = float(finite[0])
+        span = max(abs(center) * padding, 1.0 if center == 0 else np.finfo(float).eps)
+        return center - span, center + span
+    span = upper - lower
+    return lower - span * padding, upper + span * padding
+
+
+def _auto_log_ylim(values: object, padding: float = 0.1) -> Tuple[float, float]:
+    """为对数坐标轴返回正数范围，并保留上下留白。"""
+    finite = _finite_values(values)
+    finite = finite[finite > 0]
+    if finite.size == 0:
+        return 1e-3, 1.0
+    lower = float(np.percentile(finite, 1))
+    upper = float(np.percentile(finite, 99))
+    if lower >= upper:
+        lower = max(lower / 2.0, np.finfo(float).tiny)
+        upper = upper * 2.0
+    ratio = upper / lower
+    return max(lower / ratio**padding, np.finfo(float).tiny), upper * ratio**padding
+
+
+def _auto_symmetric_ylim(signals: List[np.ndarray], padding: float = 0.1) -> Tuple[float, float]:
+    values = np.concatenate([_finite_values(signal) for signal in signals if len(signal)])
+    if values.size == 0:
+        return -1.0, 1.0
+    amplitude = float(np.percentile(np.abs(values), 99))
+    amplitude = max(amplitude * (1.0 + padding), np.finfo(float).eps)
+    return -amplitude, amplitude
+
+
+def _crop_fft_window(
+    df: pd.DataFrame,
+    sample_rate: float,
+    time_range: Optional[Tuple[float, float]],
+    start: Optional[float],
+    duration: Optional[float],
+) -> Tuple[pd.DataFrame, float]:
+    """按 FFT 的严格时间窗口取样，不为频谱补齐最小时长。"""
+    if start is not None or duration is not None:
+        if start is None or duration is None or not np.isfinite(start) or not np.isfinite(duration):
+            raise SignalAnalysisError("FFT 起始时间和长度必须同时指定且为有限数字")
+        if start < 0 or duration <= 0:
+            raise SignalAnalysisError("FFT 起始时间必须非负，长度必须大于 0")
+        time_range = (start, start + duration)
+    if time_range is None:
+        return df, 0.0
+    window_start, window_end = time_range
+    if window_start < 0 or window_end <= window_start:
+        raise SignalAnalysisError("FFT 时间范围必须满足 0 <= start < end")
+    start_index = int(round(window_start * sample_rate))
+    end_index = int(round(window_end * sample_rate))
+    if start_index >= len(df) or end_index > len(df):
+        raise SignalAnalysisError("FFT 时间窗口超出数据范围")
+    return df.iloc[start_index:end_index].copy(), start_index / sample_rate
+
+
+def _top_fft_peaks(freqs: np.ndarray, amplitude: np.ndarray, count: int = 3):
+    """选取非直流频谱中幅值最高且不重复的局部峰。"""
+    valid = np.isfinite(freqs) & np.isfinite(amplitude) & (freqs > 0) & (amplitude > 0)
+    if not np.any(valid):
+        return []
+    positions = np.flatnonzero(valid)
+    peaks, _ = signal.find_peaks(amplitude[positions])
+    candidates = positions[peaks] if len(peaks) else positions
+    candidates = sorted(candidates, key=lambda index: float(amplitude[index]), reverse=True)
+    return [(float(freqs[index]), float(amplitude[index])) for index in candidates[:count]]
+
+
 def crop_time_range(
     df: pd.DataFrame,
     sample_rate: float,
@@ -223,7 +318,9 @@ class DataPlotter:
         time_range: Optional[Tuple[float, float]] = None,
     ) -> None:
         df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["time"])
-        channels = _valid_columns(df, channels)
+        channels = _valid_columns(
+            df, channels if channels is not None else _default_time_columns(df)
+        )
         if not channels:
             raise SignalAnalysisError("没有有效的绘图列")
 
@@ -242,6 +339,7 @@ class DataPlotter:
                 data = pd.to_numeric(df[channel], errors="coerce").values
                 ax.plot(_downsample(data), linewidth=0.5, label=channel)
                 ax.set_ylabel(channel)
+                ax.set_ylim(*_auto_ylim(data))
                 ax.grid(True, alpha=0.3)
                 if combined:
                     ax.legend(loc="upper right")
@@ -279,6 +377,7 @@ class DataPlotter:
                     freqs, psd = signal.welch(data, fs=sample_rate, nperseg=nperseg)
                     ax.semilogy(freqs, psd, linewidth=0.5)
                     ax.set_ylabel(f"{channel}\nPSD")
+                    ax.set_ylim(*_auto_log_ylim(psd))
                     ax.grid(True, alpha=0.3)
 
         axes[-1].set_xlabel("Frequency (Hz)")
@@ -325,6 +424,8 @@ class DataPlotter:
             acc_axes.append(base_axes[0].twinx())
         if len(acc_axes) > 2:
             acc_axes[2].spines["right"].set_position(("axes", 1.12))
+        acc_rms_axis = base_axes[0].twinx()
+        acc_rms_axis.spines["right"].set_position(("axes", 1.24))
         explicit_r_valid = bool(r_column and _has_nonzero_numeric(df[r_column]))
         r_axis = (
             base_axes[2].twinx()
@@ -337,8 +438,20 @@ class DataPlotter:
             acc = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
             axis.plot(time, acc, linewidth=0.6, label=column)
             axis.set_ylabel(column)
+            axis.set_ylim(*_auto_ylim(acc))
             axis.legend(loc="upper right")
             axis.grid(True, alpha=0.3)
+
+        acc_values = []
+        for column in acc_columns:
+            values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+            acc_values.append(np.nan_to_num(values, nan=0.0))
+        acc_rms = np.sqrt(np.sum(np.square(acc_values), axis=0))
+        acc_rms_axis.plot(time, acc_rms, linewidth=0.8, color="#111827", label="ACCRMS")
+        acc_rms_axis.set_ylabel("ACCRMS")
+        acc_rms_axis.set_ylim(*_auto_ylim(acc_rms))
+        acc_rms_axis.legend(loc="center right")
+        acc_rms_axis.grid(False)
 
         filtered_signals = []
         pi_values = {}
@@ -359,8 +472,7 @@ class DataPlotter:
             base_axes[1].plot(time, filtered, linewidth=0.7, color=color, label=channel)
             base_axes[2].plot(time, pi, linewidth=0.8, color=color, label=channel)
 
-        limit = _peak_symmetric_limit(filtered_signals)
-        base_axes[1].set_ylim(-limit, limit)
+        base_axes[1].set_ylim(*_auto_symmetric_ylim(filtered_signals))
         if explicit_r_valid:
             r_values = pd.to_numeric(df[r_column], errors="coerce").to_numpy(dtype=float)
         elif r_column is None and len(channels) == 2:
@@ -378,6 +490,7 @@ class DataPlotter:
         if r_axis is not None:
             r_axis.plot(time, r_values, linewidth=0.8, color="#111827", label="R")
             r_axis.set_ylabel("R")
+            r_axis.set_ylim(*_auto_ylim(r_values))
             r_axis.legend(loc="lower right")
             r_axis.grid(False)
 
@@ -398,11 +511,13 @@ class DataPlotter:
         file_name: Optional[str] = None,
         fig_height: Optional[float] = None,
         time_range: Optional[Tuple[float, float]] = None,
+        start: Optional[float] = None,
+        duration: Optional[float] = None,
     ) -> None:
-        """使用独立 Y 轴叠加原始与带通后 PPG 的单边 FFT。"""
+        """绘制原始波形及原始/滤波后 PPG 的单边 FFT。"""
         if channel not in df.columns:
             raise SignalAnalysisError(f"输入缺少 PPG 通道: {channel}")
-        df = crop_time_range(df, self.sample_rate, time_range, MIN_PLOT_DURATIONS["fft"])
+        df, actual_start = _crop_fft_window(df, self.sample_rate, time_range, start, duration)
         if not _has_nonzero_numeric(df[channel]):
             raise SignalAnalysisError(f"绘图通道无有效数据: {channel}")
         raw = prepare_signal(df[channel])
@@ -417,10 +532,17 @@ class DataPlotter:
         raw_freqs, raw_amplitude = compute_single_sided_fft(raw, self.sample_rate)
         filtered_freqs, filtered_amplitude = compute_single_sided_fft(filtered, self.sample_rate)
 
-        fig = _new_figure(_fig_size(12, 5, fig_height, 5))
+        fig = _new_figure(_fig_size(12, 7, fig_height, 7))
         _set_title(fig, file_name)
-        raw_axis = fig.subplots()
+        raw_data_axis, raw_axis = np.atleast_1d(fig.subplots(2, 1))
         filtered_axis = raw_axis.twinx()
+        time = actual_start + np.arange(len(raw), dtype=float) / self.sample_rate
+        raw_data_axis.plot(time, raw, color="#2563EB", linewidth=0.7, label="Raw data")
+        raw_data_axis.set_ylabel(channel)
+        raw_data_axis.set_xlabel("Time (s)")
+        raw_data_axis.set_ylim(*_auto_ylim(raw))
+        raw_data_axis.grid(True, alpha=0.3)
+        raw_data_axis.legend(loc="upper right")
         raw_line = raw_axis.plot(
             raw_freqs, raw_amplitude, color="#2563EB", linewidth=0.8, label="Raw FFT"
         )[0]
@@ -435,9 +557,21 @@ class DataPlotter:
         raw_axis.set_ylabel("Raw amplitude", color=raw_line.get_color())
         filtered_axis.set_ylabel("Filtered amplitude", color=filtered_line.get_color())
         raw_axis.set_xlim(0, self.sample_rate / 2)
+        raw_axis.set_ylim(*_auto_ylim(raw_amplitude))
+        filtered_axis.set_ylim(*_auto_ylim(filtered_amplitude))
         raw_axis.grid(True, alpha=0.3)
         raw_axis.set_title(f"FFT - {channel}")
         raw_axis.legend([raw_line, filtered_line], ["Raw FFT", "Filtered FFT"], loc="upper right")
+        for frequency, amplitude in _top_fft_peaks(raw_freqs, raw_amplitude):
+            raw_axis.plot(frequency, amplitude, "o", color="#111827", markersize=4)
+            raw_axis.annotate(
+                f"{frequency:.2f} Hz\n{amplitude:.3g}",
+                (frequency, amplitude),
+                xytext=(4, 5),
+                textcoords="offset points",
+                fontsize=8,
+            )
+        raw_axis.set_xlabel("Frequency (Hz)")
         fig.tight_layout(rect=(0, 0, 1, 0.96) if file_name else None)
         fig.savefig(output_file, dpi=self.dpi)
 
@@ -518,18 +652,21 @@ class DataPlotter:
             data_dict = {}
             for channel in channels:
                 if channel in df.columns:
-                    data_dict[channel] = pd.to_numeric(df[channel], errors="coerce").dropna().values
+                    values = pd.to_numeric(df[channel], errors="coerce").dropna().values
+                    if _has_nonzero_numeric(values):
+                        data_dict[channel] = values
 
-            if data_dict:
-                plotter.plot_multi_channel_stft(
-                    data_dict,
-                    str(output_file),
-                    title="Multi-Channel STFT",
-                    ref_data=ref_data,
-                    ref_label=ref_column or "Reference",
-                    file_name=file_name,
-                    fig_height=fig_height,
-                )
+            if not data_dict:
+                raise SignalAnalysisError("STFT 没有有效绘图通道")
+            plotter.plot_multi_channel_stft(
+                data_dict,
+                str(output_file),
+                title="Multi-Channel STFT",
+                ref_data=ref_data,
+                ref_label=ref_column or "Reference",
+                file_name=file_name,
+                fig_height=fig_height,
+            )
 
     def plot_chip_stft(
         self,

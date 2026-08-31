@@ -37,6 +37,8 @@ console = Console()
     type=str,
     help="绘制时间范围（秒，格式 START-END；短于类型最小宽度时自动扩展）",
 )
+@click.option("--fft-start", type=float, help="FFT 起始时间（秒，需同时指定 --fft-duration）")
+@click.option("--fft-duration", type=float, help="FFT 绘制长度（秒，需同时指定 --fft-start）")
 @click.option("--height", "fig_height", type=float, help="单图高度（英寸）")
 @click.option("--ref-column", help="参考曲线列名")
 @click.option(
@@ -79,6 +81,8 @@ def plot_cmd(
     freq_bpm: bool,
     freq_range: str,
     time_range: Optional[str],
+    fft_start: Optional[float],
+    fft_duration: Optional[float],
     fig_height: Optional[float],
     ref_column: Optional[str],
     r_column: Optional[str],
@@ -118,6 +122,8 @@ def plot_cmd(
                     freq_range=freq_range,
                     time_range=parsed_time_range,
                     fig_height=fig_height,
+                    fft_start=fft_start,
+                    fft_duration=fft_duration,
                     ref_column=ref_column,
                     r_column=r_column,
                     psd_acc=psd_acc,
@@ -211,6 +217,8 @@ def _plot_file(
     no_show: bool,
     verbose: bool,
     time_range=None,
+    fft_start: Optional[float] = None,
+    fft_duration: Optional[float] = None,
     fig_height: Optional[float] = None,
     chip_rule=None,
     ac_channel_groups: Optional[List[List[str]]] = None,
@@ -336,6 +344,8 @@ def _plot_file(
                     file_name=input_file.name,
                     fig_height=fig_height,
                     time_range=time_range,
+                    start=fft_start,
+                    duration=fft_duration,
                 )
                 output_files.append(str(output_file))
                 if verbose:

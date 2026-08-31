@@ -257,7 +257,15 @@ class STFTPlotter:
         freqs_masked = freqs_bpm[freq_mask]
         zxx_masked = zxx_norm[freq_mask, :]
 
-        ax.pcolormesh(times, freqs_masked, zxx_masked, cmap=cmap, shading="auto")
+        ax.pcolormesh(
+            times,
+            freqs_masked,
+            zxx_masked,
+            cmap=cmap,
+            shading="auto",
+            vmin=0.0,
+            vmax=100.0,
+        )
         ax.set_ylabel(title)
         ax.set_ylim([freq_min, freq_max])
 
