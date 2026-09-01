@@ -1384,7 +1384,16 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
+        def run(
+            self,
+            input_path,
+            output_path,
+            timeout=300,
+            settle_timeout=10,
+            is_cancelled=None,
+            log_path=None,
+            attempt=1,
+        ):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1449,7 +1458,16 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
         def __init__(self, chip, version=None, **kwargs):
             pass
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
+        def run(
+            self,
+            input_path,
+            output_path,
+            timeout=300,
+            settle_timeout=10,
+            is_cancelled=None,
+            log_path=None,
+            attempt=1,
+        ):
             calls.append(timeout)
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1510,7 +1528,16 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
         def __init__(self, chip, version=None, **kwargs):
             pass
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
+        def run(
+            self,
+            input_path,
+            output_path,
+            timeout=300,
+            settle_timeout=10,
+            is_cancelled=None,
+            log_path=None,
+            attempt=1,
+        ):
             calls.append(timeout)
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1571,7 +1598,16 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
+        def run(
+            self,
+            input_path,
+            output_path,
+            timeout=300,
+            settle_timeout=10,
+            is_cancelled=None,
+            log_path=None,
+            attempt=1,
+        ):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1639,7 +1675,16 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
+        def run(
+            self,
+            input_path,
+            output_path,
+            timeout=300,
+            settle_timeout=10,
+            is_cancelled=None,
+            log_path=None,
+            attempt=1,
+        ):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()
@@ -1720,7 +1765,16 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
         def __init__(self, chip, version=None, **kwargs):
             self.version = version
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
+        def run(
+            self,
+            input_path,
+            output_path,
+            timeout=300,
+            settle_timeout=10,
+            is_cancelled=None,
+            log_path=None,
+            attempt=1,
+        ):
             calls.append(self.version)
             output_path.mkdir(parents=True, exist_ok=True)
             return type("RunResult", (), {"success": True, "warning": None})()

@@ -325,8 +325,9 @@ def run_offline(
                 if task.moved_files:
                     detail.append("移动失败文件:")
                     detail.extend(str(moved.target) for moved in task.moved_files)
-                if run_result.log_path is not None:
-                    detail.append(f"日志: {run_result.log_path}")
+                log_path = getattr(run_result, "log_path", None)
+                if log_path is not None:
+                    detail.append(f"日志: {log_path}")
                 warning = getattr(task_result.run_result, "warning", None)
                 if warning:
                     detail.append(warning)
@@ -339,10 +340,8 @@ def run_offline(
                 else:
                     status = ItemStatus.OK
                 reason = task_result.reason
-                if status is ItemStatus.FAIL and run_result.log_path is not None:
-                    reason = f"{reason}; 日志: {run_result.log_path}" if reason else (
-                        f"日志: {run_result.log_path}"
-                    )
+                if status is ItemStatus.FAIL and log_path is not None:
+                    reason = f"{reason}; 日志: {log_path}" if reason else (f"日志: {log_path}")
                 items.append(
                     ItemResult(
                         status,

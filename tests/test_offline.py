@@ -513,7 +513,7 @@ def test_build_command_falls_back_to_builtin_format(monkeypatch, tmp_path):
 
     cmd = runner._build_command("input", "output")
 
-    assert cmd.endswith(' 0 -1 "input" "output" csv 25 1 2 2 3 4 5 6 7 8 45 61 46')
+    assert cmd.endswith(" 0 -1 input output csv 25 1 2 2 3 4 5 6 7 8 45 61 46")
     assert runner.ppg_warnings == [
         "当前命令模板未声明 PPG 通道，--ppg-offset 未生效",
         "ppg_ch0 未在 cmd_arg 中声明，设置未生效",
@@ -1174,7 +1174,16 @@ def test_offline_ppg_options_are_passed_to_runner(monkeypatch, tmp_path):
         def resolve_ppg_mapping(self):
             return self.ppg_mapping
 
-        def run(self, input_path, output_path, timeout=300, settle_timeout=10, is_cancelled=None):
+        def run(
+            self,
+            input_path,
+            output_path,
+            timeout=300,
+            settle_timeout=10,
+            is_cancelled=None,
+            log_path=None,
+            attempt=1,
+        ):
             output_path.mkdir(parents=True, exist_ok=True)
             return offline.OfflineRunResult(success=True)
 

@@ -283,9 +283,9 @@ def test_run_offline_tasks_retries_different_failed_csvs(tmp_path: Path):
     first.write_text("x\n", encoding="utf-8")
     second.write_text("x\n", encoding="utf-8")
     good.write_text("x\n", encoding="utf-8")
-    task = assign_task_outputs(
-        [OfflineTask("0000_A", input_dir, Path("A"))], tmp_path / "version"
-    )[0]
+    task = assign_task_outputs([OfflineTask("0000_A", input_dir, Path("A"))], tmp_path / "version")[
+        0
+    ]
     runners = []
 
     class Runner:
@@ -322,9 +322,9 @@ def test_run_offline_tasks_passes_shared_log_path_and_attempt_number(tmp_path: P
     good = input_dir / "good.csv"
     bad.write_text("x\n", encoding="utf-8")
     good.write_text("x\n", encoding="utf-8")
-    task = assign_task_outputs(
-        [OfflineTask("0000_A", input_dir, Path("A"))], tmp_path / "version"
-    )[0]
+    task = assign_task_outputs([OfflineTask("0000_A", input_dir, Path("A"))], tmp_path / "version")[
+        0
+    ]
     calls = []
 
     class Runner:
