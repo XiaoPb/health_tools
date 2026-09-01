@@ -113,6 +113,26 @@ def test_merge_task_outputs_does_not_add_root_layer_for_root_task(tmp_path: Path
     assert not (version_output / "数据整理" / "root").exists()
 
 
+def test_merge_task_outputs_preserves_task_logs(tmp_path: Path):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.csv").write_text("x\n", encoding="utf-8")
+    version_output = tmp_path / "version"
+    task = assign_task_outputs([OfflineTask("0000_root", input_dir, Path())], version_output)[0]
+    assert task.raw_output is not None
+    assert task.log_path is not None
+    raw_result = task.raw_output / "000000_a_result.vshb"
+    raw_result.parent.mkdir(parents=True)
+    raw_result.write_text("1,2,3\n", encoding="utf-8")
+    task.log_path.parent.mkdir(parents=True)
+    task.log_path.write_text("diagnostic\n", encoding="utf-8")
+
+    result = merge_task_outputs(version_output, [_successful_task_result(task)])
+
+    assert result.failed == ()
+    assert task.log_path.read_text(encoding="utf-8") == "diagnostic\n"
+
+
 def test_merge_task_outputs_rejects_duplicate_targets_before_final_move(tmp_path: Path):
     version_output = tmp_path / "version"
     task_results = []
@@ -263,9 +283,9 @@ def test_run_offline_tasks_retries_different_failed_csvs(tmp_path: Path):
     first.write_text("x\n", encoding="utf-8")
     second.write_text("x\n", encoding="utf-8")
     good.write_text("x\n", encoding="utf-8")
-    task = assign_task_outputs([OfflineTask("0000_A", input_dir, Path("A"))], tmp_path / "version")[
-        0
-    ]
+    task = assign_task_outputs(
+        [OfflineTask("0000_A", input_dir, Path("A"))], tmp_path / "version"
+    )[0]
     runners = []
 
     class Runner:
@@ -293,6 +313,31 @@ def test_run_offline_tasks_retries_different_failed_csvs(tmp_path: Path):
     ]
     assert (tmp_path.parent / f"{tmp_path.name}_mv/A/bad1.csv").exists()
     assert (tmp_path.parent / f"{tmp_path.name}_mv/A/bad2.csv").exists()
+
+
+def test_run_offline_tasks_passes_shared_log_path_and_attempt_number(tmp_path: Path):
+    input_dir = tmp_path / "A"
+    input_dir.mkdir()
+    bad = input_dir / "bad.csv"
+    good = input_dir / "good.csv"
+    bad.write_text("x\n", encoding="utf-8")
+    good.write_text("x\n", encoding="utf-8")
+    task = assign_task_outputs(
+        [OfflineTask("0000_A", input_dir, Path("A"))], tmp_path / "version"
+    )[0]
+    calls = []
+
+    class Runner:
+        def run(self, *_args, **kwargs):
+            calls.append((kwargs["log_path"], kwargs["attempt"]))
+            if len(calls) == 1:
+                return OfflineRunResult(success=False, last_csv_path=bad)
+            return OfflineRunResult(success=True)
+
+    result = run_offline_tasks([task], lambda _task: Runner(), tmp_path, workers=1)
+
+    assert result.failed == ()
+    assert calls == [(task.log_path, 1), (task.log_path, 2)]
 
 
 def test_run_offline_tasks_appends_retry_after_other_pending_tasks(tmp_path: Path):

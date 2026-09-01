@@ -565,9 +565,11 @@ def test_offline_runner_uses_process_cwd_without_chdir(monkeypatch, tmp_path):
     runner.run(input_dir, output_dir, settle_timeout=0)
 
     assert len(popen_calls) == 1
-    _, kwargs = popen_calls[0]
+    args, kwargs = popen_calls[0]
+    assert args[0][3] == str(input_dir.resolve())
+    assert args[0][4] == str(output_dir.resolve())
     assert kwargs["cwd"] == str(runner.tool_dir)
-    assert kwargs["shell"] is True
+    assert kwargs["shell"] is False
     assert kwargs["stdout"] is subprocess.PIPE
     assert kwargs["stderr"] is subprocess.PIPE
     assert kwargs["text"] is True
@@ -601,6 +603,65 @@ def test_offline_runner_captures_log_tail_last_csv_and_limit(monkeypatch, tmp_pa
     assert "stderr-line" in observed
     assert f"[1][2][3]:{csv_path}" in observed
     assert all(not line.endswith("\n") for line in observed)
+
+
+def test_offline_runner_writes_utf8_log_without_default_terminal_output(
+    monkeypatch, tmp_path, capsys
+):
+    input_dir = tmp_path / "输入&目录"
+    output_dir = tmp_path / "output"
+    log_path = tmp_path / "logs" / "任务.log"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    popen_calls = []
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return _FakeProcess(stdout="stdout line\n", stderr="错误行\n")
+
+    monkeypatch.setattr(
+        offline.subprocess,
+        "Popen",
+        fake_popen,
+    )
+
+    result = runner.run(input_dir, output_dir, settle_timeout=0, log_path=log_path, attempt=2)
+
+    content = log_path.read_text(encoding="utf-8")
+    assert popen_calls[0][0][0][3] == str(input_dir.resolve())
+    assert popen_calls[0][1]["shell"] is False
+    assert result.log_path == log_path
+    assert "尝试 2" in content
+    assert f"输入目录: {input_dir.resolve()}" in content
+    assert "[stdout] stdout line" in content
+    assert "[stderr] 错误行" in content
+    assert capsys.readouterr().out == ""
+
+
+def test_offline_runner_fails_when_log_cannot_be_created(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    log_parent = tmp_path / "not-a-directory"
+    input_dir.mkdir()
+    log_parent.write_text("blocked", encoding="utf-8")
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(
+        offline.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("不应启动进程")),
+    )
+
+    result = runner.run(
+        input_dir,
+        output_dir,
+        settle_timeout=0,
+        log_path=log_parent / "task.log",
+    )
+
+    assert result.success is False
+    assert "无法创建离线工具日志" in result.error
 
 
 def test_offline_runner_reader_cleanup_closes_streams_and_joins_with_bound(monkeypatch, tmp_path):

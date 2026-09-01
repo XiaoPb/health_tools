@@ -200,6 +200,8 @@ def run_offline_tasks(
             timeout=timeout,
             settle_timeout=settle_timeout,
             is_cancelled=cancelled,
+            log_path=task.log_path,
+            attempt=task.attempts + 1,
         )
         return OfflineTaskResult(task, run_result, "succeeded" if run_result.success else "failed")
 
@@ -245,6 +247,14 @@ def run_offline_tasks(
                 attempted_task = replace(task, attempts=task.attempts + 1)
                 if run_result.success:
                     results[task.task_id] = replace(outcome, task=attempted_task)
+                    continue
+
+                if run_result.error and run_result.error.startswith(
+                    ("无法创建离线工具日志", "无法启动离线工具")
+                ):
+                    results[task.task_id] = failed_result(
+                        attempted_task, run_result, run_result.error
+                    )
                     continue
 
                 last_csv = run_result.last_csv_path
