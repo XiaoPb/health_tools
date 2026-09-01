@@ -24,6 +24,7 @@ class OfflineTask:
     input_dir: Path
     relative_dir: Path
     raw_output: Optional[Path] = None
+    log_path: Optional[Path] = None
     attempts: int = 0
     last_failed_csv: Optional[Path] = None
     moved_files: Tuple[MovedOfflineInput, ...] = ()
@@ -56,8 +57,8 @@ class OfflineMergeResult:
 
 
 def safe_task_name(name: str) -> str:
-    """将目录名转换为稳定、可用于任务 ID 的安全名称。"""
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    """保留 Unicode 文字，将不适合任务目录的标点压缩为下划线。"""
+    safe = re.sub(r"[^\w.-]+", "_", name, flags=re.UNICODE).strip("_")
     return safe or "task"
 
 
@@ -86,6 +87,7 @@ def assign_task_outputs(tasks: List[OfflineTask], version_output: Path) -> List[
         replace(
             task,
             raw_output=version_output / ".offline_tasks" / task.task_id / "raw",
+            log_path=version_output / "offline_logs" / f"{task.task_id}.log",
         )
         for task in tasks
     ]

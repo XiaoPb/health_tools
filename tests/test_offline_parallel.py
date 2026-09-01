@@ -57,10 +57,15 @@ def test_assign_task_outputs_adds_private_raw_layer(tmp_path: Path):
 
     assert assigned[0].raw_output == tmp_path / "version/.offline_tasks/0000_A/raw"
     assert assigned[1].raw_output == tmp_path / "version/.offline_tasks/0001_B/raw"
+    assert assigned[0].log_path == tmp_path / "version/offline_logs/0000_A.log"
+    assert assigned[1].log_path == tmp_path / "version/offline_logs/0001_B.log"
 
 
-def test_safe_task_name_replaces_unsafe_characters():
+def test_safe_task_name_preserves_unicode_and_replaces_punctuation():
+    assert safe_task_name("室内跑步&步行") == "室内跑步_步行"
+    assert safe_task_name("户外步行(公园)") == "户外步行_公园"
     assert safe_task_name("A folder/with spaces") == "A_folder_with_spaces"
+    assert safe_task_name("()") == "task"
     assert safe_task_name("") == "task"
 
 
