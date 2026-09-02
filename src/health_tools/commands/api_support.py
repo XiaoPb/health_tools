@@ -11,6 +11,7 @@ from health_tools.api import (
     BatchResult,
     ExecutionContext,
     GHealthError,
+    ItemStatus,
     ProgressEvent,
 )
 from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
@@ -69,7 +70,7 @@ def print_batch(title: str, result: BatchResult, console: Console, verbose: bool
             console.print(f"  {path}")
     if verbose:
         for item in result.items:
-            if item.detail:
+            if item.status is ItemStatus.OK and item.detail:
                 console.print(item.detail)
 
 
