@@ -575,6 +575,7 @@ def test_offline_retry_summary_warns_and_final_failure_keeps_artifacts(monkeypat
                         success=False,
                         error="boom",
                         command="secret command",
+                        log_tail=("SUBPROCESS_STDOUT_SECRET", "SUBPROCESS_STDERR_SECRET"),
                         log_path=failed_task.log_path,
                     ),
                     "failed",
@@ -619,6 +620,9 @@ def test_offline_retry_summary_warns_and_final_failure_keeps_artifacts(monkeypat
     )
     assert "错误: boom" in result.batch.items[1].detail
     assert "命令:" not in result.batch.items[1].detail
+    all_detail = "\n".join(item.detail for item in result.batch.items)
+    assert "SUBPROCESS_STDOUT_SECRET" not in all_detail
+    assert "SUBPROCESS_STDERR_SECRET" not in all_detail
     assert output_dir / "v1" / "数据整理" in result.batch.artifacts
 
 
