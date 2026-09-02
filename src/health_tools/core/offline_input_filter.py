@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 from health_tools.models.rules import ChipRule
 
 MAX_PREVIEW_LINES = 3
+REF_RESULT_COLUMNS = {f"REF_RESULT{index}" for index in range(16)}
 
 
 class OfflineInputFilterError(RuntimeError):
@@ -77,6 +78,24 @@ def _read_header(file_path: Path, chip_rule: ChipRule) -> Tuple[Optional[List[st
     return header, ""
 
 
+def _headers_match(expected_header: List[str], header: Optional[List[str]]) -> bool:
+    """比较离线输入表头，完整金标列仅放宽其列名。"""
+    if header is None or len(header) != len(expected_header):
+        return False
+
+    ref_columns = [column for column in expected_header if column.startswith("REF_RESULT")]
+    allow_ref_names = len(ref_columns) == 16 and set(ref_columns) == REF_RESULT_COLUMNS
+
+    for expected, actual in zip(expected_header, header):
+        if allow_ref_names and expected in REF_RESULT_COLUMNS:
+            if not isinstance(actual, str) or not actual.strip():
+                return False
+            continue
+        if actual != expected:
+            return False
+    return True
+
+
 def _unique_target(target: Path) -> Path:
     if not target.exists():
         return target
@@ -113,7 +132,7 @@ def filter_offline_inputs(input_dir: Path, chip_rule: ChipRule) -> OfflineInputF
     for source in _iter_csv_files(input_dir):
         result.scanned_count += 1
         header, reason = _read_header(source, chip_rule)
-        if header == expected_header:
+        if _headers_match(expected_header, header):
             result.accepted_count += 1
             continue
         if not reason:
