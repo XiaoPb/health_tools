@@ -6,7 +6,6 @@ import queue
 import re
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from collections import deque
@@ -138,6 +137,7 @@ class OfflineRunResult:
     error: Optional[str] = None
     last_csv_path: Optional[Path] = None
     log_tail: Tuple[str, ...] = ()
+    log_path: Optional[Path] = None
 
     @property
     def duration(self) -> float:
@@ -602,7 +602,7 @@ class OfflineRunner:
             return None
         return load_local_cmd_config(self.tool_dir)
 
-    def _build_command(self, input_dir: str, output_dir: str) -> str:
+    def _build_command_args(self, input_dir: str, output_dir: str) -> List[str]:
         """构建 exe 命令行"""
         exe = str(self.exe_path)
         cmd_cfg = self._get_cmd_config()
@@ -614,7 +614,7 @@ class OfflineRunner:
             for item in cmd_arg:
                 key = _normalize_cmd_arg(item)
                 args.append(str(values.get(key, item)))
-            return subprocess.list2cmdline(args)
+            return args
 
         idx = self.column_indices
         hba_fs = self.hba_fs if self.hba_fs is not None else 25
@@ -629,13 +629,35 @@ class OfflineRunner:
                 f"{idx.get('polar', 45)} {idx.get('mcu_out', 61)} "
                 f"{idx.get('comp_out', 46)}"
             )
-            cmd = (
-                f'"{exe}" 0 -1 "{input_dir}" "{output_dir}" csv '
-                f"{hba_fs} {scene_en} {ch_num} {debug_para}"
-            )
+            return [
+                exe,
+                "0",
+                "-1",
+                input_dir,
+                output_dir,
+                "csv",
+                str(hba_fs),
+                str(scene_en),
+                str(ch_num),
+                *debug_para.split(),
+            ]
         else:
-            cmd = f'"{exe}" 0 -1 "{input_dir}" "{output_dir}" csv ' f"0 {scene_en} {hba_fs} 0"
-        return cmd
+            return [
+                exe,
+                "0",
+                "-1",
+                input_dir,
+                output_dir,
+                "csv",
+                "0",
+                str(scene_en),
+                str(hba_fs),
+                "0",
+            ]
+
+    def _build_command(self, input_dir: str, output_dir: str) -> str:
+        """构建用于诊断和结果记录的可读命令文本。"""
+        return subprocess.list2cmdline(self._build_command_args(input_dir, output_dir))
 
     def _build_template_values(
         self, input_dir: str, output_dir: str, cmd_cfg: dict
@@ -669,6 +691,8 @@ class OfflineRunner:
         settle_timeout: int = 10,
         is_cancelled: Optional[Callable[[], bool]] = None,
         on_output: Optional[Callable[[str], None]] = None,
+        log_path: Optional[Path] = None,
+        attempt: int = 1,
     ) -> OfflineRunResult:
         """执行离线跑库
 
@@ -684,110 +708,176 @@ class OfflineRunner:
         if not self.exe_path or not self.tool_dir:
             return OfflineRunResult(success=False, error="未找到离线工具")
 
-        input_str = str(input_dir.resolve())
-        output_str = str(output_dir.resolve())
+        input_path = input_dir.resolve()
+        output_path = output_dir.resolve()
+        input_str = str(input_path)
+        output_str = str(output_path)
         input_count = count_supported_csv_files(input_dir)
 
         if output_dir.exists():
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        cmd = self._build_command(input_str, output_str)
+        args = self._build_command_args(input_str, output_str)
+        command = subprocess.list2cmdline(args)
         started_at = time.time()
+        resolved_log_path = Path(log_path) if log_path is not None else None
+        log_file = None
+        if resolved_log_path is not None:
+            try:
+                resolved_log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_file = resolved_log_path.open("a", encoding="utf-8", newline="\n")
+                log_file.write(
+                    f"=== 尝试 {attempt} ===\n"
+                    f"输入目录: {input_str}\n"
+                    f"输出目录: {output_str}\n"
+                    f"命令: {command}\n"
+                )
+                log_file.flush()
+            except OSError as exc:
+                if log_file is not None:
+                    log_file.close()
+                return OfflineRunResult(
+                    success=False,
+                    command=command,
+                    started_at=started_at,
+                    ended_at=time.time(),
+                    input_count=input_count,
+                    error=f"无法创建离线工具日志 {resolved_log_path}: {exc}",
+                    log_path=resolved_log_path,
+                )
+            except BaseException:
+                if log_file is not None:
+                    log_file.close()
+                raise
         deadline = time.monotonic() + timeout
         returncode = None
         timed_out = False
         log_tail = deque(maxlen=MAX_LOG_TAIL_LINES)
         last_csv_path: Optional[Path] = None
-        output_queue: queue.Queue[Optional[str]] = queue.Queue()
+        output_queue: queue.Queue[Tuple[str, Optional[str]]] = queue.Queue()
 
-        def consume_output(stream: object) -> None:
+        def consume_output(source: str, stream: object) -> None:
             if stream is None:
-                output_queue.put(None)
+                output_queue.put((source, None))
                 return
             try:
                 for raw_line in stream:  # type: ignore[union-attr]
-                    output_queue.put(raw_line.rstrip("\r\n"))
+                    output_queue.put((source, raw_line.rstrip("\r\n")))
             except (OSError, ValueError):
                 pass
             finally:
-                output_queue.put(None)
+                output_queue.put((source, None))
 
-        def dispatch_output(line: str) -> None:
+        def dispatch_output(source: str, line: str) -> None:
             nonlocal last_csv_path
+            if log_file is not None:
+                log_file.write(f"[{source}] {line}\n")
+                log_file.flush()
             log_tail.append(line)
             csv_path = extract_logged_csv_path(line, input_dir)
             if csv_path is not None:
                 last_csv_path = csv_path
             if on_output is not None:
                 on_output(line)
-            else:
-                print(line, file=sys.stdout, flush=True)
 
-        process = subprocess.Popen(
-            cmd,
-            shell=True,
-            cwd=str(self.tool_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding=locale.getpreferredencoding(False),
-            errors="replace",
-            bufsize=1,
-        )
-        readers = [
-            threading.Thread(
-                target=consume_output, args=(getattr(process, "stdout", None),), daemon=True
-            ),
-            threading.Thread(
-                target=consume_output, args=(getattr(process, "stderr", None),), daemon=True
-            ),
-        ]
-        for reader in readers:
-            reader.start()
+        try:
+            process = subprocess.Popen(
+                args,
+                shell=False,
+                cwd=str(self.tool_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding=locale.getpreferredencoding(False),
+                errors="replace",
+                bufsize=1,
+            )
+        except OSError as exc:
+            if log_file is not None:
+                log_file.write(f"[启动失败] {exc}\n")
+                log_file.close()
+            return OfflineRunResult(
+                success=False,
+                command=command,
+                started_at=started_at,
+                ended_at=time.time(),
+                input_count=input_count,
+                error=f"无法启动离线工具: {exc}",
+                log_path=resolved_log_path,
+            )
+        except BaseException:
+            if log_file is not None:
+                log_file.close()
+            raise
+        try:
+            readers = [
+                threading.Thread(
+                    target=consume_output,
+                    args=("stdout", getattr(process, "stdout", None)),
+                    daemon=True,
+                ),
+                threading.Thread(
+                    target=consume_output,
+                    args=("stderr", getattr(process, "stderr", None)),
+                    daemon=True,
+                ),
+            ]
+            for reader in readers:
+                reader.start()
+        except BaseException:
+            if log_file is not None:
+                log_file.close()
+            _terminate_offline_process(process)
+            _close_process_streams(process)
+            raise
 
         completed_readers = 0
         drain_deadline: Optional[float] = None
         try:
-            while returncode is None or completed_readers < len(readers):
-                if is_cancelled is not None and is_cancelled():
-                    raise InterruptedError("离线任务已取消")
-                if returncode is None and time.monotonic() >= deadline:
-                    timed_out = True
-                    break
-                returncode = process.poll()
-                if returncode is not None:
-                    if drain_deadline is None:
-                        drain_deadline = time.monotonic() + OUTPUT_DRAIN_TIMEOUT
-                    elif time.monotonic() >= drain_deadline:
+            try:
+                while returncode is None or completed_readers < len(readers):
+                    if is_cancelled is not None and is_cancelled():
+                        raise InterruptedError("离线任务已取消")
+                    if returncode is None and time.monotonic() >= deadline:
+                        timed_out = True
                         break
+                    returncode = process.poll()
+                    if returncode is not None:
+                        if drain_deadline is None:
+                            drain_deadline = time.monotonic() + OUTPUT_DRAIN_TIMEOUT
+                        elif time.monotonic() >= drain_deadline:
+                            break
+                    try:
+                        source, line = output_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+                    if line is None:
+                        completed_readers += 1
+                    else:
+                        dispatch_output(source, line)
+            except BaseException:
+                _terminate_offline_process(process)
+                raise
+            finally:
+                if timed_out:
+                    _terminate_offline_process(process)
+                _close_process_streams(process)
+                for reader in readers:
+                    reader.join(timeout=READER_JOIN_TIMEOUT)
+
+            while completed_readers < len(readers):
                 try:
-                    line = output_queue.get(timeout=0.1)
+                    source, line = output_queue.get_nowait()
                 except queue.Empty:
-                    continue
+                    break
                 if line is None:
                     completed_readers += 1
                 else:
-                    dispatch_output(line)
-        except BaseException:
-            _terminate_offline_process(process)
-            raise
+                    dispatch_output(source, line)
         finally:
-            if timed_out:
-                _terminate_offline_process(process)
-            _close_process_streams(process)
-            for reader in readers:
-                reader.join(timeout=READER_JOIN_TIMEOUT)
-
-        while completed_readers < len(readers):
-            try:
-                line = output_queue.get_nowait()
-            except queue.Empty:
-                break
-            if line is None:
-                completed_readers += 1
-            else:
-                dispatch_output(line)
+            if log_file is not None:
+                log_file.close()
 
         if returncode == 0:
             output_file_count, result_count, last_mtime = _snapshot_output(output_dir)
@@ -817,7 +907,7 @@ class OfflineRunner:
 
         return OfflineRunResult(
             success=success,
-            command=cmd,
+            command=command,
             returncode=returncode,
             timed_out=timed_out,
             started_at=started_at,
@@ -830,6 +920,7 @@ class OfflineRunner:
             error=error,
             last_csv_path=last_csv_path,
             log_tail=tuple(log_tail),
+            log_path=resolved_log_path,
         )
 
 
