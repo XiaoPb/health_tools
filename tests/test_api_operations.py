@@ -201,7 +201,7 @@ def test_offline_runner_terminates_cancellable_process(monkeypatch, tmp_path: Pa
     runner = offline.OfflineRunner.__new__(offline.OfflineRunner)
     runner.exe_path = tmp_path / offline.EXE_NAME
     runner.tool_dir = tmp_path
-    runner._build_command = lambda input_dir, output_dir: "fake command"
+    runner._build_command_args = lambda input_dir, output_dir: ["fake-command"]
     monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
     monkeypatch.setattr(offline, "count_supported_csv_files", lambda path: 1)
 
