@@ -22,9 +22,24 @@ def chip_rule() -> ChipRule:
     )
 
 
+@pytest.fixture
+def ref_chip_rule() -> ChipRule:
+    return ChipRule(
+        chip="test-ref",
+        csv={"info_row": 1, "header_row": 2, "data_start_row": 3, "delimiter": ","},
+        columns=["TimeStamp", "FRAME_ID", "REF_RESULT{0-15}", "CH{0-1}"],
+    )
+
+
 def _write_csv(path: Path, header: str, info: str = "Version: test") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"{info}\n{header}\n1,2,3,4\n", encoding="utf-8")
+
+
+def _ref_header(ref_names=None):
+    if ref_names is None:
+        ref_names = [f"reference_{index}" for index in range(16)]
+    return ",".join(["TimeStamp", "FRAME_ID", *ref_names, "CH0", "CH1"])
 
 
 def test_filter_accepts_exact_header_and_utf8_bom(chip_rule, tmp_path):
@@ -37,6 +52,88 @@ def test_filter_accepts_exact_header_and_utf8_bom(chip_rule, tmp_path):
     assert result.accepted_count == 1
     assert result.moved_count == 0
     assert (input_dir / "sample.csv").exists()
+
+
+def test_filter_accepts_any_nonempty_names_at_all_ref_positions(ref_chip_rule, tmp_path):
+    input_dir = tmp_path / "ref_inputs"
+    ref_names = [f"golden_{index}" for index in range(16)]
+    source = input_dir / "nested" / "sample.csv"
+    _write_csv(source, _ref_header(ref_names))
+
+    result = filter_offline_inputs(input_dir, ref_chip_rule)
+
+    assert result.scanned_count == 1
+    assert result.accepted_count == 1
+    assert result.moved_count == 0
+    assert source.exists()
+
+
+@pytest.mark.parametrize(
+    "case, header",
+    [
+        (
+            "ref_count_insufficient",
+            _ref_header([f"golden_{index}" for index in range(15)]),
+        ),
+        (
+            "ref_count_exceeded",
+            _ref_header([f"golden_{index}" for index in range(17)]),
+        ),
+        (
+            "ref_position_misplaced",
+            ",".join(
+                [
+                    "TimeStamp",
+                    *[f"golden_{index}" for index in range(8)],
+                    "FRAME_ID",
+                    *[f"golden_{index}" for index in range(8, 16)],
+                    "CH0",
+                    "CH1",
+                ]
+            ),
+        ),
+        (
+            "empty_ref_name",
+            _ref_header(["" if index == 7 else f"golden_{index}" for index in range(16)]),
+        ),
+        (
+            "non_ref_column_mismatch",
+            ",".join(
+                ["timestamp", "FRAME_ID", *[f"golden_{index}" for index in range(16)], "CH0", "CH1"]
+            ),
+        ),
+    ],
+)
+def test_filter_moves_invalid_ref_headers_with_reason(ref_chip_rule, tmp_path, case, header):
+    input_dir = tmp_path / "ref_inputs"
+    source = input_dir / "nested" / case / "sample.csv"
+    _write_csv(source, header)
+
+    result = filter_offline_inputs(input_dir, ref_chip_rule)
+
+    target = tmp_path / "ref_inputs_mv" / "nested" / case / "sample.csv"
+    assert result.accepted_count == 0
+    assert result.moved_count == 1
+    assert not source.exists()
+    assert target.exists()
+    assert result.moved_files[0].target == target
+    assert result.moved_files[0].reason == "表头与芯片规则不一致"
+
+
+def test_filter_moves_unclosed_header_quote_as_parse_failure(ref_chip_rule, tmp_path):
+    input_dir = tmp_path / "ref_inputs"
+    source = input_dir / "nested" / "broken.csv"
+    _write_csv(source, '"TimeStamp,FRAME_ID,broken')
+
+    result = filter_offline_inputs(input_dir, ref_chip_rule)
+
+    target = tmp_path / "ref_inputs_mv" / "nested" / "broken.csv"
+    assert result.accepted_count == 0
+    assert result.moved_count == 1
+    assert not source.exists()
+    assert target.exists()
+    assert result.moved_files[0].target == target
+    assert result.moved_files[0].reason == "CSV表头解析失败"
 
 
 @pytest.mark.parametrize(
