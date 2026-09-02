@@ -11,6 +11,7 @@ from health_tools.api import (
     BatchResult,
     ExecutionContext,
     GHealthError,
+    ItemStatus,
     ProgressEvent,
 )
 from health_tools.utils.reporting import FileResult, ResultCollector, print_summary
@@ -62,14 +63,20 @@ def print_batch(title: str, result: BatchResult, console: Console, verbose: bool
                 rows=item.rows,
             )
         )
-    print_summary(title, collector, console=console, verbose=verbose)
+    print_summary(
+        title,
+        collector,
+        console=console,
+        verbose=verbose,
+        max_examples=len(result.items) if verbose else 10,
+    )
     if result.artifacts and verbose:
         console.print("输出文件:")
         for path in result.artifacts:
             console.print(f"  {path}")
     if verbose:
         for item in result.items:
-            if item.detail:
+            if item.status is ItemStatus.OK and item.detail:
                 console.print(item.detail)
 
 

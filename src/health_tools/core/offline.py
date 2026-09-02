@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -199,6 +200,34 @@ def _close_process_streams(process: object) -> None:
         close = getattr(stream, "close", None)
         if close is not None:
             close()
+
+
+def _best_effort_offline_cleanup(
+    process: Optional[object] = None,
+    readers: Sequence[object] = (),
+    log_file: Optional[object] = None,
+    *,
+    terminate: bool = False,
+) -> None:
+    """异常传播期间逐项清理资源，避免清理错误覆盖原始异常。"""
+    if process is not None:
+        if terminate:
+            with suppress(Exception):
+                _terminate_offline_process(process)
+        for name in ("stdout", "stderr"):
+            stream = getattr(process, name, None)
+            close = getattr(stream, "close", None)
+            if close is not None:
+                with suppress(Exception):
+                    close()
+
+    for reader in readers:
+        with suppress(Exception):
+            reader.join(timeout=READER_JOIN_TIMEOUT)  # type: ignore[attr-defined]
+
+    if log_file is not None:
+        with suppress(Exception):
+            log_file.close()  # type: ignore[attr-defined]
 
 
 def get_offline_config() -> OfflineConfig:
@@ -721,52 +750,57 @@ class OfflineRunner:
         args = self._build_command_args(input_str, output_str)
         command = subprocess.list2cmdline(args)
         started_at = time.time()
-        resolved_log_path = log_path or output_dir / "offline_logs" / "run.log"
-        try:
-            resolved_log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_file = resolved_log_path.open("a", encoding="utf-8", newline="\n")
-        except OSError as exc:
-            return OfflineRunResult(
-                success=False,
-                command=command,
-                started_at=started_at,
-                ended_at=time.time(),
-                input_count=input_count,
-                error=f"无法创建离线工具日志 {resolved_log_path}: {exc}",
-                log_path=resolved_log_path,
-            )
-
-        log_file.write(
-            "\n"
-            f"{'=' * 24} 尝试 {attempt} {'=' * 24}\n"
-            f"输入目录: {input_path}\n"
-            f"输出目录: {output_path}\n"
-            f"命令: {command}\n"
-        )
-        log_file.flush()
+        resolved_log_path = Path(log_path) if log_path is not None else None
+        log_file = None
+        if resolved_log_path is not None:
+            try:
+                resolved_log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_file = resolved_log_path.open("a", encoding="utf-8", newline="\n")
+                log_file.write(
+                    f"=== 尝试 {attempt} ===\n"
+                    f"输入目录: {input_str}\n"
+                    f"输出目录: {output_str}\n"
+                    f"命令: {command}\n"
+                )
+                log_file.flush()
+            except OSError as exc:
+                _best_effort_offline_cleanup(log_file=log_file)
+                return OfflineRunResult(
+                    success=False,
+                    command=command,
+                    started_at=started_at,
+                    ended_at=time.time(),
+                    input_count=input_count,
+                    error=f"无法创建离线工具日志 {resolved_log_path}: {exc}",
+                    log_path=resolved_log_path,
+                )
+            except BaseException:
+                _best_effort_offline_cleanup(log_file=log_file)
+                raise
         deadline = time.monotonic() + timeout
         returncode = None
         timed_out = False
         log_tail = deque(maxlen=MAX_LOG_TAIL_LINES)
         last_csv_path: Optional[Path] = None
-        output_queue: queue.Queue[Optional[Tuple[str, str]]] = queue.Queue()
+        output_queue: queue.Queue[Tuple[str, Optional[str]]] = queue.Queue()
 
-        def consume_output(name: str, stream: object) -> None:
+        def consume_output(source: str, stream: object) -> None:
             if stream is None:
-                output_queue.put(None)
+                output_queue.put((source, None))
                 return
             try:
                 for raw_line in stream:  # type: ignore[union-attr]
-                    output_queue.put((name, raw_line.rstrip("\r\n")))
+                    output_queue.put((source, raw_line.rstrip("\r\n")))
             except (OSError, ValueError):
                 pass
             finally:
-                output_queue.put(None)
+                output_queue.put((source, None))
 
-        def dispatch_output(name: str, line: str) -> None:
+        def dispatch_output(source: str, line: str) -> None:
             nonlocal last_csv_path
-            log_file.write(f"[{name}] {line}\n")
-            log_file.flush()
+            if log_file is not None:
+                log_file.write(f"[{source}] {line}\n")
+                log_file.flush()
             log_tail.append(line)
             csv_path = extract_logged_csv_path(line, input_dir)
             if csv_path is not None:
@@ -787,8 +821,10 @@ class OfflineRunner:
                 bufsize=1,
             )
         except OSError as exc:
-            log_file.write(f"[启动失败] {exc}\n")
-            log_file.close()
+            if log_file is not None:
+                with suppress(Exception):
+                    log_file.write(f"[启动失败] {exc}\n")
+            _best_effort_offline_cleanup(log_file=log_file)
             return OfflineRunResult(
                 success=False,
                 command=command,
@@ -798,24 +834,31 @@ class OfflineRunner:
                 error=f"无法启动离线工具: {exc}",
                 log_path=resolved_log_path,
             )
-        readers = [
-            threading.Thread(
-                target=consume_output,
-                args=("stdout", getattr(process, "stdout", None)),
-                daemon=True,
-            ),
-            threading.Thread(
-                target=consume_output,
-                args=("stderr", getattr(process, "stderr", None)),
-                daemon=True,
-            ),
-        ]
-        for reader in readers:
-            reader.start()
+        except BaseException:
+            _best_effort_offline_cleanup(log_file=log_file)
+            raise
 
-        completed_readers = 0
-        drain_deadline: Optional[float] = None
+        readers: List[threading.Thread] = []
         try:
+            readers.append(
+                threading.Thread(
+                    target=consume_output,
+                    args=("stdout", getattr(process, "stdout", None)),
+                    daemon=True,
+                )
+            )
+            readers.append(
+                threading.Thread(
+                    target=consume_output,
+                    args=("stderr", getattr(process, "stderr", None)),
+                    daemon=True,
+                )
+            )
+            for reader in readers:
+                reader.start()
+
+            completed_readers = 0
+            drain_deadline: Optional[float] = None
             while returncode is None or completed_readers < len(readers):
                 if is_cancelled is not None and is_cancelled():
                     raise InterruptedError("离线任务已取消")
@@ -829,35 +872,40 @@ class OfflineRunner:
                     elif time.monotonic() >= drain_deadline:
                         break
                 try:
-                    line = output_queue.get(timeout=0.1)
+                    source, line = output_queue.get(timeout=0.1)
                 except queue.Empty:
                     continue
                 if line is None:
                     completed_readers += 1
                 else:
-                    dispatch_output(*line)
-        except BaseException:
-            _terminate_offline_process(process)
-            log_file.close()
-            raise
-        finally:
+                    dispatch_output(source, line)
+
             if timed_out:
                 _terminate_offline_process(process)
             _close_process_streams(process)
             for reader in readers:
                 reader.join(timeout=READER_JOIN_TIMEOUT)
 
-        while completed_readers < len(readers):
-            try:
-                line = output_queue.get_nowait()
-            except queue.Empty:
-                break
-            if line is None:
-                completed_readers += 1
-            else:
-                dispatch_output(*line)
+            while completed_readers < len(readers):
+                try:
+                    source, line = output_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if line is None:
+                    completed_readers += 1
+                else:
+                    dispatch_output(source, line)
 
-        log_file.close()
+            if log_file is not None:
+                log_file.close()
+        except BaseException:
+            _best_effort_offline_cleanup(
+                process,
+                readers,
+                log_file,
+                terminate=True,
+            )
+            raise
 
         if returncode == 0:
             output_file_count, result_count, last_mtime = _snapshot_output(output_dir)

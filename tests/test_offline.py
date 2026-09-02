@@ -24,6 +24,16 @@ from health_tools.core.vshb import read_vshb_result
 from health_tools.rules.loader import RuleLoader
 
 
+def test_clean_version_outputs_removes_offline_logs(tmp_path):
+    log_file = tmp_path / "offline_logs" / "old.log"
+    log_file.parent.mkdir()
+    log_file.write_text("old", encoding="utf-8")
+
+    offline_api._clean_version_outputs(tmp_path)
+
+    assert not log_file.parent.exists()
+
+
 def test_offline_config_migrates_dot_to_default_tools_path(monkeypatch):
     monkeypatch.setattr(offline, "load_config", lambda: {"offline_tools_path": "."})
 
@@ -546,8 +556,8 @@ def test_offline_run_result_has_empty_log_diagnostics_by_default():
 
 
 def test_offline_runner_uses_process_cwd_without_chdir(monkeypatch, tmp_path):
-    input_dir = tmp_path / "input"
-    output_dir = tmp_path / "output"
+    input_dir = tmp_path / "室内跑步&步行"
+    output_dir = tmp_path / "输出&结果"
     input_dir.mkdir()
     (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
     runner = _make_runner(monkeypatch, tmp_path, {})
@@ -566,10 +576,14 @@ def test_offline_runner_uses_process_cwd_without_chdir(monkeypatch, tmp_path):
 
     assert len(popen_calls) == 1
     args, kwargs = popen_calls[0]
-    assert args[0][3] == str(input_dir.resolve())
-    assert args[0][4] == str(output_dir.resolve())
-    assert kwargs["cwd"] == str(runner.tool_dir)
+    process_args = args[0]
+    assert isinstance(process_args, list)
+    assert str(input_dir.resolve()) in process_args
+    assert process_args.count(str(input_dir.resolve())) == 1
+    assert str(output_dir.resolve()) in process_args
+    assert process_args.count(str(output_dir.resolve())) == 1
     assert kwargs["shell"] is False
+    assert kwargs["cwd"] == str(runner.tool_dir)
     assert kwargs["stdout"] is subprocess.PIPE
     assert kwargs["stderr"] is subprocess.PIPE
     assert kwargs["text"] is True
@@ -605,10 +619,8 @@ def test_offline_runner_captures_log_tail_last_csv_and_limit(monkeypatch, tmp_pa
     assert all(not line.endswith("\n") for line in observed)
 
 
-def test_offline_runner_writes_utf8_log_without_default_terminal_output(
-    monkeypatch, tmp_path, capsys
-):
-    input_dir = tmp_path / "输入&目录"
+def test_offline_runner_saves_subprocess_output_without_printing(monkeypatch, tmp_path, capsys):
+    input_dir = tmp_path / "中文&目录"
     output_dir = tmp_path / "output"
     log_path = tmp_path / "logs" / "任务.log"
     input_dir.mkdir()
@@ -618,7 +630,7 @@ def test_offline_runner_writes_utf8_log_without_default_terminal_output(
 
     def fake_popen(*args, **kwargs):
         popen_calls.append((args, kwargs))
-        return _FakeProcess(stdout="stdout line\n", stderr="错误行\n")
+        return _FakeProcess(stdout="标准输出\n", stderr="错误输出\n")
 
     monkeypatch.setattr(
         offline.subprocess,
@@ -634,9 +646,53 @@ def test_offline_runner_writes_utf8_log_without_default_terminal_output(
     assert result.log_path == log_path
     assert "尝试 2" in content
     assert f"输入目录: {input_dir.resolve()}" in content
-    assert "[stdout] stdout line" in content
-    assert "[stderr] 错误行" in content
-    assert capsys.readouterr().out == ""
+    assert "[stdout] 标准输出" in content
+    assert "[stderr] 错误输出" in content
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_offline_runner_does_not_create_log_without_log_path(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    monkeypatch.setattr(
+        offline.subprocess,
+        "Popen",
+        lambda *args, **kwargs: _FakeProcess(stdout="标准输出\n", stderr="错误输出\n"),
+    )
+
+    result = runner.run(input_dir, output_dir, settle_timeout=0)
+
+    assert result.log_path is None
+    assert not (output_dir / "offline_logs" / "run.log").exists()
+
+
+def test_offline_runner_appends_retry_log(monkeypatch, tmp_path):
+    input_dir = tmp_path / "中文&目录"
+    output_dir = tmp_path / "output"
+    log_path = tmp_path / "logs" / "任务.log"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    processes = iter(
+        [
+            _FakeProcess(stdout="first\n"),
+            _FakeProcess(stdout="second\n"),
+        ]
+    )
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: next(processes))
+
+    runner.run(input_dir, output_dir, settle_timeout=0, log_path=log_path, attempt=1)
+    runner.run(input_dir, output_dir, settle_timeout=0, log_path=log_path, attempt=2)
+
+    content = log_path.read_text(encoding="utf-8")
+    assert content.count("=== 尝试") == 2
+    assert "[stdout] first" in content
+    assert "[stdout] second" in content
 
 
 def test_offline_runner_fails_when_log_cannot_be_created(monkeypatch, tmp_path):
@@ -662,6 +718,37 @@ def test_offline_runner_fails_when_log_cannot_be_created(monkeypatch, tmp_path):
 
     assert result.success is False
     assert "无法创建离线工具日志" in result.error
+
+
+def test_offline_runner_closes_log_when_reader_creation_fails(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    log_path = tmp_path / "logs" / "task.log"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None)
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        offline.threading,
+        "Thread",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("reader creation failed")),
+    )
+    opened_files = []
+    original_open = Path.open
+
+    def tracking_open(path, *args, **kwargs):
+        opened_file = original_open(path, *args, **kwargs)
+        opened_files.append(opened_file)
+        return opened_file
+
+    monkeypatch.setattr(Path, "open", tracking_open)
+
+    with pytest.raises(RuntimeError, match="reader creation failed"):
+        runner.run(input_dir, output_dir, settle_timeout=0, log_path=log_path)
+
+    assert opened_files and opened_files[0].closed is True
+    assert process.terminated is True
 
 
 def test_offline_runner_reader_cleanup_closes_streams_and_joins_with_bound(monkeypatch, tmp_path):
@@ -767,6 +854,83 @@ def test_offline_runner_callback_error_terminates_and_propagates(monkeypatch, tm
     else:
         assert taskkill_calls == []
         assert process.terminated is True
+    assert process.stdout.closed is True
+    assert process.stderr.closed is True
+
+
+def test_offline_runner_preserves_callback_error_when_termination_fails(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None, stdout="boom\n")
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        offline,
+        "_terminate_offline_process",
+        lambda current: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        runner.run(
+            input_dir,
+            output_dir,
+            settle_timeout=0,
+            on_output=lambda line: (_ for _ in ()).throw(RuntimeError("callback failed")),
+        )
+
+    assert process.stdout.closed is True
+    assert process.stderr.closed is True
+
+
+def test_offline_runner_continues_cleanup_when_stdout_close_fails(monkeypatch, tmp_path):
+    class FailingCloseStream(StringIO):
+        def close(self):
+            raise RuntimeError("stdout close failed")
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None)
+    process.stdout = FailingCloseStream("boom\n")
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        runner.run(
+            input_dir,
+            output_dir,
+            settle_timeout=0,
+            on_output=lambda line: (_ for _ in ()).throw(RuntimeError("callback failed")),
+        )
+
+    assert process.stderr.closed is True
+
+
+def test_offline_runner_preserves_reader_creation_error_when_cleanup_fails(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None)
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        offline.threading,
+        "Thread",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("reader creation failed")),
+    )
+    monkeypatch.setattr(
+        offline,
+        "_terminate_offline_process",
+        lambda current: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="reader creation failed"):
+        runner.run(input_dir, output_dir, settle_timeout=0)
+
     assert process.stdout.closed is True
     assert process.stderr.closed is True
 
@@ -908,10 +1072,73 @@ def test_offline_verbose_prints_run_diagnostics(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "诊断:" in result.output
-    assert "命令:" in result.output
+    assert "子进程日志:" in result.output
+    assert "命令:" not in result.output
     assert "返回码: 0" in result.output
     assert "输入CSV: 1" in result.output
     assert "结果VSHB: 1" in result.output
+    assert result.output.count("0000_root.log") == 1
+
+
+def test_offline_default_prints_log_path_without_subprocess_diagnostics(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    _write_valid_chip_csv(input_dir / "sample.csv")
+    exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip_name, version=None: exe_path)
+    monkeypatch.setattr(
+        offline,
+        "get_offline_config",
+        lambda: offline.OfflineConfig(
+            tools_path=tmp_path,
+            versions={"gh3036": {"versions": {"exclusive": ["v1"]}, "default": "v1"}},
+            commands={},
+        ),
+    )
+
+    def create_output():
+        raw_output = output_dir / "v1" / ".offline_tasks" / "0000_root" / "raw"
+        raw_output.mkdir(parents=True, exist_ok=True)
+        (raw_output / "000000_sample_result.vshb").write_text("1,2,3\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        offline.subprocess,
+        "Popen",
+        lambda *args, **kwargs: _FakeProcess(
+            stdout="SUBPROCESS_STDOUT_SECRET",
+            stderr="SUBPROCESS_STDERR_SECRET",
+            on_poll=create_output,
+        ),
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3036",
+            "--no-plot",
+            "--no-accuracy",
+            "--settle-timeout",
+            "0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "子进程日志:" in result.output
+    assert str(output_dir / "v1" / "offline_logs" / "0000_root.log") in result.output.replace(
+        "\n", ""
+    )
+    assert "命令:" not in result.output
+    assert "SUBPROCESS_" not in result.output
 
 
 def test_offline_filters_once_before_multi_version_run(monkeypatch, tmp_path):

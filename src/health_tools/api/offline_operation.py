@@ -234,6 +234,7 @@ def run_offline(
 
     items: List[ItemResult] = []
     artifacts: List[Path] = []
+    log_paths: List[Path] = []
     reports = []
     total_stages = len(target_versions) * (
         (0 if request.no_run else 1)
@@ -311,9 +312,14 @@ def run_offline(
             for task_result in sorted(final_results.values(), key=lambda item: item.task.task_id):
                 task = task_result.task
                 run_result = task_result.run_result
+                log_path = getattr(run_result, "log_path", None) or task.log_path
+                if log_path:
+                    normalized_log_path = Path(log_path)
+                    if normalized_log_path not in log_paths:
+                        log_paths.append(normalized_log_path)
                 detail = [
                     "诊断:",
-                    f"命令: {getattr(run_result, 'command', '')}",
+                    f"子进程日志: {log_path or ''}",
                     f"返回码: {getattr(run_result, 'returncode', '')}",
                     f"超时: {'是' if getattr(run_result, 'timed_out', False) else '否'}",
                     f"耗时: {getattr(run_result, 'duration', 0.0):.1f}s",
@@ -322,12 +328,12 @@ def run_offline(
                     f"输出文件: {getattr(run_result, 'output_file_count', '')}",
                     f"尝试次数: {task.attempts}",
                 ]
+                error = getattr(run_result, "error", None)
+                if error:
+                    detail.append(f"错误: {error}")
                 if task.moved_files:
                     detail.append("移动失败文件:")
                     detail.extend(str(moved.target) for moved in task.moved_files)
-                log_path = getattr(run_result, "log_path", None)
-                if log_path is not None:
-                    detail.append(f"日志: {log_path}")
                 warning = getattr(task_result.run_result, "warning", None)
                 if warning:
                     detail.append(warning)
@@ -339,9 +345,6 @@ def run_offline(
                     status = ItemStatus.WARN
                 else:
                     status = ItemStatus.OK
-                reason = task_result.reason
-                if status is ItemStatus.FAIL and log_path is not None:
-                    reason = f"{reason}; 日志: {log_path}" if reason else (f"日志: {log_path}")
                 items.append(
                     ItemResult(
                         status,
@@ -351,7 +354,7 @@ def run_offline(
                             if status in {ItemStatus.OK, ItemStatus.WARN}
                             else task.raw_output or version_output
                         ),
-                        reason=reason,
+                        reason=task_result.reason,
                         detail="\n".join(detail),
                     )
                 )
@@ -447,4 +450,5 @@ def run_offline(
         output_dir=output_dir,
         versions=tuple(str(version) for version in target_versions if version is not None),
         reports=reports_paths,
+        logs=tuple(log_paths),
     )

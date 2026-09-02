@@ -201,7 +201,7 @@ def test_offline_runner_terminates_cancellable_process(monkeypatch, tmp_path: Pa
     runner = offline.OfflineRunner.__new__(offline.OfflineRunner)
     runner.exe_path = tmp_path / offline.EXE_NAME
     runner.tool_dir = tmp_path
-    runner._build_command_args = lambda input_dir, output_dir: ["fake", "command"]
+    runner._build_command_args = lambda input_dir, output_dir: ["fake-command"]
     monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
     monkeypatch.setattr(offline, "count_supported_csv_files", lambda path: 1)
 
@@ -213,19 +213,6 @@ def test_offline_runner_terminates_cancellable_process(monkeypatch, tmp_path: Pa
         )
 
     assert state["terminated"] is True
-
-
-def test_clean_version_outputs_removes_previous_offline_logs(tmp_path: Path):
-    from health_tools.api.offline_operation import _clean_version_outputs
-
-    version_output = tmp_path / "version"
-    log = version_output / "offline_logs" / "0000_task.log"
-    log.parent.mkdir(parents=True)
-    log.write_text("previous run\n", encoding="utf-8")
-
-    _clean_version_outputs(version_output)
-
-    assert not log.exists()
 
 
 def test_run_convert_single_file_with_rule_split_writes_chunks(tmp_path: Path):

@@ -180,10 +180,12 @@ class OfflineResult:
     output_dir: Optional[Path] = None
     versions: Tuple[str, ...] = ()
     reports: Tuple[Path, ...] = ()
+    logs: Tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "versions", tuple(self.versions))
         object.__setattr__(self, "reports", tuple(Path(path) for path in self.reports))
+        object.__setattr__(self, "logs", tuple(Path(path) for path in self.logs))
 
 
 @dataclass(frozen=True)

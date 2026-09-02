@@ -293,7 +293,7 @@ def run_offline_tasks(
                 last_csv = run_result.last_csv_path
                 if last_csv is None:
                     results[task.task_id] = failed_result(
-                        attempted_task, run_result, "日志未定位失败 CSV"
+                        attempted_task, run_result, run_result.error or "日志未定位失败 CSV"
                     )
                     continue
                 last_csv = Path(last_csv).resolve()

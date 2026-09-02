@@ -114,6 +114,9 @@ def test_merge_task_outputs_preserves_child_directory_structure(tmp_path: Path):
     raw_result = task.raw_output / "000000_a_result.vshb"
     raw_result.parent.mkdir(parents=True)
     raw_result.write_text("1,2,3\n", encoding="utf-8")
+    assert task.log_path is not None
+    task.log_path.parent.mkdir(parents=True)
+    task.log_path.write_text("subprocess output", encoding="utf-8")
 
     result = merge_task_outputs(version_output, [_successful_task_result(task)])
 
@@ -122,6 +125,7 @@ def test_merge_task_outputs_preserves_child_directory_structure(tmp_path: Path):
     assert result.succeeded[0].task == task
     assert target.exists()
     assert not (version_output / ".offline_tasks").exists()
+    assert task.log_path.read_text(encoding="utf-8") == "subprocess output"
 
 
 def test_merge_task_outputs_does_not_add_root_layer_for_root_task(tmp_path: Path):
@@ -316,13 +320,15 @@ def test_run_offline_tasks_retries_different_failed_csvs(tmp_path: Path):
         0
     ]
     runners = []
+    run_kwargs = []
 
     class Runner:
         def __init__(self):
             self.attempt = len(runners) + 1
             runners.append(self)
 
-        def run(self, *_args, **_kwargs):
+        def run(self, *_args, **kwargs):
+            run_kwargs.append(kwargs)
             if self.attempt == 1:
                 return OfflineRunResult(success=False, last_csv_path=first)
             if self.attempt == 2:
@@ -335,6 +341,8 @@ def test_run_offline_tasks_retries_different_failed_csvs(tmp_path: Path):
     assert result.succeeded[0].task.attempts == 3
     assert len(runners) == 3
     assert len({id(runner) for runner in runners}) == 3
+    assert [kwargs["attempt"] for kwargs in run_kwargs] == [1, 2, 3]
+    assert [kwargs["log_path"] for kwargs in run_kwargs] == [task.log_path] * 3
     assert result.succeeded[0].task.last_failed_csv == second.resolve()
     assert [item.source.name for item in result.succeeded[0].task.moved_files] == [
         "bad1.csv",
@@ -419,6 +427,25 @@ def test_run_offline_tasks_workers_one_preserves_attempt_order(tmp_path: Path):
 
     assert calls == [task.task_id for task in tasks]
     assert [item.task.task_id for item in result.succeeded] == calls
+
+
+def test_run_offline_tasks_preserves_explicit_runner_error(tmp_path: Path):
+    task = assign_task_outputs(
+        [OfflineTask("0000_failed", tmp_path, Path())], tmp_path / "version"
+    )[0]
+
+    class Runner:
+        def run(self, *_args, **_kwargs):
+            return OfflineRunResult(
+                success=False,
+                error="无法创建离线工具日志: access denied",
+                log_path=task.log_path,
+                last_csv_path=None,
+            )
+
+    result = run_offline_tasks([task], lambda _task: Runner(), tmp_path, workers=1)
+
+    assert result.failed[0].reason == "无法创建离线工具日志: access denied"
 
 
 @pytest.mark.parametrize(

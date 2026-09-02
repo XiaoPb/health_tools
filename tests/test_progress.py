@@ -390,6 +390,10 @@ def test_offline_parallel_child_directories_run_before_merge_plot_and_accuracy(
     assert captured["plot_input"] == final_reorganized
     assert captured["accuracy_input"] == final_reorganized
     assert final_reorganized in result.batch.artifacts
+    assert result.logs == (
+        output_dir / "v1" / "offline_logs" / "0000_A.log",
+        output_dir / "v1" / "offline_logs" / "0001_B.log",
+    )
 
 
 def test_offline_parallel_root_task_uses_one_worker(monkeypatch, tmp_path: Path):
@@ -557,11 +561,27 @@ def test_offline_retry_summary_warns_and_final_failure_keeps_artifacts(monkeypat
         )
         failed_task = replace(tasks[1], attempts=1)
         return OfflineTaskBatch(
-            (OfflineTaskResult(recovered_task, OfflineRunResult(success=True), "succeeded"),),
+            (
+                OfflineTaskResult(
+                    recovered_task,
+                    OfflineRunResult(
+                        success=True,
+                        command="secret command",
+                        log_path=tmp_path / "custom-success.log",
+                    ),
+                    "succeeded",
+                ),
+            ),
             (
                 OfflineTaskResult(
                     failed_task,
-                    OfflineRunResult(success=False, error="boom"),
+                    OfflineRunResult(
+                        success=False,
+                        error="boom",
+                        command="secret command",
+                        log_tail=("SUBPROCESS_STDOUT_SECRET", "SUBPROCESS_STDERR_SECRET"),
+                        log_path=failed_task.log_path,
+                    ),
                     "failed",
                     "日志未定位失败 CSV",
                 ),
@@ -595,8 +615,23 @@ def test_offline_retry_summary_warns_and_final_failure_keeps_artifacts(monkeypat
     assert Path(result.batch.items[0].output) == output_dir / "v1" / "数据整理" / "A"
     assert "尝试次数: 2" in result.batch.items[0].detail
     assert "input_mv" in result.batch.items[0].detail
+    assert f"子进程日志: {tmp_path / 'custom-success.log'}" in result.batch.items[0].detail
+    assert "命令:" not in result.batch.items[0].detail
     assert result.batch.items[1].reason == "日志未定位失败 CSV"
+    assert (
+        f"子进程日志: {output_dir / 'v1' / 'offline_logs' / '0001_B.log'}"
+        in result.batch.items[1].detail
+    )
+    assert "错误: boom" in result.batch.items[1].detail
+    assert "命令:" not in result.batch.items[1].detail
+    all_detail = "\n".join(item.detail for item in result.batch.items)
+    assert "SUBPROCESS_STDOUT_SECRET" not in all_detail
+    assert "SUBPROCESS_STDERR_SECRET" not in all_detail
     assert output_dir / "v1" / "数据整理" in result.batch.artifacts
+    assert result.logs == (
+        tmp_path / "custom-success.log",
+        output_dir / "v1" / "offline_logs" / "0001_B.log",
+    )
 
 
 def test_offline_cli_prints_summary_then_returns_nonzero_for_final_fail(monkeypatch):
@@ -1391,8 +1426,7 @@ def test_offline_single_version_uses_version_output_dir(monkeypatch, tmp_path: P
             timeout=300,
             settle_timeout=10,
             is_cancelled=None,
-            log_path=None,
-            attempt=1,
+            **kwargs,
         ):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
@@ -1465,8 +1499,7 @@ def test_offline_default_timeout_scales_after_fifty_files(monkeypatch, tmp_path:
             timeout=300,
             settle_timeout=10,
             is_cancelled=None,
-            log_path=None,
-            attempt=1,
+            **kwargs,
         ):
             calls.append(timeout)
             output_path.mkdir(parents=True, exist_ok=True)
@@ -1535,8 +1568,7 @@ def test_offline_explicit_timeout_overrides_scaled_default(monkeypatch, tmp_path
             timeout=300,
             settle_timeout=10,
             is_cancelled=None,
-            log_path=None,
-            attempt=1,
+            **kwargs,
         ):
             calls.append(timeout)
             output_path.mkdir(parents=True, exist_ok=True)
@@ -1605,8 +1637,7 @@ def test_offline_default_version_uses_resolved_version_output_dir(monkeypatch, t
             timeout=300,
             settle_timeout=10,
             is_cancelled=None,
-            log_path=None,
-            attempt=1,
+            **kwargs,
         ):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
@@ -1682,8 +1713,7 @@ def test_offline_versions_runs_each_version_and_writes_combined_accuracy(
             timeout=300,
             settle_timeout=10,
             is_cancelled=None,
-            log_path=None,
-            attempt=1,
+            **kwargs,
         ):
             calls.append(("run", self.version, output_path))
             output_path.mkdir(parents=True, exist_ok=True)
@@ -1772,8 +1802,7 @@ def test_offline_all_versions_expands_config_versions(monkeypatch, tmp_path: Pat
             timeout=300,
             settle_timeout=10,
             is_cancelled=None,
-            log_path=None,
-            attempt=1,
+            **kwargs,
         ):
             calls.append(self.version)
             output_path.mkdir(parents=True, exist_ok=True)
