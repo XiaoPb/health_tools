@@ -547,7 +547,7 @@ def test_offline_run_result_has_empty_log_diagnostics_by_default():
 
 def test_offline_runner_uses_process_cwd_without_chdir(monkeypatch, tmp_path):
     input_dir = tmp_path / "室内跑步&步行"
-    output_dir = tmp_path / "output"
+    output_dir = tmp_path / "输出&结果"
     input_dir.mkdir()
     (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
     runner = _make_runner(monkeypatch, tmp_path, {})
@@ -570,6 +570,8 @@ def test_offline_runner_uses_process_cwd_without_chdir(monkeypatch, tmp_path):
     assert isinstance(process_args, list)
     assert str(input_dir.resolve()) in process_args
     assert process_args.count(str(input_dir.resolve())) == 1
+    assert str(output_dir.resolve()) in process_args
+    assert process_args.count(str(output_dir.resolve())) == 1
     assert kwargs["shell"] is False
     assert kwargs["cwd"] == str(runner.tool_dir)
     assert kwargs["stdout"] is subprocess.PIPE
@@ -842,6 +844,83 @@ def test_offline_runner_callback_error_terminates_and_propagates(monkeypatch, tm
     else:
         assert taskkill_calls == []
         assert process.terminated is True
+    assert process.stdout.closed is True
+    assert process.stderr.closed is True
+
+
+def test_offline_runner_preserves_callback_error_when_termination_fails(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None, stdout="boom\n")
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        offline,
+        "_terminate_offline_process",
+        lambda current: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        runner.run(
+            input_dir,
+            output_dir,
+            settle_timeout=0,
+            on_output=lambda line: (_ for _ in ()).throw(RuntimeError("callback failed")),
+        )
+
+    assert process.stdout.closed is True
+    assert process.stderr.closed is True
+
+
+def test_offline_runner_continues_cleanup_when_stdout_close_fails(monkeypatch, tmp_path):
+    class FailingCloseStream(StringIO):
+        def close(self):
+            raise RuntimeError("stdout close failed")
+
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None)
+    process.stdout = FailingCloseStream("boom\n")
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        runner.run(
+            input_dir,
+            output_dir,
+            settle_timeout=0,
+            on_output=lambda line: (_ for _ in ()).throw(RuntimeError("callback failed")),
+        )
+
+    assert process.stderr.closed is True
+
+
+def test_offline_runner_preserves_reader_creation_error_when_cleanup_fails(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.csv").write_text("x\n1\n", encoding="utf-8")
+    runner = _make_runner(monkeypatch, tmp_path, {})
+    process = _FakeProcess(returncode=None)
+    monkeypatch.setattr(offline.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(
+        offline.threading,
+        "Thread",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("reader creation failed")),
+    )
+    monkeypatch.setattr(
+        offline,
+        "_terminate_offline_process",
+        lambda current: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="reader creation failed"):
+        runner.run(input_dir, output_dir, settle_timeout=0)
+
     assert process.stdout.closed is True
     assert process.stderr.closed is True
 

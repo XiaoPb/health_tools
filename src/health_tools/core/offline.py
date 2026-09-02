@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -199,6 +200,34 @@ def _close_process_streams(process: object) -> None:
         close = getattr(stream, "close", None)
         if close is not None:
             close()
+
+
+def _best_effort_offline_cleanup(
+    process: Optional[object] = None,
+    readers: Sequence[object] = (),
+    log_file: Optional[object] = None,
+    *,
+    terminate: bool = False,
+) -> None:
+    """异常传播期间逐项清理资源，避免清理错误覆盖原始异常。"""
+    if process is not None:
+        if terminate:
+            with suppress(Exception):
+                _terminate_offline_process(process)
+        for name in ("stdout", "stderr"):
+            stream = getattr(process, name, None)
+            close = getattr(stream, "close", None)
+            if close is not None:
+                with suppress(Exception):
+                    close()
+
+    for reader in readers:
+        with suppress(Exception):
+            reader.join(timeout=READER_JOIN_TIMEOUT)  # type: ignore[attr-defined]
+
+    if log_file is not None:
+        with suppress(Exception):
+            log_file.close()  # type: ignore[attr-defined]
 
 
 def get_offline_config() -> OfflineConfig:
@@ -735,8 +764,7 @@ class OfflineRunner:
                 )
                 log_file.flush()
             except OSError as exc:
-                if log_file is not None:
-                    log_file.close()
+                _best_effort_offline_cleanup(log_file=log_file)
                 return OfflineRunResult(
                     success=False,
                     command=command,
@@ -747,8 +775,7 @@ class OfflineRunner:
                     log_path=resolved_log_path,
                 )
             except BaseException:
-                if log_file is not None:
-                    log_file.close()
+                _best_effort_offline_cleanup(log_file=log_file)
                 raise
         deadline = time.monotonic() + timeout
         returncode = None
@@ -795,8 +822,9 @@ class OfflineRunner:
             )
         except OSError as exc:
             if log_file is not None:
-                log_file.write(f"[启动失败] {exc}\n")
-                log_file.close()
+                with suppress(Exception):
+                    log_file.write(f"[启动失败] {exc}\n")
+            _best_effort_offline_cleanup(log_file=log_file)
             return OfflineRunResult(
                 success=False,
                 command=command,
@@ -807,64 +835,56 @@ class OfflineRunner:
                 log_path=resolved_log_path,
             )
         except BaseException:
-            if log_file is not None:
-                log_file.close()
+            _best_effort_offline_cleanup(log_file=log_file)
             raise
+
+        readers: List[threading.Thread] = []
         try:
-            readers = [
+            readers.append(
                 threading.Thread(
                     target=consume_output,
                     args=("stdout", getattr(process, "stdout", None)),
                     daemon=True,
-                ),
+                )
+            )
+            readers.append(
                 threading.Thread(
                     target=consume_output,
                     args=("stderr", getattr(process, "stderr", None)),
                     daemon=True,
-                ),
-            ]
+                )
+            )
             for reader in readers:
                 reader.start()
-        except BaseException:
-            if log_file is not None:
-                log_file.close()
-            _terminate_offline_process(process)
-            _close_process_streams(process)
-            raise
 
-        completed_readers = 0
-        drain_deadline: Optional[float] = None
-        try:
-            try:
-                while returncode is None or completed_readers < len(readers):
-                    if is_cancelled is not None and is_cancelled():
-                        raise InterruptedError("离线任务已取消")
-                    if returncode is None and time.monotonic() >= deadline:
-                        timed_out = True
+            completed_readers = 0
+            drain_deadline: Optional[float] = None
+            while returncode is None or completed_readers < len(readers):
+                if is_cancelled is not None and is_cancelled():
+                    raise InterruptedError("离线任务已取消")
+                if returncode is None and time.monotonic() >= deadline:
+                    timed_out = True
+                    break
+                returncode = process.poll()
+                if returncode is not None:
+                    if drain_deadline is None:
+                        drain_deadline = time.monotonic() + OUTPUT_DRAIN_TIMEOUT
+                    elif time.monotonic() >= drain_deadline:
                         break
-                    returncode = process.poll()
-                    if returncode is not None:
-                        if drain_deadline is None:
-                            drain_deadline = time.monotonic() + OUTPUT_DRAIN_TIMEOUT
-                        elif time.monotonic() >= drain_deadline:
-                            break
-                    try:
-                        source, line = output_queue.get(timeout=0.1)
-                    except queue.Empty:
-                        continue
-                    if line is None:
-                        completed_readers += 1
-                    else:
-                        dispatch_output(source, line)
-            except BaseException:
+                try:
+                    source, line = output_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    completed_readers += 1
+                else:
+                    dispatch_output(source, line)
+
+            if timed_out:
                 _terminate_offline_process(process)
-                raise
-            finally:
-                if timed_out:
-                    _terminate_offline_process(process)
-                _close_process_streams(process)
-                for reader in readers:
-                    reader.join(timeout=READER_JOIN_TIMEOUT)
+            _close_process_streams(process)
+            for reader in readers:
+                reader.join(timeout=READER_JOIN_TIMEOUT)
 
             while completed_readers < len(readers):
                 try:
@@ -875,9 +895,17 @@ class OfflineRunner:
                     completed_readers += 1
                 else:
                     dispatch_output(source, line)
-        finally:
+
             if log_file is not None:
                 log_file.close()
+        except BaseException:
+            _best_effort_offline_cleanup(
+                process,
+                readers,
+                log_file,
+                terminate=True,
+            )
+            raise
 
         if returncode == 0:
             output_file_count, result_count, last_mtime = _snapshot_output(output_dir)
