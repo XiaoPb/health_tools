@@ -1077,6 +1077,68 @@ def test_offline_verbose_prints_run_diagnostics(monkeypatch, tmp_path):
     assert "返回码: 0" in result.output
     assert "输入CSV: 1" in result.output
     assert "结果VSHB: 1" in result.output
+    assert result.output.count("0000_root.log") == 1
+
+
+def test_offline_default_prints_log_path_without_subprocess_diagnostics(monkeypatch, tmp_path):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    _write_valid_chip_csv(input_dir / "sample.csv")
+    exe_path = tmp_path / "gh3036" / "exclusive" / "v1" / offline.EXE_NAME
+    exe_path.parent.mkdir(parents=True)
+    exe_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(offline, "find_exe", lambda chip_name, version=None: exe_path)
+    monkeypatch.setattr(
+        offline,
+        "get_offline_config",
+        lambda: offline.OfflineConfig(
+            tools_path=tmp_path,
+            versions={"gh3036": {"versions": {"exclusive": ["v1"]}, "default": "v1"}},
+            commands={},
+        ),
+    )
+
+    def create_output():
+        raw_output = output_dir / "v1" / ".offline_tasks" / "0000_root" / "raw"
+        raw_output.mkdir(parents=True, exist_ok=True)
+        (raw_output / "000000_sample_result.vshb").write_text("1,2,3\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        offline.subprocess,
+        "Popen",
+        lambda *args, **kwargs: _FakeProcess(
+            stdout="SUBPROCESS_STDOUT_SECRET",
+            stderr="SUBPROCESS_STDERR_SECRET",
+            on_poll=create_output,
+        ),
+    )
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "offline",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-c",
+            "gh3036",
+            "--no-plot",
+            "--no-accuracy",
+            "--settle-timeout",
+            "0",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "子进程日志:" in result.output
+    assert str(output_dir / "v1" / "offline_logs" / "0000_root.log") in result.output.replace(
+        "\n", ""
+    )
+    assert "命令:" not in result.output
+    assert "SUBPROCESS_" not in result.output
 
 
 def test_offline_filters_once_before_multi_version_run(monkeypatch, tmp_path):

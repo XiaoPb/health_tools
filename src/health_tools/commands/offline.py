@@ -149,6 +149,10 @@ def offline_cmd(
             console.print(table)
     else:
         print_batch("离线跑库", result.batch, console, verbose)
+        if not verbose and result.logs:
+            console.print("子进程日志:")
+            for log_path in result.logs:
+                console.print(f"  {log_path}")
         for item in result.batch.items:
             for line in item.detail.splitlines():
                 if line.startswith("PPG列映射"):

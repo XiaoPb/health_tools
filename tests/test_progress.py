@@ -390,6 +390,10 @@ def test_offline_parallel_child_directories_run_before_merge_plot_and_accuracy(
     assert captured["plot_input"] == final_reorganized
     assert captured["accuracy_input"] == final_reorganized
     assert final_reorganized in result.batch.artifacts
+    assert result.logs == (
+        output_dir / "v1" / "offline_logs" / "0000_A.log",
+        output_dir / "v1" / "offline_logs" / "0001_B.log",
+    )
 
 
 def test_offline_parallel_root_task_uses_one_worker(monkeypatch, tmp_path: Path):
@@ -624,6 +628,10 @@ def test_offline_retry_summary_warns_and_final_failure_keeps_artifacts(monkeypat
     assert "SUBPROCESS_STDOUT_SECRET" not in all_detail
     assert "SUBPROCESS_STDERR_SECRET" not in all_detail
     assert output_dir / "v1" / "数据整理" in result.batch.artifacts
+    assert result.logs == (
+        tmp_path / "custom-success.log",
+        output_dir / "v1" / "offline_logs" / "0001_B.log",
+    )
 
 
 def test_offline_cli_prints_summary_then_returns_nonzero_for_final_fail(monkeypatch):

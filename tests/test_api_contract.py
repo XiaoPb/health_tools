@@ -17,6 +17,7 @@ from health_tools.api import (
     OfflineCatalogRequest,
     OfflineCatalogResult,
     OfflineRequest,
+    OfflineResult,
     OfflineVersionInfo,
     OperationCancelled,
     ParseRequest,
@@ -168,6 +169,19 @@ def test_parallel_request_defaults():
     assert OfflineRequest().workers == 8
     EvaluateRequest,
     OfflineRequest,
+
+
+def test_offline_result_normalizes_logs_without_breaking_positional_arguments():
+    batch = BatchResult("offline")
+
+    legacy = OfflineResult(batch, Path("output"), ["v1"], ["report.csv"])
+    with_logs = OfflineResult(batch, logs=["a.log"])
+
+    assert legacy.output_dir == Path("output")
+    assert legacy.versions == ("v1",)
+    assert legacy.reports == (Path("report.csv"),)
+    assert legacy.logs == ()
+    assert with_logs.logs == (Path("a.log"),)
 
 
 @pytest.mark.parametrize(

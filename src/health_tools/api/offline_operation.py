@@ -234,6 +234,7 @@ def run_offline(
 
     items: List[ItemResult] = []
     artifacts: List[Path] = []
+    log_paths: List[Path] = []
     reports = []
     total_stages = len(target_versions) * (
         (0 if request.no_run else 1)
@@ -312,6 +313,10 @@ def run_offline(
                 task = task_result.task
                 run_result = task_result.run_result
                 log_path = getattr(run_result, "log_path", None) or task.log_path
+                if log_path:
+                    normalized_log_path = Path(log_path)
+                    if normalized_log_path not in log_paths:
+                        log_paths.append(normalized_log_path)
                 detail = [
                     "诊断:",
                     f"子进程日志: {log_path or ''}",
@@ -445,4 +450,5 @@ def run_offline(
         output_dir=output_dir,
         versions=tuple(str(version) for version in target_versions if version is not None),
         reports=reports_paths,
+        logs=tuple(log_paths),
     )
