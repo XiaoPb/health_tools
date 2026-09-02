@@ -63,7 +63,13 @@ def print_batch(title: str, result: BatchResult, console: Console, verbose: bool
                 rows=item.rows,
             )
         )
-    print_summary(title, collector, console=console, verbose=verbose)
+    print_summary(
+        title,
+        collector,
+        console=console,
+        verbose=verbose,
+        max_examples=len(result.items) if verbose else 10,
+    )
     if result.artifacts and verbose:
         console.print("输出文件:")
         for path in result.artifacts:
