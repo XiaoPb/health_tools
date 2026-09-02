@@ -1,10 +1,11 @@
 """离线跑库并发任务的发现与输出隔离模型。"""
 
+import hashlib
 import re
 import shutil
 from collections import deque
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
@@ -24,7 +25,7 @@ class OfflineTask:
     input_dir: Path
     relative_dir: Path
     raw_output: Optional[Path] = None
-    log_path: Optional[Path] = None
+    log_path: Optional[Path] = field(default=None, kw_only=True)
     attempts: int = 0
     last_failed_csv: Optional[Path] = None
     moved_files: Tuple[MovedOfflineInput, ...] = ()
@@ -62,6 +63,38 @@ def safe_task_name(name: str) -> str:
     return safe or "task"
 
 
+def _utf16_units(value: str) -> int:
+    """返回字符串占用的 UTF-16 编码单元数。"""
+    return sum(2 if ord(character) > 0xFFFF else 1 for character in value)
+
+
+def _truncate_utf16(value: str, max_units: int) -> str:
+    """在不拆分非 BMP 字符的前提下按 UTF-16 编码单元截断。"""
+    used_units = 0
+    characters = []
+    for character in value:
+        character_units = 2 if ord(character) > 0xFFFF else 1
+        if used_units + character_units > max_units:
+            break
+        characters.append(character)
+        used_units += character_units
+    return "".join(characters)
+
+
+def _build_task_id(index: int, name: str) -> str:
+    """构造不超过 251 个 UTF-16 编码单元的稳定任务 ID。"""
+    prefix = f"{index:04d}_"
+    safe_name = safe_task_name(name)
+    task_id = f"{prefix}{safe_name}"
+    if _utf16_units(task_id) <= 251:
+        return task_id
+
+    digest = hashlib.sha256(safe_name.encode("utf-8")).hexdigest()[:8]
+    suffix = f"_{digest}"
+    name_units = 251 - _utf16_units(prefix) - _utf16_units(suffix)
+    return f"{prefix}{_truncate_utf16(safe_name, name_units)}{suffix}"
+
+
 def discover_offline_tasks(input_dir: Path) -> List[OfflineTask]:
     """按离线跑库约定发现输入任务，并按目录名稳定排序。"""
     input_dir = Path(input_dir)
@@ -72,7 +105,7 @@ def discover_offline_tasks(input_dir: Path) -> List[OfflineTask]:
     candidates = [path for path in children if count_supported_csv_files(path) > 0]
     return [
         OfflineTask(
-            task_id=f"{index:04d}_{safe_task_name(path.name)}",
+            task_id=_build_task_id(index, path.name),
             input_dir=path,
             relative_dir=Path(path.name),
         )
