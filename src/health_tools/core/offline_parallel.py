@@ -233,6 +233,8 @@ def run_offline_tasks(
             timeout=timeout,
             settle_timeout=settle_timeout,
             is_cancelled=cancelled,
+            log_path=task.log_path,
+            attempt=task.attempts + 1,
         )
         return OfflineTaskResult(task, run_result, "succeeded" if run_result.success else "failed")
 
@@ -283,7 +285,7 @@ def run_offline_tasks(
                 last_csv = run_result.last_csv_path
                 if last_csv is None:
                     results[task.task_id] = failed_result(
-                        attempted_task, run_result, "日志未定位失败 CSV"
+                        attempted_task, run_result, run_result.error or "日志未定位失败 CSV"
                     )
                     continue
                 last_csv = Path(last_csv).resolve()

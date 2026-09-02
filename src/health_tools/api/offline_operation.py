@@ -107,7 +107,7 @@ def _filter_input_files(input_dir: Path, chip_name: str):
 
 def _clean_version_outputs(version_output: Path) -> None:
     """清理一次新跑库会重新生成的版本输出。"""
-    for directory_name in (".offline_tasks", "数据整理", "psd_bmpfile"):
+    for directory_name in (".offline_tasks", "offline_logs", "数据整理", "psd_bmpfile"):
         path = version_output / directory_name
         if path.exists():
             shutil.rmtree(path)
@@ -311,9 +311,10 @@ def run_offline(
             for task_result in sorted(final_results.values(), key=lambda item: item.task.task_id):
                 task = task_result.task
                 run_result = task_result.run_result
+                log_path = getattr(run_result, "log_path", None) or task.log_path
                 detail = [
                     "诊断:",
-                    f"命令: {getattr(run_result, 'command', '')}",
+                    f"子进程日志: {log_path or ''}",
                     f"返回码: {getattr(run_result, 'returncode', '')}",
                     f"超时: {'是' if getattr(run_result, 'timed_out', False) else '否'}",
                     f"耗时: {getattr(run_result, 'duration', 0.0):.1f}s",
@@ -322,6 +323,9 @@ def run_offline(
                     f"输出文件: {getattr(run_result, 'output_file_count', '')}",
                     f"尝试次数: {task.attempts}",
                 ]
+                error = getattr(run_result, "error", None)
+                if error:
+                    detail.append(f"错误: {error}")
                 if task.moved_files:
                     detail.append("移动失败文件:")
                     detail.extend(str(moved.target) for moved in task.moved_files)

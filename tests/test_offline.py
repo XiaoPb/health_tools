@@ -24,6 +24,16 @@ from health_tools.core.vshb import read_vshb_result
 from health_tools.rules.loader import RuleLoader
 
 
+def test_clean_version_outputs_removes_offline_logs(tmp_path):
+    log_file = tmp_path / "offline_logs" / "old.log"
+    log_file.parent.mkdir()
+    log_file.write_text("old", encoding="utf-8")
+
+    offline_api._clean_version_outputs(tmp_path)
+
+    assert not log_file.parent.exists()
+
+
 def test_offline_config_migrates_dot_to_default_tools_path(monkeypatch):
     monkeypatch.setattr(offline, "load_config", lambda: {"offline_tools_path": "."})
 
@@ -1062,7 +1072,8 @@ def test_offline_verbose_prints_run_diagnostics(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert "诊断:" in result.output
-    assert "命令:" in result.output
+    assert "子进程日志:" in result.output
+    assert "命令:" not in result.output
     assert "返回码: 0" in result.output
     assert "输入CSV: 1" in result.output
     assert "结果VSHB: 1" in result.output
