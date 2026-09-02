@@ -130,7 +130,9 @@ spo_ref_column:                # 血氧参考列（列名: 1-based 列索引）
 | `hr_ref_column` | object | 心率参考列 `{列名: 1-based 索引}`，evaluate 列名找不到时回退使用 |
 | `spo_ref_column` | object | 血氧参考列 `{列名: 1-based 索引}`，同上 |
 
-`check_columns.data` 会覆盖基于常见列名的自动识别。离线输入预检要求文件表头与展开后的 `columns` 数量、名称和顺序完全相同。
+`check_columns.data` 会覆盖基于常见列名的自动识别。离线输入预检要求文件表头与展开后的
+`columns` 列数和顺序一致；除完整 `REF_RESULT0`～`REF_RESULT15` 对应位置外，其他列名必须
+完全一致。完整 REF 对应的这 16 个位置允许使用任意非空列名。
 
 ### chip_info 结构
 
